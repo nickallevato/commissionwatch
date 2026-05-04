@@ -14,11 +14,11 @@ This roadmap outlines the implementation plan for CommissionWatch, an AI-powered
 |---|---|---|---|
 | 1.1 | Repo setup + scaffolding | Public repo, monorepo structure, Docker Compose, CI | Done |
 | 1.2 | Public web dashboard (MVP) | Next.js app — landing page, jurisdiction browser, meeting rundown viewer, agent status overview. Dark mode, amber/gold accent, mobile-responsive. | Planned |
-| 1.3 | Core agent orchestrator | Claude Code harness integration, zero-permission security model, explicit tool grants with tests | Planned |
-| 1.4 | Meeting Monitor Agent | Scrape Bozeman city council agendas/minutes, auto-transcribe, generate quick rundown sheets | Planned |
+| 1.3 | Core agent orchestrator | Claude Code harness integration, zero-permission security model, explicit tool grants with tests | Done |
+| 1.4 | Meeting Monitor Agent | Scrape Bozeman city council agendas/minutes, parse PDF/HTML, generate quick rundown sheets, flag anomalies | Planned |
 | 1.5 | Data layer setup | PostgreSQL + pgvector schema, MinIO for document storage | Planned |
-| 1.6 | Docker Compose deployment | Full stack (backend, frontend, db, minio, worker) running via `docker compose up` | Planned |
-| 1.7 | AWS demo deployment | Single instance on AWS, DNS on Route53, <$20/mo target | Planned |
+| 1.6 | Docker Compose deployment | Full stack (backend, frontend, db, minio, worker) running via `docker compose up` | Done |
+| 1.7 | AWS demo deployment | Single instance on AWS, DNS on Route53, <$20/mo target | Done |
 
 **Dashboard MVP details (1.2):**
 - Next.js with dark mode default, amber/gold accent color
@@ -29,6 +29,17 @@ This roadmap outlines the implementation plan for CommissionWatch, an AI-powered
 - Non-partisan, clean, trustworthy design language
 - Mobile-responsive layout
 - Starts with mock data; wires up to backend API when available
+
+**Meeting Monitor Agent details (1.4):**
+- **Scraper/ingestor:** Fetch agendas and minutes from the Bozeman City Commission website. Handle pagination, session archives, rate limiting.
+- **Document parser:** Parse PDF and HTML meeting documents. Extract structured data — date, attendees, agenda items, motions, votes, notable quotes.
+- **Quick Rundown Sheet generator:** Auto-generate 1-page structured meeting summaries covering attendance, votes, key items, and notable quotes.
+- **Anomaly flagging:** Detect and flag emergency sessions, closed-door votes, last-minute agenda changes, quorum issues.
+- **Data model:** PostgreSQL schema for meetings, agenda_items, votes, members, quotes, and flags.
+- **Integration tests:** End-to-end tests against real Bozeman commission data validating scraping, parsing, and rundown generation.
+- **Data sources:** Bozeman City Commission (primary), Gallatin County Commission (stretch goal).
+- **Tools required:** Web scraper (scoped to government sites), PDF parser, database write (meetings tables).
+- **Schedule:** After each commission meeting (configurable polling interval).
 
 ## Phase 2 — The Money Trail
 
