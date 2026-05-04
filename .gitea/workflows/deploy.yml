@@ -1,0 +1,63 @@
+name: Build and Push to ECR
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.service }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: ${{ matrix.service }}
+        run: npm run lint --if-present
+
+      - name: Test
+        working-directory: ${{ matrix.service }}
+        run: npm test --if-present
+
+  build-and-push:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend
+        run: |
+          docker build -t 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-backend:${{ github.sha }} \
+                       -t 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-backend:latest \
+                       ./backend
+          docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-backend:${{ github.sha }}
+          docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-backend:latest
+
+      - name: Build and push frontend
+        run: |
+          docker build -t 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:${{ github.sha }} \
+                       -t 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:latest \
+                       ./frontend
+          docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:${{ github.sha }}
+          docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:latest

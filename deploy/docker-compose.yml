@@ -1,0 +1,52 @@
+services:
+  backend:
+    image: ${ECR_IMAGE_BACKEND}
+    container_name: commissionwatch-backend
+    restart: unless-stopped
+    networks:
+      - caddy_net
+      - internal
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    image: ${ECR_IMAGE_FRONTEND}
+    container_name: commissionwatch-frontend
+    restart: unless-stopped
+    networks:
+      - caddy_net
+      - internal
+    environment:
+      - NODE_ENV=production
+      - API_URL=http://commissionwatch-backend:3001
+
+  db:
+    image: postgres:16-alpine
+    container_name: commissionwatch-db
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - commissionwatch-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  caddy_net:
+    external: true
+  internal:
+    driver: bridge
+
+volumes:
+  commissionwatch-pgdata:

@@ -1,0 +1,11 @@
+commissionwatch.legacy-platform.example {
+    import allowlist
+
+    handle /api/* {
+        reverse_proxy commissionwatch-backend:3001
+    }
+
+    handle {
+        reverse_proxy commissionwatch-frontend:3000
+    }
+}
