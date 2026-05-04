@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ${ECR_IMAGE_BACKEND}
+    image: ${IMAGE_BACKEND}
     container_name: commissionwatch-backend
     restart: unless-stopped
     networks:
@@ -14,7 +14,7 @@ services:
         condition: service_healthy
 
   frontend:
-    image: ${ECR_IMAGE_FRONTEND}
+    image: ${IMAGE_FRONTEND}
     container_name: commissionwatch-frontend
     restart: unless-stopped
     networks:

@@ -1,4 +1,4 @@
-name: Build and Push to ECR
+name: Build and Push to legacy-platform
 
 on:
   push:
@@ -35,32 +35,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-west-2
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan 44.225.151.59 >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Open SSH tunnel to registry
+        run: |
+          ssh -fN -o StrictHostKeyChecking=accept-new \
+            -L 5000:127.0.0.1:5000 \
+            ubuntu@44.225.151.59
 
       - name: Build and push backend
         run: |
-          docker build -t 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-backend:${{ github.sha }} \
-                       -t 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-backend:latest \
+          docker build -t localhost:5000/commissionwatch-backend:${{ github.sha }} \
+                       -t localhost:5000/commissionwatch-backend:latest \
                        ./backend
-          docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-backend:${{ github.sha }}
-          docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-backend:latest
+          docker push localhost:5000/commissionwatch-backend:${{ github.sha }}
+          docker push localhost:5000/commissionwatch-backend:latest
 
       - name: Build and push frontend
         run: |
-          docker build -t 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:${{ github.sha }} \
-                       -t 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:latest \
+          docker build -t localhost:5000/commissionwatch-frontend:${{ github.sha }} \
+                       -t localhost:5000/commissionwatch-frontend:latest \
                        ./frontend
-          docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:${{ github.sha }}
-          docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:latest
+          docker push localhost:5000/commissionwatch-frontend:${{ github.sha }}
+          docker push localhost:5000/commissionwatch-frontend:latest
 
   notify-failure:
     needs: [ci, build-and-push]

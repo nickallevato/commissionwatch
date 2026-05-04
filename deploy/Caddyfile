@@ -1,4 +1,6 @@
 commissionwatch.legacy-platform.example {
+    import internal_tls
+    import rproxy
     import allowlist
 
     handle /api/* {
