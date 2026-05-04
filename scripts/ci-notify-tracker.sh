@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${TRACKER_API_URL:?TRACKER_API_URL is required}"
+TRACKER_API_URL="https://tracker.example.invalid"
+TRACKER_COMPANY_ID="REDACTED-COMPANY-ID"
+
 : "${TRACKER_API_KEY:?TRACKER_API_KEY is required}"
-: "${TRACKER_COMPANY_ID:?TRACKER_COMPANY_ID is required}"
 
 JOB_NAME="${1:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url>}"
 COMMIT_SHA="${2:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url>}"

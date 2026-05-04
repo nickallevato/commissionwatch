@@ -43,6 +43,4 @@ jobs:
       - name: Notify Tracker of CI failure
         run: bash scripts/ci-notify-tracker.sh "lint-and-test (${{ github.event.pull_request && 'PR' || 'push' }})" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         env:
-          TRACKER_API_URL: ${{ secrets.TRACKER_API_URL }}
           TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
-          TRACKER_COMPANY_ID: ${{ secrets.TRACKER_COMPANY_ID }}
