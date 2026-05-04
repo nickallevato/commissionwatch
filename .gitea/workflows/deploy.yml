@@ -61,3 +61,15 @@ jobs:
                        ./frontend
           docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:${{ github.sha }}
           docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/your-org/commissionwatch-frontend:latest
+
+  notify-failure:
+    needs: [ci, build-and-push]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Tracker QA on failure
+        run: |
+          curl -s -X POST \
+            "https://tracker.example.invalid/api/routine-triggers/public/REDACTED-TRIGGER-TOKEN/fire" \
+            -H "Content-Type: application/json" \
+            -d "{\"project\":\"commissionwatch\",\"repo\":\"your-org/commissionwatch\",\"ref\":\"${{ github.ref }}\",\"sha\":\"${{ github.sha }}\",\"run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
