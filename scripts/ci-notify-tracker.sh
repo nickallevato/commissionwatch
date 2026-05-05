@@ -19,15 +19,19 @@ PAYLOAD=$(printf '{"title":"CI FAILURE: %s - %s","description":"## CI Failure\\n
   "$JOB_NAME" "$SHORT_SHA" "$JOB_NAME" "$COMMIT_SHA" "$RUN_URL")
 
 echo "Posting CI failure issue to Tracker..."
-HTTP_CODE=$(curl -s -o /dev/stderr -w "%{http_code}" -X POST \
+TMPFILE=$(mktemp)
+HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST \
   "${TRACKER_API_URL}/api/companies/${TRACKER_COMPANY_ID}/issues" \
   -H "Authorization: Bearer ${TRACKER_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d "${PAYLOAD}" 2>&1)
+  -d "${PAYLOAD}")
 
 echo "HTTP response: ${HTTP_CODE}"
 if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
   echo "ERROR: Tracker API returned HTTP ${HTTP_CODE}" >&2
+  cat "$TMPFILE" >&2
+  rm -f "$TMPFILE"
   exit 1
 fi
+rm -f "$TMPFILE"
 echo "Tracker issue created successfully"
