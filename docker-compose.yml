@@ -8,8 +8,15 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgres://commwatch:commwatch@db:5432/commwatch
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=commwatch
+      - MINIO_SECRET_KEY=commwatch-secret
+      - MINIO_BUCKET=meeting-documents
     depends_on:
       db:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   frontend:
@@ -24,7 +31,7 @@ services:
       - backend
 
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       - POSTGRES_USER=commwatch
       - POSTGRES_PASSWORD=commwatch
@@ -37,5 +44,23 @@ services:
       timeout: 3s
       retries: 5
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=commwatch
+      - MINIO_ROOT_PASSWORD=commwatch-secret
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
   pgdata:
+  minio-data:

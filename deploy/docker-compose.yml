@@ -9,8 +9,15 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=${DATABASE_URL}
+      - MINIO_ENDPOINT=commissionwatch-minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET=${MINIO_BUCKET:-meeting-documents}
     depends_on:
       db:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   frontend:
@@ -25,7 +32,7 @@ services:
       - API_URL=http://commissionwatch-backend:3001
 
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: commissionwatch-db
     restart: unless-stopped
     networks:
@@ -42,6 +49,24 @@ services:
       timeout: 3s
       retries: 5
 
+  minio:
+    image: minio/minio:latest
+    container_name: commissionwatch-minio
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
+    volumes:
+      - commissionwatch-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 networks:
   caddy_net:
     external: true
@@ -50,3 +75,4 @@ networks:
 
 volumes:
   commissionwatch-pgdata:
+  commissionwatch-minio:
