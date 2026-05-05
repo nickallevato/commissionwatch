@@ -3,12 +3,15 @@ import db from "./config/database";
 import { NotificationService } from "./services/notification";
 import { EmailDeliveryService } from "./services/email-delivery";
 import { DigestScheduler } from "./services/digest-scheduler";
+import { registerDigestStatus } from "./routes/health";
 
 const PORT = process.env.PORT || 3001;
 
 const emailService = new EmailDeliveryService(db);
 const notificationService = new NotificationService(db, (ids) => emailService.sendImmediateAlerts(ids));
 const digestScheduler = new DigestScheduler(db, emailService);
+
+registerDigestStatus(() => digestScheduler.getStatus());
 
 const server = app.listen(PORT, () => {
   console.log(`CommissionWatch backend listening on port ${PORT}`);
