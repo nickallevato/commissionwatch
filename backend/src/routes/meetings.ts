@@ -1,5 +1,6 @@
 import { Router, Request } from "express";
 import db from "../config/database";
+import { detectAnomalies } from "../services/anomalyDetection";
 
 const router = Router();
 
@@ -118,6 +119,67 @@ router.get("/:id/rundown", async (req, res, next) => {
     }
 
     res.json(rundown);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/:id/votes", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
+
+    const meeting = await db("meetings").where({ id }).first();
+    if (!meeting) {
+      res.status(404).json({ error: "Meeting not found", statusCode: 404 });
+      return;
+    }
+
+    const data = await db("votes")
+      .where({ meeting_id: id })
+      .orderBy("created_at", "desc");
+
+    res.json({ data, total: data.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/:id/anomalies", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
+
+    const meeting = await db("meetings").where({ id }).first();
+    if (!meeting) {
+      res.status(404).json({ error: "Meeting not found", statusCode: 404 });
+      return;
+    }
+
+    const data = await db("anomaly_flags")
+      .where({ meeting_id: id })
+      .orderBy("created_at", "desc");
+
+    res.json({ data, total: data.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/:id/detect-anomalies", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
+
+    const meeting = await db("meetings").where({ id }).first();
+    if (!meeting) {
+      res.status(404).json({ error: "Meeting not found", statusCode: 404 });
+      return;
+    }
+
+    const flags = await detectAnomalies(id);
+
+    res.json({ data: flags, total: flags.length });
   } catch (err) {
     next(err);
   }
