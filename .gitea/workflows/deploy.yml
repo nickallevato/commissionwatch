@@ -108,28 +108,26 @@ jobs:
 
   build-and-push:
     needs: ci
-    runs-on: ubuntu-latest
+    # Run on the host runner as user `daedalus` so we use daedalus's existing
+    # SSH key/known_hosts on ai2 — no need to inject SSH_PRIVATE_KEY into a
+    # container as root.
+    runs-on: ai2-daedalus
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup SSH key
+      - name: Open SSH tunnel to registry
         shell: bash
+        env:
+          TUNNEL_SOCK: /tmp/legacy-platform-tunnel-${{ github.run_id }}.sock
         run: |
           set -o pipefail
           {
-            mkdir -p ~/.ssh
-            echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-            chmod 600 ~/.ssh/id_ed25519
             ssh-keyscan 44.225.151.59 >> ~/.ssh/known_hosts 2>/dev/null || true
+            ssh -fN -M -S "$TUNNEL_SOCK" \
+              -o StrictHostKeyChecking=accept-new \
+              -L 5000:127.0.0.1:5000 \
+              ubuntu@44.225.151.59
           } 2>&1 | tee -a /tmp/ci-output.txt
-
-      - name: Open SSH tunnel to registry
-        shell: bash
-        run: |
-          set -o pipefail
-          ssh -fN -o StrictHostKeyChecking=accept-new \
-            -L 5000:127.0.0.1:5000 \
-            ubuntu@44.225.151.59 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Build and push backend
         shell: bash
@@ -154,6 +152,16 @@ jobs:
             docker push localhost:5000/commissionwatch-frontend:${{ github.sha }}
             docker push localhost:5000/commissionwatch-frontend:latest
           } 2>&1 | tee -a /tmp/ci-output.txt
+
+      - name: Close SSH tunnel
+        if: always()
+        shell: bash
+        env:
+          TUNNEL_SOCK: /tmp/legacy-platform-tunnel-${{ github.run_id }}.sock
+        run: |
+          if [ -S "$TUNNEL_SOCK" ]; then
+            ssh -S "$TUNNEL_SOCK" -O exit ubuntu@44.225.151.59 2>&1 || true
+          fi
 
       # ── Notify Tracker on failure ─────────────────────────────────────
       # Creates a Tracker triage issue when any prior step fails.
