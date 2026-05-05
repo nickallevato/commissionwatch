@@ -3,20 +3,22 @@ set -euo pipefail
 
 TRACKER_API_URL="https://tracker.example.invalid"
 TRACKER_COMPANY_ID="REDACTED-COMPANY-ID"
+TRACKER_PROJECT_ID="REDACTED-PROJECT-ID"
 
 if [ -z "${TRACKER_API_KEY:-}" ]; then
   echo "ERROR: TRACKER_API_KEY is not set" >&2
   exit 1
 fi
 
-JOB_NAME="${1:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url>}"
-COMMIT_SHA="${2:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url>}"
-RUN_URL="${3:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url>}"
+JOB_NAME="${1:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url> <commit-msg>}"
+COMMIT_SHA="${2:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url> <commit-msg>}"
+RUN_URL="${3:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url> <commit-msg>}"
+COMMIT_MSG="${4:?Usage: ci-notify-tracker.sh <job-name> <commit-sha> <run-url> <commit-msg>}"
 
 SHORT_SHA="${COMMIT_SHA:0:7}"
 
-PAYLOAD=$(printf '{"title":"CI FAILURE: %s - %s","description":"## CI Failure\\n\\n**Job:** %s\\n**Commit:** %s\\n**Run:** [View logs](%s)","priority":"high"}' \
-  "$JOB_NAME" "$SHORT_SHA" "$JOB_NAME" "$COMMIT_SHA" "$RUN_URL")
+PAYLOAD=$(printf '{"title":"CI FAILURE: %s - %s","description":"## CI Failure\\n\\n**Job:** %s\\n**Commit:** %s\\n**Run:** [View logs](%s)","priority":"critical","status":"todo","projectId":"%s"}' \
+  "$COMMIT_MSG" "$SHORT_SHA" "$JOB_NAME" "$COMMIT_SHA" "$RUN_URL" "$TRACKER_PROJECT_ID")
 
 echo "Posting CI failure issue to Tracker..."
 TMPFILE=$(mktemp)

@@ -41,6 +41,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Notify Tracker of CI failure
-        run: bash scripts/ci-notify-tracker.sh "lint-and-test (${{ github.event.pull_request && 'PR' || 'push' }})" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          COMMIT_MSG=$(git log -1 --format=%s)
+          bash scripts/ci-notify-tracker.sh "lint-and-test (${{ github.event.pull_request && 'PR' || 'push' }})" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" "$COMMIT_MSG"
         env:
           TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
