@@ -17,7 +17,21 @@ const MEETINGS = {
   ],
 };
 
+const MEMBERS = {
+  bozeman: [
+    { id: 'd0e1f2a3-b4c5-6789-abcd-012345678901', name: 'Terry Cunningham', title: 'Mayor', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
+    { id: 'e1f2a3b4-c5d6-7890-bcde-123456789012', name: 'Jennifer Madgic', title: 'Deputy Mayor', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
+    { id: 'f2a3b4c5-d6e7-8901-cdef-234567890123', name: 'Christopher Coburn', title: 'Commissioner', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
+  ],
+  gallatin: [
+    { id: 'a3b4c5d6-e7f8-9012-defa-345678901234', name: 'Scott MacFarlane', title: 'Chair', jurisdiction_id: GALLATIN_ID, term_start: '2023-01-01', term_end: '2026-12-31' },
+  ],
+};
+
 export async function seed(knex: Knex): Promise<void> {
+  await knex('votes').del();
+  await knex('members').del();
+  await knex('anomaly_flags').del();
   await knex('rundown_sheets').del();
   await knex('meeting_documents').del();
   await knex('agenda_items').del();
@@ -57,4 +71,22 @@ export async function seed(knex: Knex): Promise<void> {
     { meeting_id: MEETINGS.gallatin[1].id, title: 'April 22 Agenda', document_type: 'agenda', url: 'https://www.gallatin.mt.gov/meetings/2026-04-22/agenda.pdf' },
     { meeting_id: MEETINGS.gallatin[1].id, title: 'April 22 Minutes', document_type: 'minutes', url: 'https://www.gallatin.mt.gov/meetings/2026-04-22/minutes.pdf' },
   ]);
+
+  await knex('members').insert([
+    ...MEMBERS.bozeman,
+    ...MEMBERS.gallatin,
+  ]);
+
+  // Insert votes for the completed April 28 Bozeman meeting (agenda item 3: Water Infrastructure Bond)
+  const waterBondItemId = (await knex('agenda_items')
+    .where({ meeting_id: MEETINGS.bozeman[1].id, item_number: 3 })
+    .first())?.id;
+
+  if (waterBondItemId) {
+    await knex('votes').insert([
+      { meeting_id: MEETINGS.bozeman[1].id, agenda_item_id: waterBondItemId, member_id: MEMBERS.bozeman[0].id, vote: 'yes' },
+      { meeting_id: MEETINGS.bozeman[1].id, agenda_item_id: waterBondItemId, member_id: MEMBERS.bozeman[1].id, vote: 'yes' },
+      { meeting_id: MEETINGS.bozeman[1].id, agenda_item_id: waterBondItemId, member_id: MEMBERS.bozeman[2].id, vote: 'no' },
+    ]);
+  }
 }

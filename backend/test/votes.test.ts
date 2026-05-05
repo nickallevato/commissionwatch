@@ -1,0 +1,128 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import request from "supertest";
+import app from "../src/app";
+
+const BOZEMAN_MEETING_ID = "f6a7b8c9-d0e1-2345-fabc-456789012345";
+const MEMBER_CUNNINGHAM_ID = "d0e1f2a3-b4c5-6789-abcd-012345678901";
+const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
+
+describe("GET /api/votes", () => {
+  it("returns list of all votes", async () => {
+    const res = await request(app).get("/api/votes").expect(200);
+
+    assert.ok(Array.isArray(res.body.data));
+    assert.ok(res.body.total >= 3);
+  });
+
+  it("filters votes by meeting_id", async () => {
+    const res = await request(app)
+      .get(`/api/votes?meeting_id=${BOZEMAN_MEETING_ID}`)
+      .expect(200);
+
+    assert.equal(res.body.total, 3);
+    res.body.data.forEach((v: { meeting_id: string }) => {
+      assert.equal(v.meeting_id, BOZEMAN_MEETING_ID);
+    });
+  });
+
+  it("filters votes by member_id", async () => {
+    const res = await request(app)
+      .get(`/api/votes?member_id=${MEMBER_CUNNINGHAM_ID}`)
+      .expect(200);
+
+    assert.ok(res.body.total >= 1);
+    res.body.data.forEach((v: { member_id: string }) => {
+      assert.equal(v.member_id, MEMBER_CUNNINGHAM_ID);
+    });
+  });
+
+  it("returns 400 for invalid meeting_id", async () => {
+    const res = await request(app)
+      .get("/api/votes?meeting_id=not-a-uuid")
+      .expect(400);
+
+    assert.match(res.body.error, /Invalid meeting_id format/);
+  });
+});
+
+describe("GET /api/votes/:id", () => {
+  it("returns a single vote", async () => {
+    const listRes = await request(app).get("/api/votes").expect(200);
+    const voteId = listRes.body.data[0].id;
+
+    const res = await request(app)
+      .get(`/api/votes/${voteId}`)
+      .expect(200);
+
+    assert.equal(res.body.id, voteId);
+    assert.ok(res.body.vote);
+  });
+
+  it("returns 404 for non-existent vote", async () => {
+    const res = await request(app)
+      .get(`/api/votes/${NON_EXISTENT_ID}`)
+      .expect(404);
+
+    assert.equal(res.body.error, "Vote not found");
+  });
+});
+
+describe("POST /api/votes", () => {
+  it("creates a new vote", async () => {
+    // Get an agenda item for the meeting
+    const meetingRes = await request(app)
+      .get(`/api/meetings/${BOZEMAN_MEETING_ID}`)
+      .expect(200);
+
+    const agendaItemId = meetingRes.body.agenda_items[0].id;
+
+    const res = await request(app)
+      .post("/api/votes")
+      .send({
+        meeting_id: BOZEMAN_MEETING_ID,
+        agenda_item_id: agendaItemId,
+        member_id: MEMBER_CUNNINGHAM_ID,
+        vote: "yes",
+      })
+      .expect(201);
+
+    assert.equal(res.body.meeting_id, BOZEMAN_MEETING_ID);
+    assert.equal(res.body.member_id, MEMBER_CUNNINGHAM_ID);
+    assert.equal(res.body.vote, "yes");
+    assert.ok(res.body.id);
+  });
+
+  it("returns 400 for invalid vote value", async () => {
+    const res = await request(app)
+      .post("/api/votes")
+      .send({
+        meeting_id: BOZEMAN_MEETING_ID,
+        agenda_item_id: BOZEMAN_MEETING_ID,
+        member_id: MEMBER_CUNNINGHAM_ID,
+        vote: "maybe",
+      })
+      .expect(400);
+
+    assert.match(res.body.error, /vote must be one of/);
+  });
+
+  it("returns 400 when meeting does not exist", async () => {
+    await request(app)
+      .post("/api/votes")
+      .send({
+        meeting_id: NON_EXISTENT_ID,
+        agenda_item_id: NON_EXISTENT_ID,
+        member_id: MEMBER_CUNNINGHAM_ID,
+        vote: "yes",
+      })
+      .expect(400);
+  });
+
+  it("returns 400 when required fields are missing", async () => {
+    await request(app)
+      .post("/api/votes")
+      .send({ meeting_id: BOZEMAN_MEETING_ID })
+      .expect(400);
+  });
+});
