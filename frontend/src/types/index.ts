@@ -72,3 +72,47 @@ export interface RundownKeyItem {
   category?: string;
   priority?: "high" | "medium" | "low";
 }
+
+export type VoteValue = "yes" | "no" | "abstain" | "absent";
+
+export type AnomalyFlagType =
+  | "emergency_session"
+  | "closed_door_vote"
+  | "last_minute_agenda_change"
+  | "quorum_issue"
+  | "unanimous_controversial"
+  | "missing_minutes";
+
+export type AnomalySeverity = "low" | "medium" | "high" | "critical";
+
+export interface Member {
+  id: string;
+  name: string;
+  title: string | null;
+  jurisdiction_id: string;
+  term_start: string | null;
+  term_end: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Vote {
+  id: string;
+  meeting_id: string;
+  agenda_item_id: string;
+  member_id: string;
+  vote: VoteValue;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnomalyFlag {
+  id: string;
+  meeting_id: string;
+  flag_type: AnomalyFlagType;
+  description: string | null;
+  severity: AnomalySeverity;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}

@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMeetings, useJurisdictions } from "@/hooks/useMeetings";
+import { useAnomalies } from "@/hooks/useAnomalies";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { MeetingStatus } from "@/types";
+import { AnomalyBadge } from "@/components/AnomalyBadge";
+import type { MeetingStatus, AnomalyFlag, AnomalySeverity } from "@/types";
 
 export function MeetingsPage() {
   const [jurisdictionId, setJurisdictionId] = useState("");
@@ -11,6 +13,15 @@ export function MeetingsPage() {
   const [dateTo, setDateTo] = useState("");
 
   const { data: jurisdictions } = useJurisdictions();
+  const { data: anomalies } = useAnomalies();
+
+  const anomalyByMeeting = new Map<string, AnomalyFlag[]>();
+  for (const a of anomalies ?? []) {
+    const list = anomalyByMeeting.get(a.meeting_id) ?? [];
+    list.push(a);
+    anomalyByMeeting.set(a.meeting_id, list);
+  }
+
   const { data: meetings, isLoading } = useMeetings({
     jurisdiction_id: jurisdictionId || undefined,
     status: status || undefined,
@@ -111,7 +122,16 @@ export function MeetingsPage() {
                     {meeting.time && ` at ${meeting.time}`}
                   </p>
                 </div>
-                <StatusBadge status={meeting.status} />
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    const ma = anomalyByMeeting.get(meeting.id) ?? [];
+                    if (ma.length === 0) return null;
+                    const severityOrder: AnomalySeverity[] = ["critical", "high", "medium", "low"];
+                    const maxSev = severityOrder.find((s) => ma.some((a) => a.severity === s)) ?? "low";
+                    return <AnomalyBadge count={ma.length} maxSeverity={maxSev} />;
+                  })()}
+                  <StatusBadge status={meeting.status} />
+                </div>
               </div>
             </Link>
           ))}

@@ -1,0 +1,43 @@
+import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/api";
+import type { AnomalyFlag } from "@/types";
+
+export interface AnomaliesFilter {
+  meeting_id?: string;
+  flag_type?: string;
+  severity?: string;
+}
+
+function buildQuery(filters: AnomaliesFilter): string {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export function useMeetingAnomalies(meetingId: string) {
+  return useQuery({
+    queryKey: ["meetings", meetingId, "anomalies"],
+    queryFn: async () => {
+      const res = await fetchJson<{ data: AnomalyFlag[]; total: number }>(
+        `/meetings/${meetingId}/anomalies`,
+      );
+      return res.data;
+    },
+    enabled: !!meetingId,
+  });
+}
+
+export function useAnomalies(filters: AnomaliesFilter = {}) {
+  return useQuery({
+    queryKey: ["anomalies", filters],
+    queryFn: async () => {
+      const res = await fetchJson<{ data: AnomalyFlag[]; total: number }>(
+        `/anomalies${buildQuery(filters)}`,
+      );
+      return res.data;
+    },
+  });
+}
