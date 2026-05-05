@@ -69,9 +69,9 @@ jobs:
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - name: Notify Tracker QA on failure
-        run: |
-          curl -s -X POST \
-            "https://tracker.example.invalid/api/routine-triggers/public/REDACTED-TRIGGER-TOKEN/fire" \
-            -H "Content-Type: application/json" \
-            -d "{\"project\":\"commissionwatch\",\"repo\":\"your-org/commissionwatch\",\"ref\":\"${{ github.ref }}\",\"sha\":\"${{ github.sha }}\",\"run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+      - uses: actions/checkout@v4
+
+      - name: Notify Tracker of CI failure
+        run: bash scripts/ci-notify-tracker.sh "deploy (${{ github.ref_name }})" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        env:
+          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
