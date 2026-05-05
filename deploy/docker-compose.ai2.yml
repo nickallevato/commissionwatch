@@ -1,0 +1,11 @@
+# ai2-specific overrides for deploy/docker-compose.yml.
+# Used by the deploy-ai2 job in .gitea/workflows/deploy.yml.
+#
+# Production (legacy-platform/your-org) keeps no host-port mappings — Caddy reaches
+# the frontend container directly over caddy_net. ai2 has no Caddy, so we
+# bind the frontend to a host port for direct access.
+
+services:
+  frontend:
+    ports:
+      - "7860:3000"
