@@ -3,6 +3,7 @@ import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
 import { MeetingsPage } from "./pages/MeetingsPage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
+import { HubPage } from "./pages/HubPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 
 export function App() {
@@ -12,6 +13,7 @@ export function App() {
         <Route index element={<HomePage />} />
         <Route path="meetings" element={<MeetingsPage />} />
         <Route path="meetings/:id" element={<MeetingDetailPage />} />
+        <Route path="hub" element={<HubPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
