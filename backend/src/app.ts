@@ -7,6 +7,8 @@ import meetingsRouter from "./routes/meetings";
 import membersRouter from "./routes/members";
 import votesRouter from "./routes/votes";
 import anomaliesRouter from "./routes/anomalies";
+import subscriptionsRouter from "./routes/subscriptions";
+import notificationsRouter from "./routes/notifications";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -21,6 +23,8 @@ app.use("/api/meetings", meetingsRouter);
 app.use("/api/members", membersRouter);
 app.use("/api/votes", votesRouter);
 app.use("/api/anomalies", anomaliesRouter);
+app.use("/api/subscriptions", subscriptionsRouter);
+app.use("/api/notifications", notificationsRouter);
 
 app.use(errorHandler);
 

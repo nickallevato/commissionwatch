@@ -1,4 +1,5 @@
 import type { Knex } from "knex";
+import { anomalyEvents } from "./notification";
 
 interface AnomalyFlag {
   meeting_id: string;
@@ -40,6 +41,7 @@ export async function detectAnomalies(db: Knex, meetingId: string): Promise<Anom
 
   if (flags.length > 0) {
     await db("anomaly_flags").insert(flags);
+    anomalyEvents.emit("anomaly.detected", flags);
   }
 
   return flags;
