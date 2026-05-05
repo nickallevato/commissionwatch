@@ -129,7 +129,7 @@ describe("DigestScheduler", () => {
       const [flag] = await db("anomaly_flags")
         .insert({
           meeting_id: COMPLETED_MEETING_ID,
-          flag_type: "quorum_anomaly",
+          flag_type: "quorum_issue",
           description: "Weekly digest test flag",
           severity: "low",
         })

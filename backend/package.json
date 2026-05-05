@@ -8,7 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint --ext .ts src/",
     "pretest": "NODE_ENV=test knex migrate:latest --knexfile knexfile.ts && NODE_ENV=test knex seed:run --knexfile knexfile.ts",
-    "test": "NODE_ENV=test node --import tsx --test --test-force-exit test/health.test.ts test/jurisdictions.test.ts test/meetings.test.ts test/members.test.ts test/votes.test.ts test/validation.test.ts test/subscriptions.test.ts test/notifications.test.ts test/digest-scheduler.test.ts",
+    "test": "NODE_ENV=test node --import tsx --test --test-force-exit test/health.test.ts test/jurisdictions.test.ts test/meetings.test.ts test/members.test.ts test/votes.test.ts test/validation.test.ts test/subscriptions.test.ts test/notifications.test.ts test/notification-service.test.ts test/digest-scheduler.test.ts test/alert-flow.integration.test.ts",
     "test:storage": "NODE_ENV=test node --import tsx --test --test-force-exit test/storage.integration.test.ts",
     "migrate": "knex migrate:latest --knexfile knexfile.ts",
     "migrate:rollback": "knex migrate:rollback --all --knexfile knexfile.ts",

@@ -210,7 +210,8 @@ export class EmailDeliveryService {
 </html>`.trim();
   }
 
-  private escapeHtml(str: string): string {
+  private escapeHtml(value: unknown): string {
+    const str = String(value ?? "");
     return str
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
