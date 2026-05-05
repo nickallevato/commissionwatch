@@ -8,12 +8,12 @@ Each CI job tees its output to `/tmp/ci-output.txt`, then on failure posts the l
 
 ## Key Details
 
-- **API URL:** `${TRACKER_API_URL}/api/companies/REDACTED-COMPANY-ID/issues`
-- **Auth:** `Bearer ${TRACKER_CI_API_KEY}`
+- **API URL:** `https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues`
+- **Auth:** `Bearer ${TRACKER_API_KEY}`
 - **Project ID (CommissionWatch):** `REDACTED-PROJECT-ID`
 - **Assignee Agent ID:** `REDACTED-AGENT-ID`
 - **Status:** `todo`, **Priority:** `critical`
-- **Required secrets:** `TRACKER_API_URL`, `TRACKER_CI_API_KEY`
+- **Required secret:** `TRACKER_API_KEY`
 - **Runner deps:** `jq`, `curl`, `tail` (all present on `ai2-daedalus`)
 
 ## Workflow Integration
@@ -37,8 +37,7 @@ Add `| tee -a /tmp/ci-output.txt` to each build/test step (with `set -o pipefail
 - name: Notify Tracker of CI failure
   if: failure()
   env:
-    TRACKER_API_URL: ${{ secrets.TRACKER_API_URL }}
-    TRACKER_CI_API_KEY: ${{ secrets.TRACKER_CI_API_KEY }}
+    TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
     GH_SHA: ${{ github.sha }}
     GH_REF_NAME: ${{ github.ref_name }}
     GH_RUN_ID: ${{ github.run_id }}
@@ -47,11 +46,10 @@ Add `| tee -a /tmp/ci-output.txt` to each build/test step (with `set -o pipefail
     JOB_LABEL: ci ${{ matrix.service }}    # or build-and-push, lint-and-test ${{ matrix.workspace }}, etc.
   run: |
     set +e  # notification must never fail the build
-    API_URL="$(printf '%s' "$TRACKER_API_URL" | tr -d '[:space:]')"
-    API_KEY="$(printf '%s' "$TRACKER_CI_API_KEY" | tr -d '[:space:]')"
+    API_KEY="$(printf '%s' "$TRACKER_API_KEY" | tr -d '[:space:]')"
 
-    if [ -z "$API_KEY" ] || [ -z "$API_URL" ]; then
-      echo "TRACKER_CI_API_KEY or TRACKER_API_URL not set — skipping failure notification"
+    if [ -z "$API_KEY" ]; then
+      echo "TRACKER_API_KEY not set — skipping failure notification"
       exit 0
     fi
 
@@ -84,7 +82,7 @@ Add `| tee -a /tmp/ci-output.txt` to each build/test step (with `set -o pipefail
         description: ("CI failed on `" + $branch + "` @ " + $sha + " (" + $job + ")\n\nRun: " + $runUrl + "\nCommit: " + $commitUrl + "\n\n--- last log lines ---\n\n```\n" + $logTail + "\n```")
       }') || { echo "WARNING: jq failed — skipping Tracker notification"; exit 0; }
 
-    HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/api/companies/REDACTED-COMPANY-ID/issues" \
+    HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
       -H "Authorization: Bearer ${API_KEY}" \
       -H "Content-Type: application/json" \
       -d "$PAYLOAD")
@@ -119,7 +117,7 @@ Add `| tee -a /tmp/ci-output.txt` to each build/test step (with `set -o pipefail
 
 ## Setup Checklist
 
-1. Add `TRACKER_API_URL` (e.g. `https://tracker.example.invalid`) and `TRACKER_CI_API_KEY` as Gitea repo secrets
+1. Add `TRACKER_API_KEY` as a Gitea repo secret
 2. Add `| tee -a /tmp/ci-output.txt` with `set -o pipefail` to each build/test step
 3. Add the `if: failure()` notify step at the end of each job
 4. Set `JOB_LABEL` to identify which job/matrix variant failed (so each Tracker issue is distinct)

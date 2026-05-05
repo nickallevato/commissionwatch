@@ -44,12 +44,11 @@ jobs:
 
       # ── Notify Tracker on failure ─────────────────────────────────────
       # Creates a Tracker triage issue when any prior step fails.
-      # Required secrets: TRACKER_API_URL, TRACKER_CI_API_KEY
+      # Required secret: TRACKER_API_KEY
       - name: Notify Tracker of CI failure
         if: failure()
         env:
-          TRACKER_API_URL: ${{ secrets.TRACKER_API_URL }}
-          TRACKER_CI_API_KEY: ${{ secrets.TRACKER_CI_API_KEY }}
+          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
           GH_SHA: ${{ github.sha }}
           GH_REF_NAME: ${{ github.ref_name }}
           GH_RUN_ID: ${{ github.run_id }}
@@ -58,11 +57,10 @@ jobs:
           JOB_LABEL: lint-and-test ${{ matrix.workspace }}
         run: |
           set +e  # notification must never fail the build
-          API_URL="$(printf '%s' "$TRACKER_API_URL" | tr -d '[:space:]')"
-          API_KEY="$(printf '%s' "$TRACKER_CI_API_KEY" | tr -d '[:space:]')"
+          API_KEY="$(printf '%s' "$TRACKER_API_KEY" | tr -d '[:space:]')"
 
-          if [ -z "$API_KEY" ] || [ -z "$API_URL" ]; then
-            echo "TRACKER_CI_API_KEY or TRACKER_API_URL not set — skipping failure notification"
+          if [ -z "$API_KEY" ]; then
+            echo "TRACKER_API_KEY not set — skipping failure notification"
             exit 0
           fi
 
@@ -96,7 +94,7 @@ jobs:
               description: ("CI failed on `" + $branch + "` @ " + $sha + " (" + $job + ")\n\nRun: " + $runUrl + "\nCommit: " + $commitUrl + "\n\n--- last log lines ---\n\n```\n" + $logTail + "\n```")
             }') || { echo "WARNING: jq failed — skipping Tracker notification"; exit 0; }
 
-          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${API_URL}/api/companies/REDACTED-COMPANY-ID/issues" \
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
             -H "Authorization: Bearer ${API_KEY}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")
