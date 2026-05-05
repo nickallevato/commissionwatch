@@ -87,8 +87,8 @@ router.get("/:id", async (req, res, next) => {
     }
 
     const [agendaItems, documents] = await Promise.all([
-      db("agenda_items").where({ meeting_id: id }).orderBy("sort_order"),
-      db("documents").where({ meeting_id: id }).orderBy("created_at"),
+      db("agenda_items").where({ meeting_id: id }).orderBy("item_number"),
+      db("meeting_documents").where({ meeting_id: id }).orderBy("created_at"),
     ]);
 
     res.json({ ...meeting, agenda_items: agendaItems, documents });
@@ -108,7 +108,7 @@ router.get("/:id/rundown", async (req, res, next) => {
       return;
     }
 
-    const rundown = await db("rundowns").where({ meeting_id: id }).first();
+    const rundown = await db("rundown_sheets").where({ meeting_id: id }).first();
     if (!rundown) {
       res.status(404).json({
         error: "Rundown not yet generated for this meeting",

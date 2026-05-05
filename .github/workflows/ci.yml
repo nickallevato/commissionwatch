@@ -7,44 +7,70 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  backend:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        workspace: [backend, frontend]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: commissionwatch_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/commissionwatch_test
+      NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-          cache-dependency-path: ${{ matrix.workspace }}/package-lock.json
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
-        working-directory: ${{ matrix.workspace }}
+        working-directory: backend
         shell: bash
         run: |
           set -o pipefail
           npm ci 2>&1 | tee -a /tmp/ci-output.txt
 
+      - name: Build
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee -a /tmp/ci-output.txt
+
       - name: Lint
-        working-directory: ${{ matrix.workspace }}
+        working-directory: backend
         shell: bash
         run: |
           set -o pipefail
           npm run lint 2>&1 | tee -a /tmp/ci-output.txt
 
+      - name: Run migrations
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          npx knex migrate:latest --knexfile knexfile.ts 2>&1 | tee -a /tmp/ci-output.txt
+
       - name: Test
-        working-directory: ${{ matrix.workspace }}
+        working-directory: backend
         shell: bash
         run: |
           set -o pipefail
           npm test 2>&1 | tee -a /tmp/ci-output.txt
 
       # ── Notify Tracker on failure ─────────────────────────────────────
-      # Creates a Tracker triage issue when any prior step fails.
-      # Required secret: TRACKER_API_KEY
       - name: Notify Tracker of CI failure
         if: failure()
         env:
@@ -54,9 +80,9 @@ jobs:
           GH_RUN_ID: ${{ github.run_id }}
           GH_SERVER_URL: ${{ github.server_url }}
           GH_REPOSITORY: ${{ github.repository }}
-          JOB_LABEL: lint-and-test ${{ matrix.workspace }}
+          JOB_LABEL: backend
         run: |
-          set +e  # notification must never fail the build
+          set +e
           API_KEY="$(printf '%s' "$TRACKER_API_KEY" | tr -d '[:space:]')"
 
           if [ -z "$API_KEY" ]; then
@@ -68,7 +94,101 @@ jobs:
           RUN_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
           COMMIT_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/commit/${GH_SHA}"
 
-          # Capture last ~80 lines of CI output (tee'd by earlier steps), capped to 4KB
+          LOG_FILE="/tmp/ci-output.txt"
+          LOG_TAIL_FILE="/tmp/ci-output.tail"
+          if [ -f "$LOG_FILE" ]; then
+            tail -n 80 "$LOG_FILE" | tail -c 4000 > "$LOG_TAIL_FILE"
+          else
+            echo "(no captured CI output found at $LOG_FILE)" > "$LOG_TAIL_FILE"
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg title "CI Failure: ${JOB_LABEL} @ ${SHORT_SHA}" \
+            --arg runUrl "$RUN_URL" \
+            --arg commitUrl "$COMMIT_URL" \
+            --arg sha "$SHORT_SHA" \
+            --arg branch "$GH_REF_NAME" \
+            --arg job "$JOB_LABEL" \
+            --rawfile logTail "$LOG_TAIL_FILE" \
+            '{
+              title: $title,
+              status: "todo",
+              priority: "critical",
+              projectId: "REDACTED-PROJECT-ID",
+              assigneeAgentId: "REDACTED-AGENT-ID",
+              description: ("CI failed on `" + $branch + "` @ " + $sha + " (" + $job + ")\n\nRun: " + $runUrl + "\nCommit: " + $commitUrl + "\n\n--- last log lines ---\n\n```\n" + $logTail + "\n```")
+            }') || { echo "WARNING: jq failed — skipping Tracker notification"; exit 0; }
+
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
+            -H "Authorization: Bearer ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          CURL_EXIT=$?
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
+          HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n 1)
+          if [ "$CURL_EXIT" -ne 0 ] || [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ] 2>/dev/null; then
+            echo "WARNING: Failed to create Tracker failure ticket (curl=$CURL_EXIT, http=$HTTP_CODE, body=$HTTP_BODY)"
+          else
+            echo "Tracker failure ticket created: HTTP $HTTP_CODE"
+          fi
+          exit 0
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm ci 2>&1 | tee -a /tmp/ci-output.txt
+
+      - name: Lint
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee -a /tmp/ci-output.txt
+
+      - name: Test
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee -a /tmp/ci-output.txt
+
+      # ── Notify Tracker on failure ─────────────────────────────────────
+      - name: Notify Tracker of CI failure
+        if: failure()
+        env:
+          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
+          GH_SHA: ${{ github.sha }}
+          GH_REF_NAME: ${{ github.ref_name }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_SERVER_URL: ${{ github.server_url }}
+          GH_REPOSITORY: ${{ github.repository }}
+          JOB_LABEL: frontend
+        run: |
+          set +e
+          API_KEY="$(printf '%s' "$TRACKER_API_KEY" | tr -d '[:space:]')"
+
+          if [ -z "$API_KEY" ]; then
+            echo "TRACKER_API_KEY not set — skipping failure notification"
+            exit 0
+          fi
+
+          SHORT_SHA="${GH_SHA:0:7}"
+          RUN_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
+          COMMIT_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/commit/${GH_SHA}"
+
           LOG_FILE="/tmp/ci-output.txt"
           LOG_TAIL_FILE="/tmp/ci-output.tail"
           if [ -f "$LOG_FILE" ]; then

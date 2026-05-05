@@ -1,11 +1,7 @@
 import knex from "knex";
+import config from "../../knexfile";
 
-const db = knex({
-  client: "pg",
-  connection:
-    process.env.DATABASE_URL ||
-    "postgresql://postgres:postgres@localhost:5432/commissionwatch",
-  pool: { min: 2, max: 10 },
-});
+const env = (process.env.NODE_ENV || "development") as keyof typeof config;
+const db = knex(config[env] || config.development);
 
 export default db;
