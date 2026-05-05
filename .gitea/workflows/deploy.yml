@@ -35,8 +35,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify Docker available
+        run: docker info > /dev/null 2>&1 || (echo "ERROR: Docker not available on runner" && exit 1)
+
       - name: Setup SSH key
         run: |
+          set -e
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "ERROR: SSH_PRIVATE_KEY secret is not configured"
+            exit 1
+          fi
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
@@ -44,12 +52,16 @@ jobs:
 
       - name: Open SSH tunnel to registry
         run: |
+          set -e
           ssh -fN -o StrictHostKeyChecking=accept-new \
             -L 5000:127.0.0.1:5000 \
             ubuntu@44.225.151.59
+          sleep 2
+          curl -sf http://localhost:5000/v2/ > /dev/null || echo "WARNING: Registry not reachable via tunnel (may still work for push)"
 
       - name: Build and push backend
         run: |
+          set -e
           docker build -t localhost:5000/commissionwatch-backend:${{ github.sha }} \
                        -t localhost:5000/commissionwatch-backend:latest \
                        ./backend
@@ -58,6 +70,7 @@ jobs:
 
       - name: Build and push frontend
         run: |
+          set -e
           docker build -t localhost:5000/commissionwatch-frontend:${{ github.sha }} \
                        -t localhost:5000/commissionwatch-frontend:latest \
                        ./frontend
