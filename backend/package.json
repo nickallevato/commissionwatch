@@ -3,15 +3,33 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "dev": "tsx watch src/index.ts",
     "lint": "eslint src/",
-    "test": "node --test"
+    "test": "node --test",
+    "migrate": "knex migrate:latest --knexfile knexfile.ts",
+    "migrate:rollback": "knex migrate:rollback --all --knexfile knexfile.ts",
+    "seed": "knex seed:run --knexfile knexfile.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
-    "eslint": "^8.57.0"
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
+    "eslint": "^8.57.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@types/pg": "^8.20.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "helmet": "^8.1.0",
+    "knex": "^3.2.10",
+    "pg": "^8.20.0",
+    "tsx": "^4.21.0"
   }
 }
