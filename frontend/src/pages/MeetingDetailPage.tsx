@@ -4,14 +4,22 @@ import {
   useAgendaItems,
   useRundown,
 } from "@/hooks/useMeetings";
+import { useMeetingVotes } from "@/hooks/useVotes";
+import { useMeetingAnomalies } from "@/hooks/useAnomalies";
+import { useMembers } from "@/hooks/useMembers";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RundownViewer } from "@/components/RundownViewer";
+import { VoteBreakdown } from "@/components/VoteBreakdown";
+import { AnomalyCard } from "@/components/AnomalyCard";
 
 export function MeetingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: meeting, isLoading: meetingLoading } = useMeeting(id!);
   const { data: agendaItems, isLoading: agendaLoading } = useAgendaItems(id!);
   const { data: rundown } = useRundown(id!);
+  const { data: meetingVotes } = useMeetingVotes(id!);
+  const { data: anomalies } = useMeetingAnomalies(id!);
+  const { data: allMembers } = useMembers();
 
   if (meetingLoading) {
     return (
@@ -146,6 +154,20 @@ export function MeetingDetailPage() {
                         {item.category}
                       </span>
                     )}
+                    {(() => {
+                      const itemVotes = meetingVotes?.filter(
+                        (v) => v.agenda_item_id === item.id,
+                      );
+                      if (!itemVotes?.length) return null;
+                      return (
+                        <div className="mt-2">
+                          <VoteBreakdown
+                            votes={itemVotes}
+                            members={allMembers ?? []}
+                          />
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -155,6 +177,19 @@ export function MeetingDetailPage() {
           <p className="text-gray-500 text-sm">No agenda items available.</p>
         )}
       </div>
+
+      {anomalies && anomalies.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-lg font-semibold text-gray-100 mb-4">
+            Anomaly Flags
+          </h3>
+          <div className="space-y-3">
+            {anomalies.map((anomaly) => (
+              <AnomalyCard key={anomaly.id} anomaly={anomaly} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
