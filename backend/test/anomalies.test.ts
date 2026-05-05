@@ -119,3 +119,86 @@ describe("DELETE /api/anomalies/:id", () => {
       .expect(404);
   });
 });
+
+describe("POST /api/anomalies/detect-batch", () => {
+  it("runs batch detection and returns summary", async () => {
+    const res = await request(app)
+      .post("/api/anomalies/detect-batch")
+      .send({})
+      .expect(200);
+
+    assert.equal(typeof res.body.meetings_scanned, "number");
+    assert.equal(typeof res.body.flags_created, "number");
+    assert.ok(typeof res.body.flags_by_type === "object");
+  });
+
+  it("accepts date filters", async () => {
+    const res = await request(app)
+      .post("/api/anomalies/detect-batch")
+      .send({ date_from: "2020-01-01", date_to: "2030-12-31" })
+      .expect(200);
+
+    assert.equal(typeof res.body.meetings_scanned, "number");
+  });
+
+  it("rejects invalid commission_id", async () => {
+    await request(app)
+      .post("/api/anomalies/detect-batch")
+      .send({ commission_id: "not-a-uuid" })
+      .expect(400);
+  });
+
+  it("rejects invalid date format", async () => {
+    await request(app)
+      .post("/api/anomalies/detect-batch")
+      .send({ date_from: "Jan 1 2025" })
+      .expect(400);
+  });
+});
+
+describe("Idempotency", () => {
+  it("does not duplicate flags when detection runs twice", async () => {
+    await request(app)
+      .post(`/api/meetings/${COMPLETED_MEETING_ID}/detect-anomalies`)
+      .expect(200);
+
+    const after1 = await request(app)
+      .get(`/api/anomalies?meeting_id=${COMPLETED_MEETING_ID}`)
+      .expect(200);
+    const count1 = after1.body.total;
+
+    await request(app)
+      .post(`/api/meetings/${COMPLETED_MEETING_ID}/detect-anomalies`)
+      .expect(200);
+
+    const after2 = await request(app)
+      .get(`/api/anomalies?meeting_id=${COMPLETED_MEETING_ID}`)
+      .expect(200);
+
+    assert.equal(after2.body.total, count1, "Flag count should not change on re-run");
+  });
+
+  it("preserves manually created flags when detection re-runs", async () => {
+    const createRes = await request(app)
+      .post("/api/anomalies")
+      .send({
+        meeting_id: COMPLETED_MEETING_ID,
+        flag_type: "emergency_session",
+        description: "Manually created test flag",
+        severity: "low",
+      })
+      .expect(201);
+
+    const manualId = createRes.body.id;
+
+    await request(app)
+      .post(`/api/meetings/${COMPLETED_MEETING_ID}/detect-anomalies`)
+      .expect(200);
+
+    const flagRes = await request(app)
+      .get(`/api/anomalies/${manualId}`)
+      .expect(200);
+
+    assert.equal(flagRes.body.id, manualId, "Manual flag should survive re-detection");
+  });
+});

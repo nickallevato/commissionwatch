@@ -1,5 +1,6 @@
 import { Router, Request } from "express";
 import db from "../config/database";
+import { detectAnomaliesBatch } from "../services/anomaly-detection";
 
 const router = Router();
 
@@ -64,6 +65,33 @@ router.get("/", async (req: Request<unknown, unknown, unknown, AnomaliesQuery>, 
   }
 });
 
+interface DetectBatchBody {
+  commission_id?: string;
+  date_from?: string;
+  date_to?: string;
+  limit?: number;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+router.post("/detect-batch", async (req: Request<unknown, unknown, DetectBatchBody>, res, next) => {
+  try {
+    const { commission_id, date_from, date_to, limit } = req.body;
+
+    if (commission_id && !UUID_RE.test(commission_id))
+      throw badRequest("Invalid commission_id format");
+    if (date_from && !DATE_RE.test(date_from))
+      throw badRequest("Invalid date_from format (expected YYYY-MM-DD)");
+    if (date_to && !DATE_RE.test(date_to))
+      throw badRequest("Invalid date_to format (expected YYYY-MM-DD)");
+
+    const result = await detectAnomaliesBatch(db, { commission_id, date_from, date_to, limit });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -103,7 +131,7 @@ router.post("/", async (req: Request<unknown, unknown, CreateAnomalyBody>, res, 
     if (!meeting) throw badRequest("Meeting not found");
 
     const [flag] = await db("anomaly_flags")
-      .insert({ meeting_id, flag_type, description, severity })
+      .insert({ meeting_id, flag_type, description, severity, source: "manual" })
       .returning("*");
 
     res.status(201).json(flag);
