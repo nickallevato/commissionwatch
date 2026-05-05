@@ -1,16 +1,21 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import type { ParsedDocument, ParseOptions } from './types';
 import { parsePdf } from './pdf-parser';
 import { parseHtml } from './html-parser';
 
+const VALID_TYPES = ['pdf', 'html'] as const;
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
 export async function parseDocument(options: ParseOptions): Promise<ParsedDocument> {
   const type = options.type ?? detectType(options.input);
+  const resolvedPath = validateInputPath(options.input);
 
   let result: ParsedDocument;
   if (type === 'pdf') {
-    result = await parsePdf(options.input);
+    result = await parsePdf(resolvedPath);
   } else {
-    result = await parseHtml(options.input);
+    result = await parseHtml(resolvedPath);
   }
 
   if (options.sourceUrl) {
@@ -20,12 +25,41 @@ export async function parseDocument(options: ParseOptions): Promise<ParsedDocume
   return result;
 }
 
+export function validateInputPath(input: string): string {
+  const resolved = path.resolve(input);
+
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`File not found: ${resolved}`);
+  }
+
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile()) {
+    throw new Error(`Not a file: ${resolved}`);
+  }
+
+  if (stat.size > MAX_FILE_SIZE_BYTES) {
+    throw new Error(`File too large (${(stat.size / 1024 / 1024).toFixed(1)} MB). Maximum: ${MAX_FILE_SIZE_BYTES / 1024 / 1024} MB`);
+  }
+
+  if (stat.size === 0) {
+    throw new Error(`File is empty: ${resolved}`);
+  }
+
+  return resolved;
+}
+
 function detectType(input: string): 'pdf' | 'html' {
   const ext = path.extname(input).toLowerCase();
   if (ext === '.pdf') return 'pdf';
   if (ext === '.html' || ext === '.htm') return 'html';
-  // Default to HTML for unknown extensions
   return 'html';
+}
+
+function validateType(value: string): 'pdf' | 'html' {
+  if (!VALID_TYPES.includes(value as typeof VALID_TYPES[number])) {
+    throw new Error(`Invalid --type "${value}". Allowed: ${VALID_TYPES.join(', ')}`);
+  }
+  return value as 'pdf' | 'html';
 }
 
 export { ParsedDocument, ParseOptions } from './types';
@@ -42,7 +76,15 @@ if (require.main === module) {
   }
 
   const input = args[inputIdx + 1];
-  const type = typeIdx !== -1 ? (args[typeIdx + 1] as 'pdf' | 'html') : undefined;
+  let type: 'pdf' | 'html' | undefined;
+  if (typeIdx !== -1) {
+    const typeArg = args[typeIdx + 1];
+    if (!typeArg) {
+      console.error('--type requires a value (pdf or html)');
+      process.exit(1);
+    }
+    type = validateType(typeArg);
+  }
 
   parseDocument({ input, type })
     .then(result => {
