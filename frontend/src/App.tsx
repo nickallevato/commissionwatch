@@ -1,6 +1,8 @@
 import { Routes, Route } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
+import { MeetingsPage } from "./pages/MeetingsPage";
+import { MeetingDetailPage } from "./pages/MeetingDetailPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 
 export function App() {
@@ -8,6 +10,8 @@ export function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<HomePage />} />
+        <Route path="meetings" element={<MeetingsPage />} />
+        <Route path="meetings/:id" element={<MeetingDetailPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

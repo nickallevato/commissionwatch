@@ -7,4 +7,10 @@ describe("Layout", () => {
     renderWithProviders(<Layout />);
     expect(screen.getByText("CommissionWatch")).toBeInTheDocument();
   });
+
+  it("renders navigation links", () => {
+    renderWithProviders(<Layout />);
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Meetings")).toBeInTheDocument();
+  });
 });

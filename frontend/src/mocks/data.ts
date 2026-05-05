@@ -1,0 +1,279 @@
+import type {
+  Jurisdiction,
+  Commission,
+  Meeting,
+  AgendaItem,
+  MeetingDocument,
+  RundownSheet,
+} from "@/types";
+
+export const jurisdictions: Jurisdiction[] = [
+  {
+    id: "j1",
+    name: "Denver",
+    state: "CO",
+    type: "city",
+    website_url: "https://denver.gov",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "j2",
+    name: "Boulder County",
+    state: "CO",
+    type: "county",
+    website_url: "https://bouldercounty.gov",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "j3",
+    name: "Austin",
+    state: "TX",
+    type: "city",
+    website_url: "https://austintexas.gov",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  },
+];
+
+export const commissions: Commission[] = [
+  {
+    id: "c1",
+    jurisdiction_id: "j1",
+    name: "Planning & Zoning Commission",
+    description: "Reviews land use and zoning applications",
+    meeting_schedule: "1st and 3rd Tuesday",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "c2",
+    jurisdiction_id: "j2",
+    name: "Board of County Commissioners",
+    description: "Main governing body for Boulder County",
+    meeting_schedule: "Every Tuesday",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  },
+  {
+    id: "c3",
+    jurisdiction_id: "j3",
+    name: "Planning Commission",
+    description: "Reviews development proposals and zoning changes",
+    meeting_schedule: "2nd and 4th Tuesday",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
+  },
+];
+
+export const meetings: Meeting[] = [
+  {
+    id: "m1",
+    commission_id: "c1",
+    date: "2024-12-03",
+    time: "18:00",
+    location: "City Hall, Room 450",
+    status: "completed",
+    agenda_url: "https://example.com/agenda1.pdf",
+    minutes_url: "https://example.com/minutes1.pdf",
+    created_at: "2024-11-20T00:00:00Z",
+    updated_at: "2024-12-04T00:00:00Z",
+    commission: { ...commissions[0], jurisdiction: jurisdictions[0] },
+  },
+  {
+    id: "m2",
+    commission_id: "c1",
+    date: "2024-12-17",
+    time: "18:00",
+    location: "City Hall, Room 450",
+    status: "scheduled",
+    agenda_url: "https://example.com/agenda2.pdf",
+    minutes_url: null,
+    created_at: "2024-12-01T00:00:00Z",
+    updated_at: "2024-12-01T00:00:00Z",
+    commission: { ...commissions[0], jurisdiction: jurisdictions[0] },
+  },
+  {
+    id: "m3",
+    commission_id: "c2",
+    date: "2024-12-10",
+    time: "09:30",
+    location: "Boulder County Courthouse",
+    status: "completed",
+    agenda_url: "https://example.com/agenda3.pdf",
+    minutes_url: "https://example.com/minutes3.pdf",
+    created_at: "2024-12-01T00:00:00Z",
+    updated_at: "2024-12-11T00:00:00Z",
+    commission: { ...commissions[1], jurisdiction: jurisdictions[1] },
+  },
+  {
+    id: "m4",
+    commission_id: "c3",
+    date: "2024-12-12",
+    time: "14:00",
+    location: "Austin City Hall, Council Chambers",
+    status: "cancelled",
+    agenda_url: null,
+    minutes_url: null,
+    created_at: "2024-12-01T00:00:00Z",
+    updated_at: "2024-12-10T00:00:00Z",
+    commission: { ...commissions[2], jurisdiction: jurisdictions[2] },
+  },
+  {
+    id: "m5",
+    commission_id: "c2",
+    date: "2025-01-07",
+    time: "09:30",
+    location: "Boulder County Courthouse",
+    status: "scheduled",
+    agenda_url: null,
+    minutes_url: null,
+    created_at: "2024-12-15T00:00:00Z",
+    updated_at: "2024-12-15T00:00:00Z",
+    commission: { ...commissions[1], jurisdiction: jurisdictions[1] },
+  },
+];
+
+export const agendaItems: AgendaItem[] = [
+  {
+    id: "a1",
+    meeting_id: "m1",
+    item_number: 1,
+    title: "Call to Order and Roll Call",
+    description: null,
+    category: "procedural",
+    created_at: "2024-11-20T00:00:00Z",
+    updated_at: "2024-11-20T00:00:00Z",
+  },
+  {
+    id: "a2",
+    meeting_id: "m1",
+    item_number: 2,
+    title: "Rezoning Application: 1234 Main St",
+    description:
+      "Request to rezone from R-2 to MU-3 for mixed-use development. Applicant proposes 120-unit residential with ground-floor retail.",
+    category: "zoning",
+    created_at: "2024-11-20T00:00:00Z",
+    updated_at: "2024-11-20T00:00:00Z",
+  },
+  {
+    id: "a3",
+    meeting_id: "m1",
+    item_number: 3,
+    title: "Site Plan Review: Riverside Commerce Park",
+    description:
+      "Review of site plan for 50,000 sqft commercial development at Riverside Dr and 5th Ave.",
+    category: "development",
+    created_at: "2024-11-20T00:00:00Z",
+    updated_at: "2024-11-20T00:00:00Z",
+  },
+  {
+    id: "a4",
+    meeting_id: "m1",
+    item_number: 4,
+    title: "Public Comment Period",
+    description: null,
+    category: "procedural",
+    created_at: "2024-11-20T00:00:00Z",
+    updated_at: "2024-11-20T00:00:00Z",
+  },
+  {
+    id: "a5",
+    meeting_id: "m1",
+    item_number: 5,
+    title: "Adjournment",
+    description: null,
+    category: "procedural",
+    created_at: "2024-11-20T00:00:00Z",
+    updated_at: "2024-11-20T00:00:00Z",
+  },
+  {
+    id: "a6",
+    meeting_id: "m3",
+    item_number: 1,
+    title: "Approval of Minutes",
+    description: "Approval of minutes from November 26, 2024 meeting",
+    category: "procedural",
+    created_at: "2024-12-01T00:00:00Z",
+    updated_at: "2024-12-01T00:00:00Z",
+  },
+  {
+    id: "a7",
+    meeting_id: "m3",
+    item_number: 2,
+    title: "Land Use Change: Niwot Rural Area",
+    description:
+      "Consideration of land use designation change from Agricultural to Rural Residential for 45-acre parcel.",
+    category: "land-use",
+    created_at: "2024-12-01T00:00:00Z",
+    updated_at: "2024-12-01T00:00:00Z",
+  },
+];
+
+export const meetingDocuments: MeetingDocument[] = [
+  {
+    id: "d1",
+    meeting_id: "m1",
+    title: "Staff Report - 1234 Main St Rezoning",
+    document_type: "staff_report",
+    url: "https://example.com/doc1.pdf",
+    created_at: "2024-11-25T00:00:00Z",
+    updated_at: "2024-11-25T00:00:00Z",
+  },
+  {
+    id: "d2",
+    meeting_id: "m1",
+    title: "Site Plan - Riverside Commerce Park",
+    document_type: "site_plan",
+    url: "https://example.com/doc2.pdf",
+    created_at: "2024-11-25T00:00:00Z",
+    updated_at: "2024-11-25T00:00:00Z",
+  },
+];
+
+export const rundownSheets: RundownSheet[] = [
+  {
+    id: "r1",
+    meeting_id: "m1",
+    summary:
+      "Key meeting focused on a significant rezoning request at 1234 Main St that would allow mixed-use development. The site plan for Riverside Commerce Park was also reviewed. Both items drew considerable public interest.",
+    key_items: [
+      {
+        title: "1234 Main St Rezoning",
+        description:
+          "Major rezoning from R-2 to MU-3 for 120-unit mixed-use. Staff recommends approval with conditions. Notable public opposition from adjacent neighborhood.",
+        category: "zoning",
+        priority: "high",
+      },
+      {
+        title: "Riverside Commerce Park",
+        description:
+          "50,000 sqft commercial site plan. Traffic study shows acceptable LOS. Landscaping plan meets code requirements.",
+        category: "development",
+        priority: "medium",
+      },
+    ],
+    generated_at: "2024-12-04T10:00:00Z",
+    created_at: "2024-12-04T10:00:00Z",
+    updated_at: "2024-12-04T10:00:00Z",
+  },
+  {
+    id: "r2",
+    meeting_id: "m3",
+    summary:
+      "Routine meeting with one significant land use change application for the Niwot rural area. The proposal would affect 45 acres of currently agricultural land.",
+    key_items: [
+      {
+        title: "Niwot Rural Area Land Use Change",
+        description:
+          "45-acre agricultural to rural residential conversion. Water rights and access road concerns raised by neighbors.",
+        category: "land-use",
+        priority: "high",
+      },
+    ],
+    generated_at: "2024-12-11T10:00:00Z",
+    created_at: "2024-12-11T10:00:00Z",
+    updated_at: "2024-12-11T10:00:00Z",
+  },
+];
