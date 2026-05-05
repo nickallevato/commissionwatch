@@ -33,42 +33,14 @@ jobs:
         working-directory: ${{ matrix.workspace }}
         run: npm test
 
-  notify-tracker:
+  notify-failure:
     needs: lint-and-test
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch failed job logs
+      - name: Notify Tracker QA on failure
         run: |
-          LOG_FILE="/tmp/ci-error.log"
-          echo "=== CI Run Logs ===" > "$LOG_FILE"
-          echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$LOG_FILE"
-          echo "Commit: ${{ github.sha }}" >> "$LOG_FILE"
-          echo "" >> "$LOG_FILE"
-          curl -s -H "Authorization: token ${{ github.token }}" \
-            "${{ github.api_url }}/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
-            | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-jobs = data if isinstance(data, list) else data.get('jobs', data.get('workflow_jobs', []))
-for job in jobs:
-    name = job.get('name', 'unknown')
-    status = job.get('status', 'unknown')
-    conclusion = job.get('conclusion', 'unknown')
-    if conclusion in ('failure', 'cancelled', None):
-        print(f'--- Job: {name} (status={status}, conclusion={conclusion}) ---')
-        for step in job.get('steps', []):
-            sname = step.get('name', '')
-            sconc = step.get('conclusion', '')
-            print(f'  Step: {sname} -> {sconc}')
-" >> "$LOG_FILE" 2>&1 || echo "Could not fetch detailed job logs" >> "$LOG_FILE"
-          echo "LOG_FILE=$LOG_FILE" >> "$GITHUB_ENV"
-
-      - name: Notify Tracker of CI failure
-        run: |
-          COMMIT_MSG=$(git log -1 --format=%s)
-          bash scripts/ci-notify-tracker.sh "lint-and-test (${{ github.event.pull_request && 'PR' || 'push' }})" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" "$COMMIT_MSG" "${LOG_FILE:-}"
-        env:
-          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
+          curl -s -X POST \
+            "https://tracker.example.invalid/api/routine-triggers/public/REDACTED-TRIGGER-TOKEN/fire" \
+            -H "Content-Type: application/json" \
+            -d "{\"project\":\"commissionwatch\",\"repo\":\"your-org/commissionwatch\",\"ref\":\"${{ github.ref }}\",\"sha\":\"${{ github.sha }}\",\"run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
