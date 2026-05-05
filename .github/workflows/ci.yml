@@ -38,12 +38,28 @@ jobs:
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - name: Notify Tracker QA on failure
+      - uses: actions/checkout@v4
+
+      - name: Notify Tracker of CI failure
+        env:
+          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
         run: |
-          echo "Firing Tracker routine trigger..."
+          COMMIT_MSG=$(git log -1 --format=%s)
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Creating Tracker issue..."
+          PAYLOAD=$(python3 -c "
+          import json, sys
+          print(json.dumps({
+              'title': 'CI FAILURE: ' + sys.argv[1] + ' - ' + sys.argv[2],
+              'description': '## CI Failure\n\n**Job:** lint-and-test\n**Commit:** ' + sys.argv[3] + '\n**Run:** ' + sys.argv[4],
+              'priority': 'critical',
+              'status': 'todo',
+              'projectId': 'REDACTED-PROJECT-ID',
+              'assigneeAgentId': 'REDACTED-AGENT-ID'
+          }))" "$COMMIT_MSG" "$SHORT_SHA" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
           RESPONSE=$(curl -sS -w "\nHTTP_STATUS:%{http_code}" -X POST \
-            "https://tracker.example.invalid/api/routine-triggers/public/REDACTED-TRIGGER-TOKEN/fire" \
+            "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
+            -H "Authorization: Bearer ${TRACKER_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"project\":\"commissionwatch\",\"repo\":\"your-org/commissionwatch\",\"ref\":\"${{ github.ref }}\",\"sha\":\"${{ github.sha }}\",\"run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}")
+            -d "$PAYLOAD")
           echo "$RESPONSE"
-          echo "Done."
