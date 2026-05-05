@@ -19,15 +19,56 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ matrix.service }}
-        run: npm ci
+        shell: bash
+        run: |
+          set -o pipefail
+          npm ci 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Lint
         working-directory: ${{ matrix.service }}
-        run: npm run lint --if-present
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint --if-present 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Test
         working-directory: ${{ matrix.service }}
-        run: npm test --if-present
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test --if-present 2>&1 | tee -a /tmp/ci-output.txt
+
+      - name: Notify Tracker of CI failure
+        if: failure()
+        env:
+          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
+        run: |
+          COMMIT_MSG=$(git log -1 --format=%s)
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Creating Tracker issue for ${{ matrix.service }} CI failure..."
+          PAYLOAD=$(python3 -c "
+          import json, sys, os
+          error_log = ''
+          if os.path.exists('/tmp/ci-output.txt'):
+              error_log = open('/tmp/ci-output.txt').read()
+              if len(error_log) > 5000:
+                  error_log = '...(truncated)\n' + error_log[-5000:]
+          else:
+              error_log = 'No output captured'
+          print(json.dumps({
+              'title': 'CI FAILURE: ' + sys.argv[1] + ' - ' + sys.argv[2],
+              'description': '## CI Failure\n\n**Job:** ' + sys.argv[5] + ' ci\n**Commit:** ' + sys.argv[3] + '\n\n## Error Log\n\n\`\`\`\n' + error_log + '\n\`\`\`',
+              'priority': 'critical',
+              'status': 'todo',
+              'projectId': 'REDACTED-PROJECT-ID',
+              'assigneeAgentId': 'REDACTED-AGENT-ID'
+          }))" "$COMMIT_MSG" "$SHORT_SHA" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" "${{ matrix.service }}")
+          RESPONSE=$(curl -sS -w "\nHTTP_STATUS:%{http_code}" -X POST \
+            "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
+            -H "Authorization: Bearer ${TRACKER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          echo "$RESPONSE"
 
   build-and-push:
     needs: ci
@@ -35,16 +76,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify Docker available
-        run: docker info > /dev/null 2>&1 || (echo "ERROR: Docker not available on runner" && exit 1)
-
       - name: Setup SSH key
         run: |
-          set -e
-          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            echo "ERROR: SSH_PRIVATE_KEY secret is not configured"
-            exit 1
-          fi
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
@@ -52,50 +85,54 @@ jobs:
 
       - name: Open SSH tunnel to registry
         run: |
-          set -e
           ssh -fN -o StrictHostKeyChecking=accept-new \
             -L 5000:127.0.0.1:5000 \
             ubuntu@44.225.151.59
-          sleep 2
-          curl -sf http://localhost:5000/v2/ > /dev/null || echo "WARNING: Registry not reachable via tunnel (may still work for push)"
 
       - name: Build and push backend
+        shell: bash
         run: |
-          set -e
-          docker build -t localhost:5000/commissionwatch-backend:${{ github.sha }} \
-                       -t localhost:5000/commissionwatch-backend:latest \
-                       ./backend
-          docker push localhost:5000/commissionwatch-backend:${{ github.sha }}
-          docker push localhost:5000/commissionwatch-backend:latest
+          set -o pipefail
+          {
+            docker build -t localhost:5000/commissionwatch-backend:${{ github.sha }} \
+                         -t localhost:5000/commissionwatch-backend:latest \
+                         ./backend
+            docker push localhost:5000/commissionwatch-backend:${{ github.sha }}
+            docker push localhost:5000/commissionwatch-backend:latest
+          } 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Build and push frontend
+        shell: bash
         run: |
-          set -e
-          docker build -t localhost:5000/commissionwatch-frontend:${{ github.sha }} \
-                       -t localhost:5000/commissionwatch-frontend:latest \
-                       ./frontend
-          docker push localhost:5000/commissionwatch-frontend:${{ github.sha }}
-          docker push localhost:5000/commissionwatch-frontend:latest
+          set -o pipefail
+          {
+            docker build -t localhost:5000/commissionwatch-frontend:${{ github.sha }} \
+                         -t localhost:5000/commissionwatch-frontend:latest \
+                         ./frontend
+            docker push localhost:5000/commissionwatch-frontend:${{ github.sha }}
+            docker push localhost:5000/commissionwatch-frontend:latest
+          } 2>&1 | tee -a /tmp/ci-output.txt
 
-  notify-failure:
-    needs: [ci, build-and-push]
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Notify Tracker of CI failure
+      - name: Notify Tracker of build failure
+        if: failure()
         env:
           TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
         run: |
           COMMIT_MSG=$(git log -1 --format=%s)
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "Creating Tracker issue..."
+          echo "Creating Tracker issue for build failure..."
           PAYLOAD=$(python3 -c "
-          import json, sys
+          import json, sys, os
+          error_log = ''
+          if os.path.exists('/tmp/ci-output.txt'):
+              error_log = open('/tmp/ci-output.txt').read()
+              if len(error_log) > 5000:
+                  error_log = '...(truncated)\n' + error_log[-5000:]
+          else:
+              error_log = 'No output captured'
           print(json.dumps({
               'title': 'CI FAILURE: ' + sys.argv[1] + ' - ' + sys.argv[2],
-              'description': '## CI Failure\n\n**Job:** deploy\n**Commit:** ' + sys.argv[3] + '\n**Run:** ' + sys.argv[4],
+              'description': '## CI Failure\n\n**Job:** build-and-push\n**Commit:** ' + sys.argv[3] + '\n\n## Error Log\n\n\`\`\`\n' + error_log + '\n\`\`\`',
               'priority': 'critical',
               'status': 'todo',
               'projectId': 'REDACTED-PROJECT-ID',

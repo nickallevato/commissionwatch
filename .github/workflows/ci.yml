@@ -23,40 +23,50 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ matrix.workspace }}
-        run: npm ci
+        shell: bash
+        run: |
+          set -o pipefail
+          npm ci 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Lint
         working-directory: ${{ matrix.workspace }}
-        run: npm run lint
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Test
         working-directory: ${{ matrix.workspace }}
-        run: npm test
-
-  notify-failure:
-    needs: lint-and-test
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Notify Tracker of CI failure
+        if: failure()
         env:
           TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
         run: |
           COMMIT_MSG=$(git log -1 --format=%s)
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "Creating Tracker issue..."
+          echo "Creating Tracker issue for ${{ matrix.workspace }} CI failure..."
           PAYLOAD=$(python3 -c "
-          import json, sys
+          import json, sys, os
+          error_log = ''
+          if os.path.exists('/tmp/ci-output.txt'):
+              error_log = open('/tmp/ci-output.txt').read()
+              if len(error_log) > 5000:
+                  error_log = '...(truncated)\n' + error_log[-5000:]
+          else:
+              error_log = 'No output captured'
           print(json.dumps({
               'title': 'CI FAILURE: ' + sys.argv[1] + ' - ' + sys.argv[2],
-              'description': '## CI Failure\n\n**Job:** lint-and-test\n**Commit:** ' + sys.argv[3] + '\n**Run:** ' + sys.argv[4],
+              'description': '## CI Failure\n\n**Job:** ' + sys.argv[5] + ' lint-and-test\n**Commit:** ' + sys.argv[3] + '\n\n## Error Log\n\n\`\`\`\n' + error_log + '\n\`\`\`',
               'priority': 'critical',
               'status': 'todo',
               'projectId': 'REDACTED-PROJECT-ID',
               'assigneeAgentId': 'REDACTED-AGENT-ID'
-          }))" "$COMMIT_MSG" "$SHORT_SHA" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          }))" "$COMMIT_MSG" "$SHORT_SHA" "${{ github.sha }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" "${{ matrix.workspace }}")
           RESPONSE=$(curl -sS -w "\nHTTP_STATUS:%{http_code}" -X POST \
             "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
             -H "Authorization: Bearer ${TRACKER_API_KEY}" \

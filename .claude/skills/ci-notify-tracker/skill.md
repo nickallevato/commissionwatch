@@ -4,73 +4,83 @@ Set up CI/CD pipelines to automatically create Tracker issues when builds fail. 
 
 ## The Pattern
 
-Use the Tracker public routine trigger endpoint. No auth, no scripts, no dependencies — just a single inline `curl` in the CI workflow. The routine handles ticket creation server-side (project assignment, QA agent assignment, priority, log attachment).
+Each CI job captures its step output to `/tmp/ci-output.txt` using `tee`, then on failure posts the actual error log content directly to Tracker via the issues API. The notify step is inline within each job (not a separate job) so it has access to the captured output.
 
-## Endpoint
+## Key Details
 
-```
-POST https://tracker.example.invalid/api/routine-triggers/public/REDACTED-TRIGGER-TOKEN/fire
-```
-
-## Payload
-
-```json
-{
-  "project": "<project-name>",
-  "repo": "<org>/<repo>",
-  "ref": "<git-ref>",
-  "sha": "<commit-sha>",
-  "run_url": "<ci-run-url>"
-}
-```
+- **API Endpoint:** `POST https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues`
+- **Auth:** `Bearer $TRACKER_API_KEY` (stored as CI secret)
+- **Project ID:** `REDACTED-PROJECT-ID`
+- **Assignee (QA Agent):** `REDACTED-AGENT-ID`
+- **Priority:** critical
+- **Status:** todo
 
 ## Workflow Integration
 
-Add a job that runs `if: failure()` after the main CI jobs:
+Add `| tee -a /tmp/ci-output.txt` to each build/test step (with `set -o pipefail`), then add an `if: failure()` step at the end of the job:
 
 ```yaml
-notify-failure:
-  needs: [<main-job-names>]
-  if: failure()
-  runs-on: ubuntu-latest
-  steps:
-    - name: Notify Tracker QA on failure
-      run: |
-        curl -s -X POST \
-          "https://tracker.example.invalid/api/routine-triggers/public/REDACTED-TRIGGER-TOKEN/fire" \
-          -H "Content-Type: application/json" \
-          -d "{\"project\":\"<project-name>\",\"repo\":\"<org>/<repo>\",\"ref\":\"${{ github.ref }}\",\"sha\":\"${{ github.sha }}\",\"run_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
-```
+- name: Install dependencies
+  shell: bash
+  run: |
+    set -o pipefail
+    npm ci 2>&1 | tee -a /tmp/ci-output.txt
 
-Replace `<project-name>` and `<org>/<repo>` with the actual values (e.g. `commissionwatch`, `your-org/commissionwatch`).
+- name: Lint
+  shell: bash
+  run: |
+    set -o pipefail
+    npm run lint 2>&1 | tee -a /tmp/ci-output.txt
+
+- name: Test
+  shell: bash
+  run: |
+    set -o pipefail
+    npm test 2>&1 | tee -a /tmp/ci-output.txt
+
+- name: Notify Tracker of CI failure
+  if: failure()
+  env:
+    TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
+  run: |
+    COMMIT_MSG=$(git log -1 --format=%s)
+    SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+    PAYLOAD=$(python3 -c "
+    import json, sys, os
+    error_log = ''
+    if os.path.exists('/tmp/ci-output.txt'):
+        error_log = open('/tmp/ci-output.txt').read()
+        if len(error_log) > 5000:
+            error_log = '...(truncated)\n' + error_log[-5000:]
+    else:
+        error_log = 'No output captured'
+    print(json.dumps({
+        'title': 'CI FAILURE: ' + sys.argv[1] + ' - ' + sys.argv[2],
+        'description': '## CI Failure\n\n**Job:** <job-name>\n**Commit:** ' + sys.argv[3] + '\n\n## Error Log\n\n\`\`\`\n' + error_log + '\n\`\`\`',
+        'priority': 'critical',
+        'status': 'todo',
+        'projectId': 'REDACTED-PROJECT-ID',
+        'assigneeAgentId': 'REDACTED-AGENT-ID'
+    }))" "$COMMIT_MSG" "$SHORT_SHA" "${{ github.sha }}")
+    curl -sS -w "\nHTTP_STATUS:%{http_code}" -X POST \
+      "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
+      -H "Authorization: Bearer ${TRACKER_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD"
+```
 
 ## Why This Approach
 
-Previous iterations used a custom bash script (`scripts/ci-notify-tracker.sh`) that called the Tracker issues API directly. This failed repeatedly due to:
-
-| Pitfall | What happened |
-|---|---|
-| `jq` dependency | Gitea runner image didn't have it — silent 0s failure |
-| `printf` for JSON | Special chars in logs/commit messages broke the payload |
-| `python3 json.dump` | Added complexity, still fragile in CI environments |
-| `curl -o /dev/stderr 2>&1` | Merged response body into HTTP status code variable |
-| Secrets configuration | `TRACKER_API_KEY` needed in each CI platform separately |
-| Checkout step | Needed just to access the script file |
-
-The public routine trigger avoids all of these: no auth, no scripts, no checkout, no JSON escaping issues. The routine handles ticket creation server-side with correct project, assignee, priority, and log attachment.
+- **Inline notify step** within each job avoids cross-job log fetching (which is unreliable on Gitea)
+- **`tee -a`** captures all step output to a file while still showing it in CI logs
+- **`set -o pipefail`** ensures steps still fail properly despite the pipe to tee
+- **`python3 json.dumps`** safely handles special characters in logs and commit messages
+- **5000 char truncation** prevents oversized API payloads
+- **No `jq` dependency** — the Gitea runner image doesn't have it
 
 ## Setup Checklist
 
-1. Add the `notify-failure` job to each CI workflow (`.github/workflows/` and/or `.gitea/workflows/`)
-2. Set `needs` to depend on all jobs that should trigger notification on failure
-3. Set `if: failure()`
-4. Replace `project` and `repo` in the payload with your values
-5. No secrets or additional configuration needed
-
-## Adapting for a New Project
-
-Copy the workflow snippet above and change two values:
-- `"project":"<your-project>"` — the Tracker project name
-- `"repo":"<org>/<repo>"` — the git repo identifier
-
-Everything else (the trigger URL, GitHub context variables) stays the same.
+1. Add `TRACKER_API_KEY` as a CI secret
+2. Add `| tee -a /tmp/ci-output.txt` with `set -o pipefail` to each build/test step
+3. Add the `if: failure()` notify step at the end of each job
+4. Replace `<job-name>` in the description template with the actual job name
