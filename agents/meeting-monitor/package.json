@@ -1,0 +1,27 @@
+{
+  "name": "commissionwatch-meeting-monitor",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "dev": "tsx src/index.ts",
+    "lint": "eslint --ext .ts src/",
+    "test": "vitest run",
+    "scrape": "tsx src/index.ts scrape --target bozeman"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "knex": "^3.2.10",
+    "pg": "^8.20.0",
+    "playwright": "^1.52.0",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.1.3"
+  }
+}
