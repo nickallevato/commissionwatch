@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [],
-    "deny": ["Bash(*)", "Edit(*)", "Write(*)", "WebFetch(*)", "WebSearch(*)"]
-  },
-  "description": "CommissionWatch agent workspace — zero-permission by default. Agents must request explicit approval for all tool use."
-}
