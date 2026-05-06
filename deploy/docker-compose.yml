@@ -1,3 +1,5 @@
+name: commissionwatch
+
 services:
   backend:
     image: ${IMAGE_BACKEND}
