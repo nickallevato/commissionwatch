@@ -65,6 +65,7 @@ export function AnomalyCard({ anomaly, meetingId }: Props) {
             <p className="text-sm text-gray-400 mt-1">{anomaly.description}</p>
           )}
           <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+            <span>Source: {anomaly.source}</span>
             <span>
               {new Date(anomaly.created_at).toLocaleDateString("en-US", {
                 month: "short",

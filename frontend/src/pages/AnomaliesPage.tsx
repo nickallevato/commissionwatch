@@ -18,7 +18,7 @@ export function AnomaliesPage() {
   const [flagType, setFlagType] = useState("");
   const [severity, setSeverity] = useState("");
 
-  const { data: anomalies, isLoading, isError, error } = useAnomalies({
+  const { data: anomalies, isLoading } = useAnomalies({
     flag_type: flagType || undefined,
     severity: severity || undefined,
   });
@@ -75,10 +75,6 @@ export function AnomaliesPage() {
               className="h-20 rounded-lg bg-gray-800 animate-pulse"
             />
           ))}
-        </div>
-      ) : isError ? (
-        <div className="text-center py-12 text-red-400">
-          Failed to load anomalies{error instanceof Error ? `: ${error.message}` : "."}
         </div>
       ) : anomalies && anomalies.length > 0 ? (
         <div className="space-y-3">

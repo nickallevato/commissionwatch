@@ -1,10 +1,14 @@
 import { Link } from "react-router-dom";
 import { useMeetings } from "@/hooks/useMeetings";
+import { useAnomalies } from "@/hooks/useAnomalies";
 import { StatusBadge } from "@/components/StatusBadge";
+import { AnomalyCard } from "@/components/AnomalyCard";
 
 export function HomePage() {
   const { data: meetings, isLoading } = useMeetings();
+  const { data: anomalies } = useAnomalies();
   const recent = meetings?.slice(0, 6) ?? [];
+  const recentAnomalies = anomalies?.slice(0, 5) ?? [];
 
   return (
     <div>
@@ -62,6 +66,31 @@ export function HomePage() {
       {!isLoading && recent.length === 0 && (
         <div className="text-center py-12 text-gray-500">
           No meetings found.
+        </div>
+      )}
+
+      {recentAnomalies.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-100">
+              Recent Anomalies
+            </h3>
+            <Link
+              to="/anomalies"
+              className="text-sm text-accent-400 hover:text-accent-300"
+            >
+              View all
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {recentAnomalies.map((anomaly) => (
+              <AnomalyCard
+                key={anomaly.id}
+                anomaly={anomaly}
+                meetingId={anomaly.meeting_id}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>

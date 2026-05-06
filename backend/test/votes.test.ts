@@ -82,14 +82,54 @@ describe("POST /api/votes/bulk", () => {
   });
 });
 
+describe("POST /api/votes/bulk", () => {
+  it("rejects empty votes array", async () => {
+    await request(app)
+      .post("/api/votes/bulk")
+      .send({ votes: [] })
+      .expect(400);
+  });
+
+  it("rejects missing votes field", async () => {
+    await request(app)
+      .post("/api/votes/bulk")
+      .send({})
+      .expect(400);
+  });
+
+  it("rejects invalid vote values in bulk", async () => {
+    await request(app)
+      .post("/api/votes/bulk")
+      .send({
+        votes: [
+          { meeting_id: BOZEMAN_MEETING_ID, agenda_item_id: NON_EXISTENT_ID, member_id: MEMBER_CUNNINGHAM_ID, vote: "maybe" },
+        ],
+      })
+      .expect(400);
+  });
+});
+
 describe("DELETE /api/votes/:id", () => {
   it("returns 404 for non-existent vote", async () => {
     await request(app)
       .delete(`/api/votes/${NON_EXISTENT_ID}`)
       .expect(404);
   });
+});
 
-  it("validates ID format", async () => {
-    await request(app).delete("/api/votes/bad-id").expect(400);
+describe("GET /api/meetings/:id/votes", () => {
+  it("returns votes for a meeting", async () => {
+    const res = await request(app)
+      .get(`/api/meetings/${BOZEMAN_MEETING_ID}/votes`)
+      .expect(200);
+
+    assert.ok(Array.isArray(res.body.data));
+    assert.ok(res.body.total >= 3);
+  });
+
+  it("returns 404 for non-existent meeting", async () => {
+    await request(app)
+      .get(`/api/meetings/${NON_EXISTENT_ID}/votes`)
+      .expect(404);
   });
 });

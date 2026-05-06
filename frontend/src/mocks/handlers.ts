@@ -5,6 +5,9 @@ import {
   agendaItems,
   meetingDocuments,
   rundownSheets,
+  members,
+  votes,
+  anomalyFlags,
 } from "./data";
 
 export const handlers = [
@@ -63,7 +66,75 @@ export const handlers = [
     return HttpResponse.json(rundown);
   }),
 
+  http.get("/api/meetings/:id/votes", ({ params }) => {
+    const data = votes.filter((v) => v.meeting_id === params.id);
+    return HttpResponse.json({ data, total: data.length });
+  }),
+
+  http.get("/api/meetings/:id/anomalies", ({ params }) => {
+    const data = anomalyFlags.filter((a) => a.meeting_id === params.id);
+    return HttpResponse.json({ data, total: data.length });
+  }),
+
   http.get("/api/jurisdictions", () => {
     return HttpResponse.json(jurisdictions);
+  }),
+
+  http.get("/api/members", ({ request }) => {
+    const url = new URL(request.url);
+    const jurisdictionId = url.searchParams.get("jurisdiction_id");
+
+    let filtered = [...members];
+    if (jurisdictionId) {
+      filtered = filtered.filter((m) => m.jurisdiction_id === jurisdictionId);
+    }
+
+    return HttpResponse.json({ data: filtered, total: filtered.length });
+  }),
+
+  http.get("/api/members/:id", ({ params }) => {
+    const member = members.find((m) => m.id === params.id);
+    if (!member) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(member);
+  }),
+
+  http.get("/api/votes", ({ request }) => {
+    const url = new URL(request.url);
+    const meetingId = url.searchParams.get("meeting_id");
+    const agendaItemId = url.searchParams.get("agenda_item_id");
+    const memberId = url.searchParams.get("member_id");
+
+    let filtered = [...votes];
+    if (meetingId) filtered = filtered.filter((v) => v.meeting_id === meetingId);
+    if (agendaItemId) filtered = filtered.filter((v) => v.agenda_item_id === agendaItemId);
+    if (memberId) filtered = filtered.filter((v) => v.member_id === memberId);
+
+    return HttpResponse.json({ data: filtered, total: filtered.length });
+  }),
+
+  http.get("/api/votes/:id", ({ params }) => {
+    const vote = votes.find((v) => v.id === params.id);
+    if (!vote) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(vote);
+  }),
+
+  http.get("/api/anomalies", ({ request }) => {
+    const url = new URL(request.url);
+    const meetingId = url.searchParams.get("meeting_id");
+    const flagType = url.searchParams.get("flag_type");
+    const severity = url.searchParams.get("severity");
+
+    let filtered = [...anomalyFlags];
+    if (meetingId) filtered = filtered.filter((a) => a.meeting_id === meetingId);
+    if (flagType) filtered = filtered.filter((a) => a.flag_type === flagType);
+    if (severity) filtered = filtered.filter((a) => a.severity === severity);
+
+    return HttpResponse.json({ data: filtered, total: filtered.length });
+  }),
+
+  http.get("/api/anomalies/:id", ({ params }) => {
+    const anomaly = anomalyFlags.find((a) => a.id === params.id);
+    if (!anomaly) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(anomaly);
   }),
 ];

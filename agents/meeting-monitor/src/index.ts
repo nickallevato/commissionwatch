@@ -1,5 +1,6 @@
 import { scrape, ScrapeOptions } from './scraper/scraper';
 import { closeDb } from './db';
+import { config } from './config';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -23,6 +24,10 @@ async function main(): Promise<void> {
       for (const err of result.errors) {
         console.log(`  - ${err}`);
       }
+    }
+
+    if (result.inserted > 0 && !options.dryRun) {
+      await triggerAnomalyDetection();
     }
   } finally {
     await closeDb();
@@ -58,6 +63,27 @@ function parseArgs(args: string[]): ScrapeOptions {
   }
 
   return { target, limit, dryRun };
+}
+
+async function triggerAnomalyDetection(): Promise<void> {
+  const url = `${config.backendUrl}/api/anomalies/detect-batch`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      console.log(`\n--- Anomaly Detection ---`);
+      console.log(`Meetings scanned: ${data.meetings_scanned}`);
+      console.log(`Flags created:    ${data.flags_created}`);
+    } else {
+      console.warn(`Anomaly detection trigger returned ${res.status} — skipping`);
+    }
+  } catch (err) {
+    console.warn('Could not trigger anomaly detection (backend may be offline):', (err as Error).message);
+  }
 }
 
 main().catch((err) => {

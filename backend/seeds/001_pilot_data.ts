@@ -29,6 +29,8 @@ const MEMBERS = {
 };
 
 export async function seed(knex: Knex): Promise<void> {
+  await knex('notifications').del();
+  await knex('alert_subscriptions').del();
   await knex('votes').del();
   await knex('members').del();
   await knex('anomaly_flags').del();
