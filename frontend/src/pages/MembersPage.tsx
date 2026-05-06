@@ -6,7 +6,7 @@ import { MemberCard } from "@/components/MemberCard";
 export function MembersPage() {
   const [jurisdictionId, setJurisdictionId] = useState("");
   const { data: jurisdictions } = useJurisdictions();
-  const { data: members, isLoading } = useMembers({
+  const { data: members, isLoading, isError, error } = useMembers({
     jurisdiction_id: jurisdictionId || undefined,
   });
 
@@ -50,6 +50,10 @@ export function MembersPage() {
               className="h-24 rounded-xl bg-gray-800 animate-pulse"
             />
           ))}
+        </div>
+      ) : isError ? (
+        <div className="text-center py-12 text-red-400">
+          Failed to load officials{error instanceof Error ? `: ${error.message}` : "."}
         </div>
       ) : members && members.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
