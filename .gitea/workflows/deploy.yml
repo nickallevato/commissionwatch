@@ -3,6 +3,8 @@ name: Build and Push to legacy-platform
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   ci:
@@ -106,9 +108,7 @@ jobs:
 
   build-and-push:
     needs: ci
-    # Run on the host runner as user `daedalus` so we use daedalus's existing
-    # SSH key/known_hosts on ai2 — no need to inject SSH_PRIVATE_KEY into a
-    # container as root.
+    if: github.event_name == 'push'
     runs-on: ai2-daedalus
     steps:
       - uses: actions/checkout@v4
@@ -229,6 +229,7 @@ jobs:
 
   deploy-ai2:
     needs: build-and-push
+    if: github.event_name == 'push'
     runs-on: ai2-daedalus
     steps:
       - uses: actions/checkout@v4
