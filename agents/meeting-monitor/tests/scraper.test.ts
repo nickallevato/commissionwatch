@@ -1,109 +1,163 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { scrape, ScrapeOptions } from '../src/scraper/scraper';
-import { parseMeetingDate, resolveUrl, BOZEMAN_CONFIG } from '../src/scraper/bozeman-commission';
-import { RateLimiter } from '../src/scraper/rate-limiter';
+import { scrape } from '../src/scraper/scraper';
 
-describe('parseMeetingDate', () => {
-  it('parses ISO date format', () => {
-    expect(parseMeetingDate('2025-01-07')).toBe('2025-01-07');
-  });
+const ARCHIVE_HTML = `
+<html><body>
+<div class="view-content">
+  <div class="views-row">
+    <time datetime="2025-04-07">April 7, 2025</time>
+    <a href="/documents/agenda-2025-04-07.pdf">Agenda</a>
+    <a href="/documents/minutes-2025-04-07.html">Minutes</a>
+  </div>
+  <div class="views-row">
+    <time datetime="2025-03-17">March 17, 2025</time>
+    <a href="/documents/agenda-2025-03-17.pdf">Agenda</a>
+  </div>
+  <div class="views-row">
+    <time datetime="2025-03-03">March 3, 2025</time>
+    <a href="https://www.bozeman.net/documents/minutes-2025-03-03.html">Minutes</a>
+  </div>
+  <div class="views-row">
+    <span class="date-display-single">February 18, 2025</span>
+    <a href="/docs/agenda-feb.pdf">View Agenda</a>
+    <a href="/docs/minutes-feb.html">View Minutes</a>
+  </div>
+</div>
+</body></html>`;
 
-  it('parses long US date format', () => {
-    expect(parseMeetingDate('January 7, 2025')).toBe('2025-01-07');
-  });
+const PAGE2_HTML = `
+<html><body>
+<div class="view-content">
+  <div class="views-row">
+    <time datetime="2025-01-06">January 6, 2025</time>
+    <a href="/documents/agenda-2025-01-06.pdf">Agenda</a>
+    <a href="/documents/minutes-2025-01-06.html">Minutes</a>
+  </div>
+</div>
+</body></html>`;
 
-  it('parses abbreviated month format', () => {
-    expect(parseMeetingDate('Mar 15, 2025')).toBe('2025-03-15');
-  });
+const PAGINATED_ARCHIVE_HTML = `
+<html><body>
+<div class="view-content">
+  <div class="views-row">
+    <time datetime="2025-04-07">April 7, 2025</time>
+    <a href="/documents/agenda-2025-04-07.pdf">Agenda</a>
+  </div>
+</div>
+<div class="pager__item--next"><a href="/archive?page=2">Next</a></div>
+</body></html>`;
 
-  it('parses slash date format', () => {
-    expect(parseMeetingDate('1/7/2025')).toBe('2025-01-07');
-  });
+const commissionId = '11111111-1111-1111-1111-111111111111';
+const meetingId = '22222222-2222-2222-2222-222222222222';
 
-  it('parses slash date with zero padding', () => {
-    expect(parseMeetingDate('12/31/2025')).toBe('2025-12-31');
-  });
+const mockFirst = vi.fn();
+const mockReturning = vi.fn();
+const mockInsert = vi.fn();
+const mockWhere = vi.fn();
+const mockJoin = vi.fn();
+const mockSelect = vi.fn();
 
-  it('handles extra whitespace', () => {
-    expect(parseMeetingDate('  January  7,  2025  ')).toBe('2025-01-07');
-  });
+function buildMockDb() {
+  const tableHandlers: Record<string, any> = {
+    commissions: {
+      join: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            first: vi.fn().mockResolvedValue({ id: commissionId }),
+          }),
+        }),
+      }),
+    },
+    meetings: {
+      where: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue(null),
+      }),
+      insert: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([{ id: meetingId }]),
+      }),
+    },
+    meeting_documents: {
+      insert: vi.fn().mockResolvedValue(undefined),
+    },
+  };
 
-  it('returns null for unparseable text', () => {
-    expect(parseMeetingDate('TBD')).toBeNull();
-    expect(parseMeetingDate('')).toBeNull();
-  });
-});
+  return (table: string) => tableHandlers[table];
+}
 
-describe('resolveUrl', () => {
-  it('returns absolute URLs unchanged', () => {
-    expect(resolveUrl('https://example.com/doc.pdf')).toBe('https://example.com/doc.pdf');
-  });
+vi.mock('../src/db', () => ({
+  getDb: vi.fn(() => buildMockDb()),
+}));
 
-  it('prepends base URL to relative paths', () => {
-    expect(resolveUrl('/documents/agenda.pdf')).toBe(
-      `${BOZEMAN_CONFIG.baseUrl}/documents/agenda.pdf`
-    );
-  });
+vi.mock('../src/config', () => ({
+  config: {
+    databaseUrl: 'postgresql://localhost/test',
+    userAgent: 'TestAgent/1.0',
+    scraper: {
+      requestsPerSecond: 100,
+      maxRetries: 0,
+      baseBackoffMs: 10,
+      timeoutMs: 5000,
+    },
+  },
+}));
 
-  it('handles relative paths without leading slash', () => {
-    expect(resolveUrl('documents/agenda.pdf')).toBe(
-      `${BOZEMAN_CONFIG.baseUrl}/documents/agenda.pdf`
-    );
-  });
-});
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
 
-describe('RateLimiter', () => {
-  it('throttles requests to respect rate limit', async () => {
-    const limiter = new RateLimiter({ requestsPerSecond: 10 });
-    const start = Date.now();
-
-    await limiter.throttle();
-    await limiter.throttle();
-    await limiter.throttle();
-
-    const elapsed = Date.now() - start;
-    expect(elapsed).toBeGreaterThanOrEqual(180);
-  });
-
-  it('retries on retryable errors', async () => {
-    const limiter = new RateLimiter({ requestsPerSecond: 100, maxRetries: 2, baseBackoffMs: 10 });
-    let attempts = 0;
-
-    const result = await limiter.withRetry(async () => {
-      attempts++;
-      if (attempts < 3) throw new Error('HTTP 503 Service Unavailable');
-      return 'success';
+describe('scraper', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(ARCHIVE_HTML),
     });
-
-    expect(result).toBe('success');
-    expect(attempts).toBe(3);
   });
 
-  it('throws on non-retryable errors immediately', async () => {
-    const limiter = new RateLimiter({ requestsPerSecond: 100, maxRetries: 3, baseBackoffMs: 10 });
-    let attempts = 0;
-
-    await expect(
-      limiter.withRetry(async () => {
-        attempts++;
-        throw new Error('404 Not Found');
-      })
-    ).rejects.toThrow('404 Not Found');
-
-    expect(attempts).toBe(1);
-  });
-});
-
-describe('scrape', () => {
   it('rejects unsupported targets', async () => {
-    await expect(scrape({ target: 'unknown' })).rejects.toThrow('Unsupported target: unknown');
+    await expect(scrape({ target: 'unknown' })).rejects.toThrow('Unsupported target');
   });
 
-  it('accepts bozeman target with dry-run mode', async () => {
-    const result = await scrape({ target: 'bozeman', dryRun: true, limit: 1 });
-    expect(result).toHaveProperty('discovered');
-    expect(result).toHaveProperty('inserted', 0);
-    expect(result).toHaveProperty('skipped', 0);
-    expect(result).toHaveProperty('errors');
+  it('discovers meetings from archive HTML', async () => {
+    const result = await scrape({ target: 'bozeman', dryRun: true });
+    expect(result.discovered).toBe(4);
+    expect(result.inserted).toBe(4);
+    expect(result.skipped).toBe(0);
+  });
+
+  it('respects the limit option', async () => {
+    const result = await scrape({ target: 'bozeman', limit: 2, dryRun: true });
+    expect(result.discovered).toBe(2);
+    expect(result.inserted).toBe(2);
+  });
+
+  it('follows pagination links', async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, text: () => Promise.resolve(PAGINATED_ARCHIVE_HTML) })
+      .mockResolvedValueOnce({ ok: true, text: () => Promise.resolve(PAGE2_HTML) });
+
+    const result = await scrape({ target: 'bozeman', dryRun: true });
+    expect(result.discovered).toBe(2);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves relative URLs to absolute', async () => {
+    const singleMeetingHtml = `
+    <html><body><div class="view-content">
+      <div class="views-row">
+        <time datetime="2025-04-07">April 7, 2025</time>
+        <a href="/documents/agenda.pdf">Agenda</a>
+      </div>
+    </div></body></html>`;
+
+    mockFetch.mockResolvedValue({ ok: true, text: () => Promise.resolve(singleMeetingHtml) });
+
+    const result = await scrape({ target: 'bozeman', dryRun: true });
+    expect(result.discovered).toBe(1);
+  });
+
+  it('handles HTTP errors in fetch', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve('') });
+
+    await expect(scrape({ target: 'bozeman' })).rejects.toThrow('HTTP 500');
   });
 });

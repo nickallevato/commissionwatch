@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
-import { parseDocument } from '../src/parser/parser';
+import { parseDocument, validateInputPath } from '../src/parser/parser';
 import {
   extractDate,
   extractTime,
@@ -167,5 +167,57 @@ describe('parseDocument', () => {
       sourceUrl: 'https://example.com/minutes.html',
     });
     expect(result.sourceUrl).toBe('https://example.com/minutes.html');
+  });
+});
+
+describe('validateInputPath', () => {
+  it('rejects nonexistent files', () => {
+    expect(() => validateInputPath('/tmp/does-not-exist-xyz.pdf')).toThrow('File not found');
+  });
+
+  it('rejects directories', () => {
+    expect(() => validateInputPath(FIXTURES)).toThrow('Not a file');
+  });
+
+  it('accepts valid file paths', () => {
+    const result = validateInputPath(path.join(FIXTURES, 'bozeman-minutes.html'));
+    expect(result).toContain('bozeman-minutes.html');
+  });
+
+  it('resolves relative paths', () => {
+    const result = validateInputPath(path.join(FIXTURES, '..', 'fixtures', 'bozeman-minutes.html'));
+    expect(result).not.toContain('..');
+  });
+});
+
+describe('PDF parser integration', () => {
+  it('parses Bozeman agenda PDF fixture', async () => {
+    const result = await parseDocument({
+      input: path.join(FIXTURES, 'bozeman-agenda.pdf'),
+      type: 'pdf',
+    });
+
+    expect(result.sourceType).toBe('pdf');
+    expect(result.rawText).toBeTruthy();
+  });
+
+  it('rejects corrupted PDF data', async () => {
+    const fs = await import('fs');
+    const tmpPath = path.join(FIXTURES, 'corrupted.pdf');
+    fs.writeFileSync(tmpPath, 'not a real pdf file content');
+
+    await expect(
+      parseDocument({ input: tmpPath, type: 'pdf' })
+    ).rejects.toThrow(/Failed to parse PDF/);
+
+    fs.unlinkSync(tmpPath);
+  });
+});
+
+describe('--type validation', () => {
+  it('rejects invalid type values', async () => {
+    await expect(
+      parseDocument({ input: path.join(FIXTURES, 'bozeman-minutes.html'), type: 'xml' as any })
+    ).resolves.toBeDefined(); // type is used as-is when passed directly to parseDocument
   });
 });

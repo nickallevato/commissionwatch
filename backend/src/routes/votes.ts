@@ -36,6 +36,7 @@ router.get("/", async (req: Request<unknown, unknown, unknown, VotesQuery>, res,
     const offset = Math.max(parseInt(rawOffset || "0", 10) || 0, 0);
 
     const query = db("votes");
+
     if (meeting_id) query.where({ meeting_id });
     if (agenda_item_id) query.where({ agenda_item_id });
     if (member_id) query.where({ member_id });
@@ -55,92 +56,57 @@ router.get("/", async (req: Request<unknown, unknown, unknown, VotesQuery>, res,
   }
 });
 
-router.get("/:id", async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    if (!UUID_RE.test(id)) throw badRequest("Invalid vote ID format");
-
-    const vote = await db("votes").where({ id }).first();
-    if (!vote) {
-      res.status(404).json({ error: "Vote not found", statusCode: 404 });
-      return;
-    }
-
-    res.json(vote);
-  } catch (err) {
-    next(err);
-  }
-});
-
-interface CreateVoteBody {
-  meeting_id: string;
-  agenda_item_id: string;
-  member_id: string;
-  vote: string;
-}
-
-router.post("/", async (req: Request<unknown, unknown, CreateVoteBody>, res, next) => {
+router.post("/", async (req, res, next) => {
   try {
     const { meeting_id, agenda_item_id, member_id, vote } = req.body;
 
     if (!meeting_id || !UUID_RE.test(meeting_id))
       throw badRequest("Valid meeting_id is required");
-    if (!agenda_item_id || !UUID_RE.test(agenda_item_id))
-      throw badRequest("Valid agenda_item_id is required");
     if (!member_id || !UUID_RE.test(member_id))
       throw badRequest("Valid member_id is required");
+    if (agenda_item_id && !UUID_RE.test(agenda_item_id))
+      throw badRequest("Invalid agenda_item_id format");
     if (!vote || !VALID_VOTES.includes(vote))
       throw badRequest("vote must be one of: yes, no, abstain, absent");
 
-    const [meeting, agendaItem, member] = await Promise.all([
-      db("meetings").where({ id: meeting_id }).first(),
-      db("agenda_items").where({ id: agenda_item_id }).first(),
-      db("members").where({ id: member_id }).first(),
-    ]);
-
-    if (!meeting) throw badRequest("Meeting not found");
-    if (!agendaItem) throw badRequest("Agenda item not found");
-    if (!member) throw badRequest("Member not found");
-
-    const [record] = await db("votes")
-      .insert({ meeting_id, agenda_item_id, member_id, vote })
+    const [created] = await db("votes")
+      .insert({ meeting_id, agenda_item_id: agenda_item_id || null, member_id, vote })
       .returning("*");
 
-    res.status(201).json(record);
+    res.status(201).json(created);
   } catch (err) {
     next(err);
   }
 });
 
-router.post("/bulk", async (req: Request<unknown, unknown, { votes: CreateVoteBody[] }>, res, next) => {
+router.post("/bulk", async (req, res, next) => {
   try {
     const { votes } = req.body;
+
     if (!Array.isArray(votes) || votes.length === 0)
-      throw badRequest("votes array is required");
-    if (votes.length > 100)
-      throw badRequest("Maximum 100 votes per bulk insert");
+      throw badRequest("votes must be a non-empty array");
 
     for (const v of votes) {
       if (!v.meeting_id || !UUID_RE.test(v.meeting_id))
-        throw badRequest("Valid meeting_id is required for each vote");
-      if (!v.agenda_item_id || !UUID_RE.test(v.agenda_item_id))
-        throw badRequest("Valid agenda_item_id is required for each vote");
+        throw badRequest("Each vote must have a valid meeting_id");
       if (!v.member_id || !UUID_RE.test(v.member_id))
-        throw badRequest("Valid member_id is required for each vote");
+        throw badRequest("Each vote must have a valid member_id");
+      if (v.agenda_item_id && !UUID_RE.test(v.agenda_item_id))
+        throw badRequest("Invalid agenda_item_id format in vote");
       if (!v.vote || !VALID_VOTES.includes(v.vote))
-        throw badRequest("Valid vote is required for each entry");
+        throw badRequest("Each vote must have a valid vote value (yes/no/abstain/absent)");
     }
 
-    const inserted = await db("votes")
-      .insert(votes.map(v => ({
-        meeting_id: v.meeting_id,
-        agenda_item_id: v.agenda_item_id,
-        member_id: v.member_id,
-        vote: v.vote,
-      })))
-      .returning("*");
+    const rows = votes.map((v: { meeting_id: string; agenda_item_id?: string; member_id: string; vote: string }) => ({
+      meeting_id: v.meeting_id,
+      agenda_item_id: v.agenda_item_id || null,
+      member_id: v.member_id,
+      vote: v.vote,
+    }));
 
-    res.status(201).json({ data: inserted, count: inserted.length });
+    const created = await db("votes").insert(rows).returning("*");
+
+    res.status(201).json({ data: created, total: created.length });
   } catch (err) {
     next(err);
   }

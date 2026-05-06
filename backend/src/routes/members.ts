@@ -29,6 +29,7 @@ router.get("/", async (req: Request<unknown, unknown, unknown, MembersQuery>, re
     const offset = Math.max(parseInt(rawOffset || "0", 10) || 0, 0);
 
     const query = db("members");
+
     if (jurisdiction_id) query.where({ jurisdiction_id });
 
     const countResult = await query.clone().count("* as total").first();
@@ -36,7 +37,7 @@ router.get("/", async (req: Request<unknown, unknown, unknown, MembersQuery>, re
 
     const data = await query
       .select("*")
-      .orderBy("name")
+      .orderBy("name", "asc")
       .limit(limit)
       .offset(offset);
 
@@ -63,28 +64,19 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-interface CreateMemberBody {
-  name: string;
-  title?: string;
-  jurisdiction_id: string;
-  term_start?: string;
-  term_end?: string;
-}
-
-router.post("/", async (req: Request<unknown, unknown, CreateMemberBody>, res, next) => {
+router.post("/", async (req, res, next) => {
   try {
-    const { name, title, jurisdiction_id, term_start, term_end } = req.body;
+    const { jurisdiction_id, name, title, term_start, term_end, email, party } = req.body;
 
-    if (!name || typeof name !== "string")
-      throw badRequest("name is required");
     if (!jurisdiction_id || !UUID_RE.test(jurisdiction_id))
       throw badRequest("Valid jurisdiction_id is required");
-
-    const jurisdiction = await db("jurisdictions").where({ id: jurisdiction_id }).first();
-    if (!jurisdiction) throw badRequest("Jurisdiction not found");
+    if (!name || typeof name !== "string")
+      throw badRequest("name is required");
+    if (!term_start)
+      throw badRequest("term_start is required");
 
     const [member] = await db("members")
-      .insert({ name, title, jurisdiction_id, term_start, term_end })
+      .insert({ jurisdiction_id, name, title, term_start, term_end, email, party })
       .returning("*");
 
     res.status(201).json(member);
@@ -98,37 +90,31 @@ router.put("/:id", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid member ID format");
 
-    const { name, title, jurisdiction_id, term_start, term_end } = req.body;
+    const { jurisdiction_id, name, title, term_start, term_end, email, party } = req.body;
 
     if (jurisdiction_id && !UUID_RE.test(jurisdiction_id))
       throw badRequest("Invalid jurisdiction_id format");
 
-    if (jurisdiction_id) {
-      const jurisdiction = await db("jurisdictions").where({ id: jurisdiction_id }).first();
-      if (!jurisdiction) throw badRequest("Jurisdiction not found");
-    }
-
-    const updates: Record<string, unknown> = {};
-    if (name !== undefined) updates.name = name;
-    if (title !== undefined) updates.title = title;
-    if (jurisdiction_id !== undefined) updates.jurisdiction_id = jurisdiction_id;
-    if (term_start !== undefined) updates.term_start = term_start;
-    if (term_end !== undefined) updates.term_end = term_end;
-
-    if (Object.keys(updates).length === 0)
-      throw badRequest("No fields to update");
-
-    const [member] = await db("members")
+    const [updated] = await db("members")
       .where({ id })
-      .update({ ...updates, updated_at: db.fn.now() })
+      .update({
+        ...(jurisdiction_id && { jurisdiction_id }),
+        ...(name && { name }),
+        ...(title !== undefined && { title }),
+        ...(term_start && { term_start }),
+        ...(term_end !== undefined && { term_end }),
+        ...(email !== undefined && { email }),
+        ...(party !== undefined && { party }),
+        updated_at: db.fn.now(),
+      })
       .returning("*");
 
-    if (!member) {
+    if (!updated) {
       res.status(404).json({ error: "Member not found", statusCode: 404 });
       return;
     }
 
-    res.json(member);
+    res.json(updated);
   } catch (err) {
     next(err);
   }

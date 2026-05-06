@@ -107,6 +107,7 @@ jobs:
           exit 0
 
   build-and-push:
+    if: github.event_name == 'push'
     needs: ci
     if: github.event_name == 'push'
     runs-on: ai2-daedalus
@@ -228,6 +229,7 @@ jobs:
           exit 0
 
   deploy-ai2:
+    if: github.event_name == 'push'
     needs: build-and-push
     if: github.event_name == 'push'
     runs-on: ai2-daedalus
@@ -252,8 +254,8 @@ jobs:
               || docker network create caddy_net
 
             cd deploy
-            docker compose -f docker-compose.yml -f docker-compose.ai2.yml up -d
-            docker compose -f docker-compose.yml -f docker-compose.ai2.yml ps
+            docker compose -p commissionwatch -f docker-compose.yml -f docker-compose.ai2.yml up -d
+            docker compose -p commissionwatch -f docker-compose.yml -f docker-compose.ai2.yml ps
           } 2>&1 | tee -a /tmp/ci-output.txt
 
       # ── Notify Tracker on failure ─────────────────────────────────────
