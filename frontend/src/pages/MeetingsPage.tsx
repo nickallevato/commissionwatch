@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useMeetings, useJurisdictions } from "@/hooks/useMeetings";
 import { useAnomalies } from "@/hooks/useAnomalies";
@@ -13,14 +13,17 @@ export function MeetingsPage() {
   const [dateTo, setDateTo] = useState("");
 
   const { data: jurisdictions } = useJurisdictions();
-  const { data: anomalies } = useAnomalies();
+  const { data: allAnomalies } = useAnomalies();
 
-  const anomalyByMeeting = new Map<string, AnomalyFlag[]>();
-  for (const a of anomalies ?? []) {
-    const list = anomalyByMeeting.get(a.meeting_id) ?? [];
-    list.push(a);
-    anomalyByMeeting.set(a.meeting_id, list);
-  }
+  const anomaliesByMeeting = useMemo(() => {
+    const map = new Map<string, AnomalyFlag[]>();
+    for (const a of allAnomalies ?? []) {
+      const list = map.get(a.meeting_id) ?? [];
+      list.push(a);
+      map.set(a.meeting_id, list);
+    }
+    return map;
+  }, [allAnomalies]);
 
   const { data: meetings, isLoading } = useMeetings({
     jurisdiction_id: jurisdictionId || undefined,
@@ -124,11 +127,18 @@ export function MeetingsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {(() => {
-                    const ma = anomalyByMeeting.get(meeting.id) ?? [];
-                    if (ma.length === 0) return null;
+                    const meetingAnomalies = anomaliesByMeeting.get(meeting.id);
+                    if (!meetingAnomalies?.length) return null;
                     const severityOrder: AnomalySeverity[] = ["critical", "high", "medium", "low"];
-                    const maxSev = severityOrder.find((s) => ma.some((a) => a.severity === s)) ?? "low";
-                    return <AnomalyBadge count={ma.length} maxSeverity={maxSev} />;
+                    const maxSeverity = severityOrder.find((s) =>
+                      meetingAnomalies.some((a) => a.severity === s),
+                    ) ?? "low";
+                    return (
+                      <AnomalyBadge
+                        count={meetingAnomalies.length}
+                        maxSeverity={maxSeverity}
+                      />
+                    );
                   })()}
                   <StatusBadge status={meeting.status} />
                 </div>

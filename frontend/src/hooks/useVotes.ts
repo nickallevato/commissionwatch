@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
-import type { Vote } from "@/types";
+import type { Vote, PaginatedResponse } from "@/types";
 
 export interface VotesFilter {
   meeting_id?: string;
@@ -19,10 +19,10 @@ function buildQuery(filters: VotesFilter): string {
 
 export function useMeetingVotes(meetingId: string) {
   return useQuery({
-    queryKey: ["meetings", meetingId, "votes"],
+    queryKey: ["votes", { meetingId }],
     queryFn: async () => {
-      const res = await fetchJson<{ data: Vote[]; total: number }>(
-        `/meetings/${meetingId}/votes`,
+      const res = await fetchJson<PaginatedResponse<Vote>>(
+        `/votes?meeting_id=${meetingId}`,
       );
       return res.data;
     },
@@ -34,7 +34,7 @@ export function useVotes(filters: VotesFilter = {}) {
   return useQuery({
     queryKey: ["votes", filters],
     queryFn: async () => {
-      const res = await fetchJson<{ data: Vote[]; total: number }>(
+      const res = await fetchJson<PaginatedResponse<Vote>>(
         `/votes${buildQuery(filters)}`,
       );
       return res.data;

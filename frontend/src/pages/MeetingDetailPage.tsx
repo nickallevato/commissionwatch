@@ -17,9 +17,9 @@ export function MeetingDetailPage() {
   const { data: meeting, isLoading: meetingLoading } = useMeeting(id!);
   const { data: agendaItems, isLoading: agendaLoading } = useAgendaItems(id!);
   const { data: rundown } = useRundown(id!);
-  const { data: votes } = useMeetingVotes(id!);
+  const { data: meetingVotes } = useMeetingVotes(id!);
   const { data: anomalies } = useMeetingAnomalies(id!);
-  const { data: members } = useMembers();
+  const { data: allMembers } = useMembers();
 
   if (meetingLoading) {
     return (
@@ -154,6 +154,20 @@ export function MeetingDetailPage() {
                         {item.category}
                       </span>
                     )}
+                    {(() => {
+                      const itemVotes = meetingVotes?.filter(
+                        (v) => v.agenda_item_id === item.id,
+                      );
+                      if (!itemVotes?.length) return null;
+                      return (
+                        <div className="mt-2">
+                          <VoteBreakdown
+                            votes={itemVotes}
+                            members={allMembers ?? []}
+                          />
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -163,17 +177,6 @@ export function MeetingDetailPage() {
           <p className="text-gray-500 text-sm">No agenda items available.</p>
         )}
       </div>
-
-      {votes && votes.length > 0 && (
-        <div className="mt-6">
-          <h3 className="text-lg font-semibold text-gray-100 mb-4">
-            Vote Breakdown
-          </h3>
-          <div className="rounded-lg border border-gray-800 bg-gray-800/50 p-4">
-            <VoteBreakdown votes={votes} members={members ?? []} />
-          </div>
-        </div>
-      )}
 
       {anomalies && anomalies.length > 0 && (
         <div className="mt-6">

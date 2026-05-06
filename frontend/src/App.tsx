@@ -5,6 +5,7 @@ import { MeetingsPage } from "./pages/MeetingsPage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
 import { MembersPage } from "./pages/MembersPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
+import { HubPage } from "./pages/HubPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 
 export function App() {
@@ -16,6 +17,7 @@ export function App() {
         <Route path="meetings/:id" element={<MeetingDetailPage />} />
         <Route path="members" element={<MembersPage />} />
         <Route path="anomalies" element={<AnomaliesPage />} />
+        <Route path="hub" element={<HubPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

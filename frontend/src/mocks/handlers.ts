@@ -112,29 +112,17 @@ export const handlers = [
     return HttpResponse.json({ data: filtered, total: filtered.length });
   }),
 
-  http.get("/api/votes/:id", ({ params }) => {
-    const vote = votes.find((v) => v.id === params.id);
-    if (!vote) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json(vote);
-  }),
-
   http.get("/api/anomalies", ({ request }) => {
     const url = new URL(request.url);
     const meetingId = url.searchParams.get("meeting_id");
-    const flagType = url.searchParams.get("flag_type");
     const severity = url.searchParams.get("severity");
+    const flagType = url.searchParams.get("flag_type");
 
     let filtered = [...anomalyFlags];
     if (meetingId) filtered = filtered.filter((a) => a.meeting_id === meetingId);
-    if (flagType) filtered = filtered.filter((a) => a.flag_type === flagType);
     if (severity) filtered = filtered.filter((a) => a.severity === severity);
+    if (flagType) filtered = filtered.filter((a) => a.flag_type === flagType);
 
     return HttpResponse.json({ data: filtered, total: filtered.length });
-  }),
-
-  http.get("/api/anomalies/:id", ({ params }) => {
-    const anomaly = anomalyFlags.find((a) => a.id === params.id);
-    if (!anomaly) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json(anomaly);
   }),
 ];

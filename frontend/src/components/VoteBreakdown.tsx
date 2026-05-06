@@ -2,17 +2,10 @@ import { useState } from "react";
 import type { Vote, Member, VoteValue } from "@/types";
 
 const voteStyles: Record<VoteValue, string> = {
-  yes: "bg-green-500/10 text-green-400 border-green-500/20",
-  no: "bg-red-500/10 text-red-400 border-red-500/20",
-  abstain: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  yea: "bg-green-500/10 text-green-400 border-green-500/20",
+  nay: "bg-red-500/10 text-red-400 border-red-500/20",
+  abstain: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
   absent: "bg-gray-500/10 text-gray-400 border-gray-500/20",
-};
-
-const voteLabels: Record<VoteValue, string> = {
-  yes: "Yea",
-  no: "Nay",
-  abstain: "Abstain",
-  absent: "Absent",
 };
 
 interface Props {
@@ -25,56 +18,56 @@ export function VoteBreakdown({ votes, members }: Props) {
 
   const memberMap = new Map(members.map((m) => [m.id, m]));
 
-  const counts: Record<VoteValue, number> = { yes: 0, no: 0, abstain: 0, absent: 0 };
+  const counts: Record<VoteValue, number> = { yea: 0, nay: 0, abstain: 0, absent: 0 };
   for (const v of votes) {
-    counts[v.vote]++;
+    counts[v.value]++;
   }
 
   return (
     <div>
-      <div className="flex items-center gap-2 flex-wrap">
-        {(Object.entries(counts) as [VoteValue, number][]).map(
-          ([value, count]) =>
-            count > 0 && (
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-sm text-gray-300 hover:text-gray-100"
+      >
+        <div className="flex gap-1.5">
+          {(Object.entries(counts) as [VoteValue, number][])
+            .filter(([, count]) => count > 0)
+            .map(([value, count]) => (
               <span
                 key={value}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${voteStyles[value]}`}
+                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${voteStyles[value]}`}
               >
-                {voteLabels[value]}: {count}
+                {count} {value}
               </span>
-            ),
-        )}
-        {votes.length > 0 && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-xs text-gray-400 hover:text-gray-200 ml-1"
-          >
-            {expanded ? "Hide details" : "Show details"}
-          </button>
-        )}
-      </div>
+            ))}
+        </div>
+        <svg
+          className={`w-4 h-4 transition-transform ${expanded ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
 
-      {expanded && votes.length > 0 && (
-        <div className="mt-3 space-y-1">
-          {votes.map((v) => {
-            const member = memberMap.get(v.member_id);
+      {expanded && (
+        <div className="mt-2 space-y-1">
+          {votes.map((vote) => {
+            const member = memberMap.get(vote.member_id);
             return (
               <div
-                key={v.id}
-                className="flex items-center justify-between text-sm px-3 py-1.5 rounded bg-gray-800/50"
+                key={vote.id}
+                className="flex items-center justify-between text-sm px-2 py-1 rounded bg-gray-800/50"
               >
                 <span className="text-gray-300">
-                  {member?.name ?? "Unknown Member"}
-                  {member?.title && (
-                    <span className="text-gray-500 ml-1">
-                      — {member.title}
-                    </span>
-                  )}
+                  {member?.name ?? "Unknown member"}
                 </span>
                 <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${voteStyles[v.vote]}`}
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${voteStyles[vote.value]}`}
                 >
-                  {voteLabels[v.vote]}
+                  {vote.value}
                 </span>
               </div>
             );

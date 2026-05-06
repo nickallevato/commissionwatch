@@ -6,7 +6,7 @@ import { AnomalyCard } from "@/components/AnomalyCard";
 
 export function HomePage() {
   const { data: meetings, isLoading } = useMeetings();
-  const { data: anomalies } = useAnomalies();
+  const { data: anomalies, isLoading: anomaliesLoading } = useAnomalies();
   const recent = meetings?.slice(0, 6) ?? [];
   const recentAnomalies = anomalies?.slice(0, 5) ?? [];
 
@@ -69,30 +69,45 @@ export function HomePage() {
         </div>
       )}
 
-      {recentAnomalies.length > 0 && (
-        <div className="mt-8">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-100">
-              Recent Anomalies
-            </h3>
-            <Link
-              to="/anomalies"
-              className="text-sm text-accent-400 hover:text-accent-300"
-            >
-              View all
-            </Link>
-          </div>
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-100">
+            Recent Anomalies
+          </h3>
+          <Link
+            to="/anomalies"
+            className="text-sm text-accent-400 hover:text-accent-300"
+          >
+            View all →
+          </Link>
+        </div>
+        {anomaliesLoading ? (
           <div className="space-y-3">
-            {recentAnomalies.map((anomaly) => (
-              <AnomalyCard
-                key={anomaly.id}
-                anomaly={anomaly}
-                meetingId={anomaly.meeting_id}
+            {[1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-20 rounded-lg bg-gray-800 animate-pulse"
               />
             ))}
           </div>
-        </div>
-      )}
+        ) : recentAnomalies.length > 0 ? (
+          <div className="space-y-3">
+            {recentAnomalies.map((anomaly) => (
+              <div key={anomaly.id}>
+                <AnomalyCard anomaly={anomaly} />
+                <Link
+                  to={`/meetings/${anomaly.meeting_id}`}
+                  className="text-xs text-accent-400 hover:text-accent-300 ml-8 mt-1 inline-block"
+                >
+                  View meeting →
+                </Link>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No anomalies detected.</p>
+        )}
+      </div>
     </div>
   );
 }
