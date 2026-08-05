@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/api";
-import type { AnomalyFlag, PaginatedResponse } from "@/types";
+import { fetchList } from "@/lib/api";
+import type { AnomalyFlag } from "@/types";
 
 export interface AnomaliesFilter {
   meeting_id?: string;
@@ -21,7 +21,7 @@ export function useMeetingAnomalies(meetingId: string) {
   return useQuery({
     queryKey: ["anomalies", { meetingId }],
     queryFn: async () => {
-      const res = await fetchJson<PaginatedResponse<AnomalyFlag>>(
+      const res = await fetchList<AnomalyFlag>(
         `/anomalies?meeting_id=${meetingId}`,
       );
       return res.data;
@@ -34,7 +34,7 @@ export function useAnomalies(filters: AnomaliesFilter = {}) {
   return useQuery({
     queryKey: ["anomalies", filters],
     queryFn: async () => {
-      const res = await fetchJson<PaginatedResponse<AnomalyFlag>>(
+      const res = await fetchList<AnomalyFlag>(
         `/anomalies${buildQuery(filters)}`,
       );
       return res.data;

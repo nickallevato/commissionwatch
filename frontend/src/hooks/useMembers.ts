@@ -1,15 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/api";
-import type { Member, PaginatedResponse } from "@/types";
+import { fetchList, fetchOne } from "@/lib/api";
+import type { Member } from "@/types";
 
 export function useMembers(jurisdictionId?: string) {
   const qs = jurisdictionId ? `?jurisdiction_id=${jurisdictionId}` : "";
   return useQuery({
     queryKey: ["members", { jurisdictionId }],
     queryFn: async () => {
-      const res = await fetchJson<PaginatedResponse<Member>>(
-        `/members${qs}`,
-      );
+      const res = await fetchList<Member>(`/members${qs}`);
       return res.data;
     },
   });
@@ -18,7 +16,7 @@ export function useMembers(jurisdictionId?: string) {
 export function useMember(id: string) {
   return useQuery({
     queryKey: ["members", id],
-    queryFn: () => fetchJson<Member>(`/members/${id}`),
+    queryFn: () => fetchOne<Member>(`/members/${id}`),
     enabled: !!id,
   });
 }

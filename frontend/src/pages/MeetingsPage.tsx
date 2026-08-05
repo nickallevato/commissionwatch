@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMeetings, useJurisdictions } from "@/hooks/useMeetings";
 import { useAnomalies } from "@/hooks/useAnomalies";
@@ -56,6 +56,30 @@ function datelineOf(meeting: Meeting): string {
     : "Jurisdiction unrecorded";
 }
 
+interface FilterFieldProps {
+  id: string;
+  label: string;
+  children: ReactNode;
+}
+
+/**
+ * One control in the filter strap, with a *visible* micro-label bound by
+ * `htmlFor`/`id`. Explicit association rather than a wrapping <label>: an
+ * `<input type="date">` renders no placeholder text, so the label is the only
+ * thing — for a screen reader and for a sighted reader alike — that says which
+ * end of the range a box is.
+ */
+function FilterField({ id, label, children }: FilterFieldProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <label htmlFor={id} className="label-sm">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
 export function MeetingsPage() {
   const [jurisdictionId, setJurisdictionId] = useState("");
   const [status, setStatus] = useState("");
@@ -102,9 +126,9 @@ export function MeetingsPage() {
       <div className="rule-hi mt-6" />
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-rule py-3">
-        <label className="flex items-center gap-2">
-          <span className="label-sm">Jurisdiction</span>
+        <FilterField id="meetings-jurisdiction" label="Jurisdiction">
           <select
+            id="meetings-jurisdiction"
             value={jurisdictionId}
             onChange={(e) => setJurisdictionId(e.target.value)}
             className={controlClass}
@@ -116,11 +140,11 @@ export function MeetingsPage() {
               </option>
             ))}
           </select>
-        </label>
+        </FilterField>
 
-        <label className="flex items-center gap-2">
-          <span className="label-sm">Status</span>
+        <FilterField id="meetings-status" label="Status">
           <select
+            id="meetings-status"
             value={status}
             onChange={(e) => setStatus(e.target.value)}
             className={controlClass}
@@ -130,27 +154,27 @@ export function MeetingsPage() {
             <option value="completed">Completed</option>
             <option value="cancelled">Cancelled</option>
           </select>
-        </label>
+        </FilterField>
 
-        <label className="flex items-center gap-2">
-          <span className="label-sm">From</span>
+        <FilterField id="meetings-date-from" label="From">
           <input
+            id="meetings-date-from"
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
             className={`${controlClass} figure`}
           />
-        </label>
+        </FilterField>
 
-        <label className="flex items-center gap-2">
-          <span className="label-sm">To</span>
+        <FilterField id="meetings-date-to" label="To">
           <input
+            id="meetings-date-to"
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             className={`${controlClass} figure`}
           />
-        </label>
+        </FilterField>
 
         {filtersActive && (
           <button

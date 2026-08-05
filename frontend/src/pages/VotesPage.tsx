@@ -1,8 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/api";
 import { useVotes } from "@/hooks/useVotes";
-import { useMeetings } from "@/hooks/useMeetings";
+import { agendaItemsQuery, useMeetings } from "@/hooks/useMeetings";
 import { useMembers } from "@/hooks/useMembers";
 import {
   VoteBreakdown,
@@ -82,10 +81,7 @@ export function VotesPage() {
   // actually has votes. The query keys match `useAgendaItems`, so a visit to a
   // meeting page reuses the same cache entry.
   const agendaItems = useQueries({
-    queries: meetingIds.map((id) => ({
-      queryKey: ["meetings", id, "agenda-items"],
-      queryFn: () => fetchJson<AgendaItem[]>(`/meetings/${id}/agenda-items`),
-    })),
+    queries: meetingIds.map(agendaItemsQuery),
     combine: combineAgendaItems,
   });
 

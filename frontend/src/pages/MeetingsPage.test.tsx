@@ -31,6 +31,42 @@ describe("MeetingsPage", () => {
     expect(screen.getByText("The calendar")).toBeInTheDocument();
   });
 
+  it("gives every filter control a visible, programmatic label", () => {
+    renderWithProviders(<MeetingsPage />);
+
+    // Reachable by accessible name — the only handle a screen reader has.
+    expect(screen.getByLabelText(/^jurisdiction$/i)).toHaveRole("combobox");
+    expect(screen.getByLabelText(/^status$/i)).toHaveRole("combobox");
+    expect(screen.getByLabelText(/^from$/i)).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText(/^to$/i)).toHaveAttribute("type", "date");
+  });
+
+  it("binds each filter label to its control by htmlFor/id, visibly", () => {
+    renderWithProviders(<MeetingsPage />);
+
+    for (const [text, controlId] of [
+      ["Jurisdiction", "meetings-jurisdiction"],
+      ["Status", "meetings-status"],
+      ["From", "meetings-date-from"],
+      ["To", "meetings-date-to"],
+    ]) {
+      const label = screen.getByText(text);
+      expect(label.tagName).toBe("LABEL");
+      expect(label).toHaveAttribute("for", controlId);
+      // Visible to everyone, in the established micro-label style — not sr-only.
+      expect(label).toHaveClass("label-sm");
+      expect(label).toBeVisible();
+    }
+  });
+
+  it("does not lean on a placeholder to name the date range", () => {
+    renderWithProviders(<MeetingsPage />);
+
+    // <input type="date"> renders no placeholder, so one would name nothing.
+    expect(screen.getByLabelText(/^from$/i)).not.toHaveAttribute("placeholder");
+    expect(screen.getByLabelText(/^to$/i)).not.toHaveAttribute("placeholder");
+  });
+
   it("renders one row per meeting, datelined and dated", async () => {
     renderWithProviders(<MeetingsPage />);
     const row = await screen.findByRole("article", {

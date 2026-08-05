@@ -2,6 +2,7 @@ import { http, HttpResponse } from "msw";
 import {
   meetings,
   jurisdictions,
+  commissions,
   agendaItems,
   meetingDocuments,
   rundownSheets,
@@ -24,6 +25,14 @@ function byCreatedAtAsc<T extends { created_at: string }>(a: T, b: T): number {
 /** Alphabetical — /jurisdictions and /members both `.orderBy("name")`. */
 function byName<T extends { name: string }>(a: T, b: T): number {
   return a.name.localeCompare(b.name);
+}
+
+/**
+ * Every collection route in backend/src/routes answers with `{ data, total }`.
+ * Not one of them returns a bare array, so neither does any handler here.
+ */
+function list<T>(data: T[]) {
+  return HttpResponse.json({ data, total: data.length });
 }
 
 export const handlers = [
@@ -55,27 +64,38 @@ export const handlers = [
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
     );
 
-    return HttpResponse.json(filtered);
+    return list(filtered);
   }),
 
+  // `GET /meetings/:id` spreads the row together with its agenda and documents.
   http.get("/api/meetings/:id", ({ params }) => {
     const meeting = meetings.find((m) => m.id === params.id);
     if (!meeting) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json(meeting);
+    return HttpResponse.json({
+      ...meeting,
+      agenda_items: agendaItems
+        .filter((a) => a.meeting_id === params.id)
+        .sort((a, b) => a.item_number - b.item_number),
+      documents: meetingDocuments
+        .filter((d) => d.meeting_id === params.id)
+        .sort(byCreatedAtAsc),
+    });
   }),
 
   http.get("/api/meetings/:id/agenda-items", ({ params }) => {
     const items = agendaItems
       .filter((a) => a.meeting_id === params.id)
       .sort((a, b) => a.item_number - b.item_number);
-    return HttpResponse.json(items);
+    return list(items);
   }),
 
+  // Newest first: `/documents` is `.orderBy("created_at", "desc")`, unlike the
+  // `documents` array embedded in `GET /meetings/:id`, which is ascending.
   http.get("/api/meetings/:id/documents", ({ params }) => {
     const docs = meetingDocuments
       .filter((d) => d.meeting_id === params.id)
-      .sort(byCreatedAtAsc);
-    return HttpResponse.json(docs);
+      .sort(byCreatedAtDesc);
+    return list(docs);
   }),
 
   http.get("/api/meetings/:id/rundown", ({ params }) => {
@@ -85,23 +105,29 @@ export const handlers = [
   }),
 
   http.get("/api/meetings/:id/votes", ({ params }) => {
-    const data = votes
-      .filter((v) => v.meeting_id === params.id)
-      .sort(byCreatedAtAsc);
-    return HttpResponse.json({ data, total: data.length });
+    return list(
+      votes.filter((v) => v.meeting_id === params.id).sort(byCreatedAtAsc),
+    );
   }),
 
   http.get("/api/meetings/:id/anomalies", ({ params }) => {
-    const data = anomalyFlags
-      .filter((a) => a.meeting_id === params.id)
-      .sort(byCreatedAtAsc);
-    return HttpResponse.json({ data, total: data.length });
+    return list(
+      anomalyFlags
+        .filter((a) => a.meeting_id === params.id)
+        .sort(byCreatedAtAsc),
+    );
   }),
 
   http.get("/api/jurisdictions", () => {
-    // The route is `.orderBy("jurisdictions.name")`, not insertion order.
-    const data = [...jurisdictions].sort(byName);
-    return HttpResponse.json(data);
+    // The route is `.orderBy("jurisdictions.name")`, not insertion order, and
+    // it embeds each jurisdiction's commissions.
+    const data = [...jurisdictions].sort(byName).map((j) => ({
+      ...j,
+      commissions: commissions
+        .filter((c) => c.jurisdiction_id === j.id)
+        .sort(byName),
+    }));
+    return list(data);
   }),
 
   http.get("/api/members", ({ request }) => {
@@ -116,7 +142,7 @@ export const handlers = [
     // The route is `.orderBy("name", "asc")`, not insertion order.
     filtered.sort(byName);
 
-    return HttpResponse.json({ data: filtered, total: filtered.length });
+    return list(filtered);
   }),
 
   http.get("/api/members/:id", ({ params }) => {
@@ -138,7 +164,7 @@ export const handlers = [
 
     filtered.sort(byCreatedAtDesc);
 
-    return HttpResponse.json({ data: filtered, total: filtered.length });
+    return list(filtered);
   }),
 
   http.get("/api/anomalies", ({ request }) => {
@@ -154,6 +180,6 @@ export const handlers = [
 
     filtered.sort(byCreatedAtDesc);
 
-    return HttpResponse.json({ data: filtered, total: filtered.length });
+    return list(filtered);
   }),
 ];

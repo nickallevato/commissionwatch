@@ -178,4 +178,44 @@ router.get("/:id/anomalies", async (req, res, next) => {
   }
 });
 
+router.get("/:id/agenda-items", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
+
+    const meeting = await db("meetings").where({ id }).first();
+    if (!meeting) {
+      res.status(404).json({ error: "Meeting not found", statusCode: 404 });
+      return;
+    }
+
+    const agendaItems = await db("agenda_items")
+      .where({ meeting_id: id })
+      .orderBy("item_number", "asc");
+    res.json({ data: agendaItems, total: agendaItems.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/:id/documents", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
+
+    const meeting = await db("meetings").where({ id }).first();
+    if (!meeting) {
+      res.status(404).json({ error: "Meeting not found", statusCode: 404 });
+      return;
+    }
+
+    const documents = await db("meeting_documents")
+      .where({ meeting_id: id })
+      .orderBy("created_at", "desc");
+    res.json({ data: documents, total: documents.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

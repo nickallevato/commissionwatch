@@ -236,12 +236,13 @@ const flags: AnomalyFlag[] = [
 
 function useFrontPageFixtures() {
   server.use(
-    http.get("/api/meetings", () => HttpResponse.json(meetings)),
-    http.get("/api/meetings/:id/agenda-items", ({ params }) =>
-      HttpResponse.json(
-        agendaItems.filter((item) => item.meeting_id === params.id),
-      ),
+    http.get("/api/meetings", () =>
+      HttpResponse.json({ data: meetings, total: meetings.length }),
     ),
+    http.get("/api/meetings/:id/agenda-items", ({ params }) => {
+      const data = agendaItems.filter((item) => item.meeting_id === params.id);
+      return HttpResponse.json({ data, total: data.length });
+    }),
     http.get("/api/votes", ({ request }) => {
       const meetingId = new URL(request.url).searchParams.get("meeting_id");
       const data = votes.filter((v) => v.meeting_id === meetingId);
@@ -477,7 +478,11 @@ describe("HomePage front page", () => {
     });
 
     it("says so when no completed meeting is on the record", async () => {
-      server.use(http.get("/api/meetings", () => HttpResponse.json([])));
+      server.use(
+        http.get("/api/meetings", () =>
+          HttpResponse.json({ data: [], total: 0 }),
+        ),
+      );
       renderWithProviders(<HomePage />);
 
       expect(
