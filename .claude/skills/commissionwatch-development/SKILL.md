@@ -96,11 +96,42 @@ transparency project that silently stops ingesting is worse than one that says
 ## Scraping conduct
 
 All targeted material is public record. Fetch politely: a real browser at low rate, an honest user
-agent naming the project, aggressive caching, and no re-fetching of unchanged documents. Respect
-`robots.txt`.
+agent naming the project, aggressive caching, and no re-fetching of unchanged documents.
 
-If a source requires fingerprint spoofing or proxy rotation to access, **stop and ask the
-operator.** Do not build it. The fallback is a public-records request for the same documents.
+### robots.txt
+
+Respect it by default. There is one deliberate exception, decided by the operator on 2026-08-04.
+
+Where a **vendor's** blanket `Disallow: /` would block access to records a government custodian is
+legally obliged to publish, we fetch anyway, under strict conditions:
+
+- one request every few seconds at most, never concurrent
+- an honest user agent naming the project, never a spoofed browser identity
+- aggressive caching; an unchanged document is never re-fetched
+- the practice is **disclosed publicly on the Methodology page**, not hidden
+- the public-records-request route is offered alongside it, so anyone can obtain the same
+  documents through the statutory channel
+
+The reasoning: a blanket vendor robots file is written to manage search-engine crawlers, not to
+withdraw public records from public access, and the custodian's legal obligation does not transfer
+to its hosting vendor's convention. This applies to **vendor** files. A custodian who directly asks
+us to stop is a different matter — we stop.
+
+A transparency project must not carry a published policy it knowingly breaks. If this exception
+ever stops being disclosed on the Methodology page, the exception itself must end.
+
+### The hard line
+
+If a source requires **fingerprint spoofing, TLS/JA3 manipulation, CAPTCHA solving, or proxy
+rotation**, that is not politeness with an asterisk — it is defeating an access control. **Stop and
+ask the operator. Do not build it.** The finding is "not accessible by acceptable means" and the
+answer is a public-records request.
+
+Worked example: `bozemanmt.gov` returns a blanket Akamai 403 to real Chromium from a residential
+IP — a wall, not bot detection. That door stays closed. The records were found instead at
+`bozeman.granicus.com`, reachable with no evasion at all, by following the DNS CNAME chain rather
+than attacking the HTTP endpoint. **When HTTP probing dead-ends, look at DNS** — it is how this
+project found 520 meetings spanning 2013–2026.
 
 ## Architecture facts
 
