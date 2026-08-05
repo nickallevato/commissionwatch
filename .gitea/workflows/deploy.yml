@@ -179,39 +179,19 @@ jobs:
               | docker login --username AWS --password-stdin "$ECR_REGISTRY"
           } 2>&1 | tee -a /tmp/ci-output.txt
 
-      # ECR does not create a repository on first push the way Docker Hub does.
-      # Pushing to one that does not exist fails with `403 Forbidden` on the
-      # blob HEAD request — not a 404, and not anything mentioning the
-      # repository — which reads as a credentials problem and sends you looking
-      # in the wrong place entirely.
-      - name: Ensure ECR repositories exist
-        shell: bash
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: |
-          set -uo pipefail
-          {
-            for repo in commissionwatch-backend commissionwatch-frontend; do
-              if aws ecr describe-repositories --repository-names "$repo" \
-                   --region "$AWS_REGION" >/dev/null 2>&1; then
-                echo "ECR repository exists: $repo"
-                continue
-              fi
-              echo "ECR repository missing, creating: $repo"
-              if ! aws ecr create-repository \
-                     --repository-name "$repo" \
-                     --region "$AWS_REGION" \
-                     --image-scanning-configuration scanOnPush=true >/dev/null; then
-                echo "Could not create $repo." >&2
-                echo "The CI credentials need ecr:CreateRepository, or an operator must run:" >&2
-                echo "  aws ecr create-repository --repository-name $repo --region $AWS_REGION" >&2
-                exit 1
-              fi
-              echo "Created $repo"
-            done
-          } 2>&1 | tee -a /tmp/ci-output.txt
-
+      # The `your-org/` prefix is REQUIRED and is not cosmetic. The CI user's
+      # inline policy grants push only on
+      #   arn:aws:ecr:us-west-2:123456789012:repository/your-org/commissionwatch-*
+      # so an unprefixed path is denied no matter what else is correct.
+      #
+      # Repositories are provisioned out of band on purpose: a build pipeline
+      # should push to known repositories, not create arbitrary ones, so these
+      # credentials deliberately lack ecr:CreateRepository.
+      #
+      # Both failure modes — wrong path and missing repository — surface as
+      # `403 Forbidden` on a blob HEAD request rather than a 404, and the
+      # message never names the repository. If a push 403s, check the image
+      # path and the repository's existence before suspecting the credentials.
       - name: Set up buildx for cross-architecture builds
         shell: bash
         run: |
@@ -228,8 +208,8 @@ jobs:
           set -o pipefail
           {
             docker buildx build --platform linux/arm64 --push \
-              -t "$ECR_REGISTRY/commissionwatch-backend:${{ github.sha }}" \
-              -t "$ECR_REGISTRY/commissionwatch-backend:latest" \
+              -t "$ECR_REGISTRY/your-org/commissionwatch-backend:${{ github.sha }}" \
+              -t "$ECR_REGISTRY/your-org/commissionwatch-backend:latest" \
               ./backend
           } 2>&1 | tee -a /tmp/ci-output.txt
 
@@ -239,8 +219,8 @@ jobs:
           set -o pipefail
           {
             docker buildx build --platform linux/arm64 --push \
-              -t "$ECR_REGISTRY/commissionwatch-frontend:${{ github.sha }}" \
-              -t "$ECR_REGISTRY/commissionwatch-frontend:latest" \
+              -t "$ECR_REGISTRY/your-org/commissionwatch-frontend:${{ github.sha }}" \
+              -t "$ECR_REGISTRY/your-org/commissionwatch-frontend:latest" \
               ./frontend
           } 2>&1 | tee -a /tmp/ci-output.txt
 
@@ -300,8 +280,8 @@ jobs:
             # and a rollback is just re-running an older commit.
             {
               printf '%s\n' "$DEPLOY_ENV_FILE_AWS"
-              printf 'IMAGE_BACKEND=%s/commissionwatch-backend:%s\n' "$ECR_REGISTRY" "${{ github.sha }}"
-              printf 'IMAGE_FRONTEND=%s/commissionwatch-frontend:%s\n' "$ECR_REGISTRY" "${{ github.sha }}"
+              printf 'IMAGE_BACKEND=%s/your-org/commissionwatch-backend:%s\n' "$ECR_REGISTRY" "${{ github.sha }}"
+              printf 'IMAGE_FRONTEND=%s/your-org/commissionwatch-frontend:%s\n' "$ECR_REGISTRY" "${{ github.sha }}"
             } > /tmp/commissionwatch.env
             scp $SSH_OPTS /tmp/commissionwatch.env "$DEPLOY_USER@$DEPLOY_HOST:$REMOTE_DIR/.env"
             rm -f /tmp/commissionwatch.env
