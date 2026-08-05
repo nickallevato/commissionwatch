@@ -24,11 +24,11 @@ describe('generateRundown', () => {
       const doc = makeParsedDoc({
         attendees: {
           value: [
-            { name: 'Terry Cunningham', title: 'Mayor', present: true },
-            { name: 'Jennifer Madgic', title: 'Deputy Mayor', present: true },
-            { name: 'Christopher Coburn', present: true },
+            { name: 'Avery Sample', title: 'Mayor', present: true },
+            { name: 'Jordan Placeholder', title: 'Deputy Mayor', present: true },
+            { name: 'Riley Fixture', present: true },
             { name: 'Emma Bode', present: false },
-            { name: 'Joey Morrison', present: false },
+            { name: 'Quinn Testcase', present: false },
           ],
           confidence: 'high',
         },
@@ -36,11 +36,11 @@ describe('generateRundown', () => {
 
       const rundown = generateRundown(doc, { meetingId: MEETING_ID });
       expect(rundown.keyItems.attendance.present).toEqual([
-        'Terry Cunningham',
-        'Jennifer Madgic',
-        'Christopher Coburn',
+        'Avery Sample',
+        'Jordan Placeholder',
+        'Riley Fixture',
       ]);
-      expect(rundown.keyItems.attendance.absent).toEqual(['Emma Bode', 'Joey Morrison']);
+      expect(rundown.keyItems.attendance.absent).toEqual(['Emma Bode', 'Quinn Testcase']);
       expect(rundown.keyItems.attendance.totalMembers).toBe(5);
       expect(rundown.keyItems.attendance.quorumMet).toBe(true);
     });
@@ -109,15 +109,15 @@ describe('generateRundown', () => {
           value: [
             {
               title: 'Approve budget',
-              mover: 'Cunningham',
-              seconder: 'Madgic',
+              mover: 'Sample',
+              seconder: 'Placeholder',
               result: 'passed',
               votes: [
-                { memberName: 'Cunningham', vote: 'yes' },
-                { memberName: 'Madgic', vote: 'yes' },
-                { memberName: 'Coburn', vote: 'yes' },
+                { memberName: 'Sample', vote: 'yes' },
+                { memberName: 'Placeholder', vote: 'yes' },
+                { memberName: 'Fixture', vote: 'yes' },
                 { memberName: 'Bode', vote: 'no' },
-                { memberName: 'Morrison', vote: 'abstain' },
+                { memberName: 'Testcase', vote: 'abstain' },
               ],
             },
           ],
@@ -129,8 +129,8 @@ describe('generateRundown', () => {
       expect(rundown.keyItems.votes).toHaveLength(1);
       const vote = rundown.keyItems.votes[0];
       expect(vote.motion).toBe('Approve budget');
-      expect(vote.mover).toBe('Cunningham');
-      expect(vote.seconder).toBe('Madgic');
+      expect(vote.mover).toBe('Sample');
+      expect(vote.seconder).toBe('Placeholder');
       expect(vote.result).toBe('passed');
       expect(vote.tally).toEqual({ yes: 3, no: 1, abstain: 1, absent: 0 });
     });
@@ -234,12 +234,12 @@ describe('generateRundown', () => {
             {
               title: 'Approve consent agenda',
               result: 'passed',
-              mover: 'Cunningham',
-              seconder: 'Madgic',
+              mover: 'Sample',
+              seconder: 'Placeholder',
               votes: [
-                { memberName: 'Cunningham', vote: 'yes' },
-                { memberName: 'Madgic', vote: 'yes' },
-                { memberName: 'Coburn', vote: 'yes' },
+                { memberName: 'Sample', vote: 'yes' },
+                { memberName: 'Placeholder', vote: 'yes' },
+                { memberName: 'Fixture', vote: 'yes' },
               ],
             },
           ],
@@ -257,11 +257,11 @@ describe('generateRundown', () => {
       const doc = makeParsedDoc({
         attendees: {
           value: [
-            { name: 'Terry Cunningham', title: 'Mayor', present: true },
-            { name: 'Jennifer Madgic', title: 'Deputy Mayor', present: true },
-            { name: 'Christopher Coburn', present: true },
+            { name: 'Avery Sample', title: 'Mayor', present: true },
+            { name: 'Jordan Placeholder', title: 'Deputy Mayor', present: true },
+            { name: 'Riley Fixture', present: true },
             { name: 'Emma Bode', present: true },
-            { name: 'Joey Morrison', present: true },
+            { name: 'Quinn Testcase', present: true },
           ],
           confidence: 'high',
         },
@@ -279,28 +279,28 @@ describe('generateRundown', () => {
               agendaItemNumber: 1,
               title: 'Approve consent agenda',
               result: 'passed',
-              mover: 'Madgic',
-              seconder: 'Coburn',
+              mover: 'Placeholder',
+              seconder: 'Fixture',
               votes: [
-                { memberName: 'Cunningham', vote: 'yes' },
-                { memberName: 'Madgic', vote: 'yes' },
-                { memberName: 'Coburn', vote: 'yes' },
+                { memberName: 'Sample', vote: 'yes' },
+                { memberName: 'Placeholder', vote: 'yes' },
+                { memberName: 'Fixture', vote: 'yes' },
                 { memberName: 'Bode', vote: 'yes' },
-                { memberName: 'Morrison', vote: 'yes' },
+                { memberName: 'Testcase', vote: 'yes' },
               ],
             },
             {
               agendaItemNumber: 2,
               title: 'Approve annexation ordinance 2145',
               result: 'passed',
-              mover: 'Cunningham',
-              seconder: 'Morrison',
+              mover: 'Sample',
+              seconder: 'Testcase',
               votes: [
-                { memberName: 'Cunningham', vote: 'yes' },
-                { memberName: 'Madgic', vote: 'yes' },
-                { memberName: 'Coburn', vote: 'yes' },
+                { memberName: 'Sample', vote: 'yes' },
+                { memberName: 'Placeholder', vote: 'yes' },
+                { memberName: 'Fixture', vote: 'yes' },
                 { memberName: 'Bode', vote: 'no' },
-                { memberName: 'Morrison', vote: 'yes' },
+                { memberName: 'Testcase', vote: 'yes' },
               ],
             },
           ],
@@ -308,7 +308,7 @@ describe('generateRundown', () => {
         },
         quotes: {
           value: [
-            { speaker: 'Terry Cunningham', text: 'This annexation benefits the community.', context: 'Agenda item 2' },
+            { speaker: 'Avery Sample', text: 'This annexation benefits the community.', context: 'Agenda item 2' },
           ],
           confidence: 'medium',
         },

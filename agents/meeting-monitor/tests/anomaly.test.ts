@@ -84,7 +84,7 @@ describe('detectClosedDoorVote', () => {
           {
             agendaItemNumber: 1,
             title: 'Executive Session Personnel',
-            votes: [{ memberName: 'Cunningham', vote: 'yes' }],
+            votes: [{ memberName: 'Sample', vote: 'yes' }],
           },
         ],
         confidence: 'high',
@@ -191,11 +191,11 @@ describe('detectQuorumIssue', () => {
     const doc = makeParsedDoc({
       attendees: {
         value: [
-          { name: 'Cunningham', present: true },
-          { name: 'Madgic', present: true },
-          { name: 'Coburn', present: false },
+          { name: 'Sample', present: true },
+          { name: 'Placeholder', present: true },
+          { name: 'Fixture', present: false },
           { name: 'Bode', present: false },
-          { name: 'Morrison', present: false },
+          { name: 'Testcase', present: false },
         ],
         confidence: 'high',
       },
@@ -211,11 +211,11 @@ describe('detectQuorumIssue', () => {
     const doc = makeParsedDoc({
       attendees: {
         value: [
-          { name: 'Cunningham', present: true },
-          { name: 'Madgic', present: true },
-          { name: 'Coburn', present: true },
+          { name: 'Sample', present: true },
+          { name: 'Placeholder', present: true },
+          { name: 'Fixture', present: true },
           { name: 'Bode', present: true },
-          { name: 'Morrison', present: true },
+          { name: 'Testcase', present: true },
         ],
         confidence: 'high',
       },
@@ -224,11 +224,11 @@ describe('detectQuorumIssue', () => {
           {
             title: 'Late vote',
             votes: [
-              { memberName: 'Cunningham', vote: 'yes' },
-              { memberName: 'Madgic', vote: 'yes' },
-              { memberName: 'Coburn', vote: 'absent' },
+              { memberName: 'Sample', vote: 'yes' },
+              { memberName: 'Placeholder', vote: 'yes' },
+              { memberName: 'Fixture', vote: 'absent' },
               { memberName: 'Bode', vote: 'absent' },
-              { memberName: 'Morrison', vote: 'absent' },
+              { memberName: 'Testcase', vote: 'absent' },
             ],
           },
         ],
@@ -245,11 +245,11 @@ describe('detectQuorumIssue', () => {
     const doc = makeParsedDoc({
       attendees: {
         value: [
-          { name: 'Cunningham', present: true },
-          { name: 'Madgic', present: true },
-          { name: 'Coburn', present: true },
+          { name: 'Sample', present: true },
+          { name: 'Placeholder', present: true },
+          { name: 'Fixture', present: true },
           { name: 'Bode', present: false },
-          { name: 'Morrison', present: false },
+          { name: 'Testcase', present: false },
         ],
         confidence: 'high',
       },
@@ -268,11 +268,11 @@ describe('detectUnanimousControversial', () => {
           {
             title: 'Ordinance 2145: Annexation of 45 acres',
             votes: [
-              { memberName: 'Cunningham', vote: 'yes' },
-              { memberName: 'Madgic', vote: 'yes' },
-              { memberName: 'Coburn', vote: 'yes' },
+              { memberName: 'Sample', vote: 'yes' },
+              { memberName: 'Placeholder', vote: 'yes' },
+              { memberName: 'Fixture', vote: 'yes' },
               { memberName: 'Bode', vote: 'yes' },
-              { memberName: 'Morrison', vote: 'yes' },
+              { memberName: 'Testcase', vote: 'yes' },
             ],
           },
         ],
@@ -294,11 +294,11 @@ describe('detectUnanimousControversial', () => {
           {
             title: 'Annexation ordinance',
             votes: [
-              { memberName: 'Cunningham', vote: 'yes' },
-              { memberName: 'Madgic', vote: 'yes' },
-              { memberName: 'Coburn', vote: 'no' },
+              { memberName: 'Sample', vote: 'yes' },
+              { memberName: 'Placeholder', vote: 'yes' },
+              { memberName: 'Fixture', vote: 'no' },
               { memberName: 'Bode', vote: 'yes' },
-              { memberName: 'Morrison', vote: 'yes' },
+              { memberName: 'Testcase', vote: 'yes' },
             ],
           },
         ],
@@ -317,9 +317,9 @@ describe('detectUnanimousControversial', () => {
           {
             title: 'Approve meeting minutes',
             votes: [
-              { memberName: 'Cunningham', vote: 'yes' },
-              { memberName: 'Madgic', vote: 'yes' },
-              { memberName: 'Coburn', vote: 'yes' },
+              { memberName: 'Sample', vote: 'yes' },
+              { memberName: 'Placeholder', vote: 'yes' },
+              { memberName: 'Fixture', vote: 'yes' },
             ],
           },
         ],
@@ -366,11 +366,11 @@ describe('detectAnomalies (integration)', () => {
       meetingDate: { value: '2025-01-07', confidence: 'high' },
       attendees: {
         value: [
-          { name: 'Terry Cunningham', title: 'Mayor', present: true },
-          { name: 'Jennifer Madgic', title: 'Deputy Mayor', present: true },
-          { name: 'Christopher Coburn', present: true },
+          { name: 'Avery Sample', title: 'Mayor', present: true },
+          { name: 'Jordan Placeholder', title: 'Deputy Mayor', present: true },
+          { name: 'Riley Fixture', present: true },
           { name: 'Emma Bode', present: true },
-          { name: 'Joey Morrison', present: true },
+          { name: 'Quinn Testcase', present: true },
         ],
         confidence: 'high',
       },
@@ -379,22 +379,22 @@ describe('detectAnomalies (integration)', () => {
           {
             title: 'Approve the Consent Agenda',
             votes: [
-              { memberName: 'Cunningham', vote: 'yes' },
-              { memberName: 'Madgic', vote: 'yes' },
-              { memberName: 'Coburn', vote: 'yes' },
+              { memberName: 'Sample', vote: 'yes' },
+              { memberName: 'Placeholder', vote: 'yes' },
+              { memberName: 'Fixture', vote: 'yes' },
               { memberName: 'Bode', vote: 'yes' },
-              { memberName: 'Morrison', vote: 'yes' },
+              { memberName: 'Testcase', vote: 'yes' },
             ],
             result: 'passed',
           },
           {
             title: 'Approve Ordinance 2145: Annexation of 45 acres at Baxter and Davis',
             votes: [
-              { memberName: 'Cunningham', vote: 'yes' },
-              { memberName: 'Madgic', vote: 'yes' },
-              { memberName: 'Coburn', vote: 'yes' },
+              { memberName: 'Sample', vote: 'yes' },
+              { memberName: 'Placeholder', vote: 'yes' },
+              { memberName: 'Fixture', vote: 'yes' },
               { memberName: 'Bode', vote: 'yes' },
-              { memberName: 'Morrison', vote: 'yes' },
+              { memberName: 'Testcase', vote: 'yes' },
             ],
             result: 'passed',
           },

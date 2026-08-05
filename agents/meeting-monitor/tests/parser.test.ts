@@ -62,16 +62,16 @@ describe('extractors', () => {
   describe('extractAttendees', () => {
     it('extracts from roll call section', () => {
       const text = `Roll Call
-Mayor Terry Cunningham - present
-Deputy Mayor Jennifer Madgic - present
-Commissioner Christopher Coburn - present
+Mayor Avery Sample - present
+Deputy Mayor Jordan Placeholder - present
+Commissioner Riley Fixture - present
 Commissioner Emma Bode - absent
 
 Agenda`;
       const result = extractAttendees(text);
       expect(result.confidence).toBe('high');
       expect(result.value.length).toBe(4);
-      expect(result.value[0].name).toContain('Cunningham');
+      expect(result.value[0].name).toContain('Sample');
       expect(result.value[0].present).toBe(true);
       expect(result.value[3].name).toContain('Bode');
       expect(result.value[3].present).toBe(false);
@@ -99,18 +99,18 @@ PUBLIC HEARING
 
   describe('extractMotions', () => {
     it('extracts motion with votes', () => {
-      const text = `Motion by Commissioner Coburn to approve the Consent Agenda.
+      const text = `Motion by Commissioner Fixture to approve the Consent Agenda.
 Second by Commissioner Bode.
-Cunningham - Aye
-Madgic - Aye
-Coburn - Aye
+Sample - Aye
+Placeholder - Aye
+Fixture - Aye
 Bode - Aye
-Morrison - Aye
+Testcase - Aye
 The motion passed unanimously.`;
       const result = extractMotions(text);
       expect(result.confidence).toBe('medium');
       expect(result.value.length).toBeGreaterThanOrEqual(1);
-      expect(result.value[0].mover).toBe('Coburn');
+      expect(result.value[0].mover).toBe('Fixture');
       expect(result.value[0].seconder).toBe('Bode');
       expect(result.value[0].result).toBe('passed');
       expect(result.value[0].votes.length).toBe(5);
