@@ -38,6 +38,16 @@ services:
       - edge
       - cw-internal
     mem_limit: 128m
+    # nginx resolves upstream hostnames once, at config-parse time, and exits if
+    # one does not resolve — it does not retry. Without this, `web` starts before
+    # `backend` exists in DNS and dies with:
+    #   [emerg] host not found in upstream "backend"
+    # It recovers only because restart: unless-stopped keeps trying, which is
+    # luck rather than design: observed on the first production deploy, where it
+    # crash-looped until the backend finished starting.
+    depends_on:
+      backend:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
       interval: 15s
