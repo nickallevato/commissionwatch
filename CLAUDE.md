@@ -5,10 +5,16 @@ Bozeman City Commission and Gallatin County, MT.
 
 ## Read this first
 
+**`docs/STATUS.md`** — what is actually true right now: the live deployment, the gaps, the known
+defects, the operational traps, and the ordered next steps. Read it before starting work.
+
 **`.claude/skills/commissionwatch-development/SKILL.md`** holds the development process and the
 project invariants. Invoke it before planning or implementing anything substantial. It covers the
 brainstorm → spec → plan → fan-out pipeline, the rules for parallel agents, and the constraints
 that make published output defensible.
+
+**Live:** `https://commissionwatch.bmux.sh` — deployed, healthy, and **empty**. Nothing ingests
+yet, so there are no public records on it. That is the top of the next-steps list.
 
 Current design of record:
 `docs/superpowers/specs/2026-08-04-commissionwatch-production-design.md`
