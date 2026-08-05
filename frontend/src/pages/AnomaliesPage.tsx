@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAnomalies } from "@/hooks/useAnomalies";
-import { AnomalyCard } from "@/components/AnomalyCard";
+import { AnomalyCard, flagTypeLabels } from "@/components/AnomalyCard";
 import type { AnomalySeverity, AnomalyFlagType } from "@/types";
 
 const severityOptions: AnomalySeverity[] = ["critical", "high", "medium", "low"];
-const flagTypeOptions: { value: AnomalyFlagType; label: string }[] = [
-  { value: "unanimous_streak", label: "Unanimous Streak" },
-  { value: "quorum_risk", label: "Quorum Risk" },
-  { value: "late_agenda_change", label: "Late Agenda Change" },
-  { value: "missing_minutes", label: "Missing Minutes" },
-  { value: "unusual_vote_pattern", label: "Unusual Vote Pattern" },
-  { value: "conflict_of_interest", label: "Conflict of Interest" },
+/** Every member of the `anomaly_flag_type` enum, in filter-menu order. */
+const flagTypeOptions: AnomalyFlagType[] = [
+  "emergency_session",
+  "closed_door_vote",
+  "last_minute_agenda_change",
+  "quorum_issue",
+  "unanimous_controversial",
+  "missing_minutes",
 ];
 
 export function AnomaliesPage() {
@@ -47,9 +48,9 @@ export function AnomaliesPage() {
           className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-accent-500 focus:border-accent-500"
         >
           <option value="">All Types</option>
-          {flagTypeOptions.map((ft) => (
-            <option key={ft.value} value={ft.value}>
-              {ft.label}
+          {flagTypeOptions.map((value) => (
+            <option key={value} value={value}>
+              {flagTypeLabels[value]}
             </option>
           ))}
         </select>

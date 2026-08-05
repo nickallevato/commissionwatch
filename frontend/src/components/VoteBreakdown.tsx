@@ -2,11 +2,14 @@ import { useState } from "react";
 import type { Vote, Member, VoteValue } from "@/types";
 
 const voteStyles: Record<VoteValue, string> = {
-  yea: "bg-green-500/10 text-green-400 border-green-500/20",
-  nay: "bg-red-500/10 text-red-400 border-red-500/20",
+  yes: "bg-green-500/10 text-green-400 border-green-500/20",
+  no: "bg-red-500/10 text-red-400 border-red-500/20",
   abstain: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
   absent: "bg-gray-500/10 text-gray-400 border-gray-500/20",
 };
+
+/** Every member of the `vote_value` enum, in tally display order. */
+const voteOrder: VoteValue[] = ["yes", "no", "abstain", "absent"];
 
 interface Props {
   votes: Vote[];
@@ -18,9 +21,9 @@ export function VoteBreakdown({ votes, members }: Props) {
 
   const memberMap = new Map(members.map((m) => [m.id, m]));
 
-  const counts: Record<VoteValue, number> = { yea: 0, nay: 0, abstain: 0, absent: 0 };
+  const counts: Record<VoteValue, number> = { yes: 0, no: 0, abstain: 0, absent: 0 };
   for (const v of votes) {
-    counts[v.value]++;
+    counts[v.vote]++;
   }
 
   return (
@@ -30,14 +33,14 @@ export function VoteBreakdown({ votes, members }: Props) {
         className="flex items-center gap-2 text-sm text-gray-300 hover:text-gray-100"
       >
         <div className="flex gap-1.5">
-          {(Object.entries(counts) as [VoteValue, number][])
-            .filter(([, count]) => count > 0)
-            .map(([value, count]) => (
+          {voteOrder
+            .filter((value) => counts[value] > 0)
+            .map((value) => (
               <span
                 key={value}
                 className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${voteStyles[value]}`}
               >
-                {count} {value}
+                {counts[value]} {value}
               </span>
             ))}
         </div>
@@ -65,9 +68,9 @@ export function VoteBreakdown({ votes, members }: Props) {
                   {member?.name ?? "Unknown member"}
                 </span>
                 <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${voteStyles[vote.value]}`}
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${voteStyles[vote.vote]}`}
                 >
-                  {vote.value}
+                  {vote.vote}
                 </span>
               </div>
             );

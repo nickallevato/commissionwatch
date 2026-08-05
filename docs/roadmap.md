@@ -1,6 +1,6 @@
 # CommissionWatch — Roadmap
 
-> Last updated: 2026-05-04
+> Last updated: 2026-08-04
 
 ## Overview
 
@@ -13,15 +13,23 @@ This roadmap outlines the implementation plan for CommissionWatch, an AI-powered
 | # | Deliverable | Description | Status |
 |---|---|---|---|
 | 1.1 | Repo setup + scaffolding | Public repo, monorepo structure, Docker Compose, CI | Done |
-| 1.2 | Public web dashboard (MVP) | Next.js app — landing page, jurisdiction browser, meeting rundown viewer, agent status overview. Dark mode, amber/gold accent, mobile-responsive. | Planned |
+| 1.2 | Public web dashboard (MVP) | React 18 + Vite single-page app — landing page, jurisdiction browser, meeting rundown viewer, agent status overview. Light editorial design, serif headlines, single red accent, mobile-responsive. | Planned |
 | 1.3 | Core agent orchestrator | Claude Code harness integration, zero-permission security model, explicit tool grants with tests | Done |
 | 1.4 | Meeting Monitor Agent | Scrape Bozeman city council agendas/minutes, parse PDF/HTML, generate quick rundown sheets, flag anomalies | Planned |
 | 1.5 | Data layer setup | PostgreSQL + pgvector schema, MinIO for document storage | Planned |
-| 1.6 | Docker Compose deployment | Full stack (backend, frontend, db, minio, worker) running via `docker compose up` | Done |
+| 1.6 | Docker Compose deployment | Full stack (backend, frontend, db, minio) running via `docker compose up` | Done |
 | 1.7 | AWS demo deployment | Single instance on AWS, DNS on Route53, <$20/mo target | Done |
 
 **Dashboard MVP details (1.2):**
-- Next.js with dark mode default, amber/gold accent color
+
+> Visual direction is defined by the approved
+> [production design spec](superpowers/specs/2026-08-04-commissionwatch-production-design.md).
+> That spec supersedes any earlier dark-mode description of this deliverable.
+
+- React 18 + Vite 5 + Tailwind, TypeScript throughout
+- Investigative/editorial look: light paper background, serif headlines, sans-serif for data,
+  tabular numerals, and a single red accent
+- Sourced citation chips on every generated claim
 - Landing page with project mission and value proposition
 - Jurisdiction browser — select city/county to view commission data
 - Meeting rundown sheet viewer — display agent-generated summaries

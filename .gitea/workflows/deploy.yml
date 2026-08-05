@@ -1,4 +1,4 @@
-name: Build and Push to legacy-platform
+name: Build and Push
 
 on:
   push:
@@ -11,20 +11,25 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # pgvector image required: migration 007 runs CREATE EXTENSION vector.
+        image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: commwatch
-          POSTGRES_PASSWORD: commwatch
-          POSTGRES_DB: commwatch_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: commissionwatch_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready -U commwatch"
+          --health-cmd="pg_isready -U postgres -d commissionwatch_test"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
     env:
-      DATABASE_URL: postgres://commwatch:commwatch@localhost:5432/commwatch_test
+      # Must match backend/knexfile.ts's `test` connection, which `npm test`
+      # (NODE_ENV=test) uses.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/commissionwatch_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/commissionwatch_test
+      NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
 
@@ -39,19 +44,33 @@ jobs:
           set -o pipefail
           npm ci 2>&1 | tee -a /tmp/ci-output.txt
 
+      - name: Typecheck
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee -a /tmp/ci-output.txt
+
       - name: Lint
         working-directory: backend
         shell: bash
         run: |
           set -o pipefail
-          npm run lint --if-present 2>&1 | tee -a /tmp/ci-output.txt
+          npm run lint 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Test
         working-directory: backend
         shell: bash
         run: |
           set -o pipefail
-          npm test --if-present 2>&1 | tee -a /tmp/ci-output.txt
+          npm test 2>&1 | tee -a /tmp/ci-output.txt
+
+      - name: Build
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee -a /tmp/ci-output.txt
 
       # ── Notify Tracker on failure ─────────────────────────────────────
       # Creates a Tracker triage issue when any prior step fails.
@@ -135,19 +154,33 @@ jobs:
           set -o pipefail
           npm ci 2>&1 | tee -a /tmp/ci-output.txt
 
+      - name: Typecheck
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee -a /tmp/ci-output.txt
+
       - name: Lint
         working-directory: frontend
         shell: bash
         run: |
           set -o pipefail
-          npm run lint --if-present 2>&1 | tee -a /tmp/ci-output.txt
+          npm run lint 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Test
         working-directory: frontend
         shell: bash
         run: |
           set -o pipefail
-          npm test --if-present 2>&1 | tee -a /tmp/ci-output.txt
+          npm test 2>&1 | tee -a /tmp/ci-output.txt
+
+      - name: Build
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee -a /tmp/ci-output.txt
 
       # ── Notify Tracker on failure ─────────────────────────────────────
       # Creates a Tracker triage issue when any prior step fails.
@@ -225,7 +258,7 @@ jobs:
       - name: Open SSH tunnel to registry
         shell: bash
         env:
-          TUNNEL_SOCK: /tmp/legacy-platform-tunnel-${{ github.run_id }}.sock
+          TUNNEL_SOCK: /tmp/commissionwatch-tunnel-${{ github.run_id }}.sock
         run: |
           set -o pipefail
           {
@@ -264,7 +297,7 @@ jobs:
         if: always()
         shell: bash
         env:
-          TUNNEL_SOCK: /tmp/legacy-platform-tunnel-${{ github.run_id }}.sock
+          TUNNEL_SOCK: /tmp/commissionwatch-tunnel-${{ github.run_id }}.sock
         run: |
           if [ -S "$TUNNEL_SOCK" ]; then
             ssh -S "$TUNNEL_SOCK" -O exit ubuntu@44.225.151.59 2>&1 || true
@@ -337,7 +370,6 @@ jobs:
           exit 0
 
   deploy-ai2:
-    if: github.event_name == 'push'
     needs: build-and-push
     if: github.event_name == 'push'
     runs-on: ai2-daedalus

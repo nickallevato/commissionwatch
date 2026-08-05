@@ -4,7 +4,12 @@ import request from "supertest";
 import app from "../src/app";
 
 const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
+// Bozeman's April 28 meeting — the completed meeting seeded with three votes
+// (see backend/seeds/001_pilot_data.ts, MEETINGS.bozeman[1]).
 const COMPLETED_MEETING_ID = "f6a7b8c9-d0e1-2345-fabc-456789012345";
+const BOZEMAN_MEETING_ID = COMPLETED_MEETING_ID;
+// Terry Cunningham, Mayor — MEMBERS.bozeman[0] in the pilot seed.
+const MEMBER_CUNNINGHAM_ID = "d0e1f2a3-b4c5-6789-abcd-012345678901";
 
 describe("GET /api/votes", () => {
   it("lists votes", async () => {

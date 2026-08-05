@@ -73,15 +73,23 @@ export interface RundownKeyItem {
   priority?: "high" | "medium" | "low";
 }
 
-export type VoteValue = "yea" | "nay" | "abstain" | "absent";
+/** Postgres `vote_value` enum — see backend/migrations/010_create_votes.ts */
+export type VoteValue = "yes" | "no" | "abstain" | "absent";
+
+/** Postgres `anomaly_flag_type` enum — see backend/migrations/011_create_anomaly_flags.ts */
 export type AnomalyFlagType =
-  | "unanimous_streak"
-  | "quorum_risk"
-  | "late_agenda_change"
-  | "missing_minutes"
-  | "unusual_vote_pattern"
-  | "conflict_of_interest";
+  | "emergency_session"
+  | "closed_door_vote"
+  | "last_minute_agenda_change"
+  | "quorum_issue"
+  | "unanimous_controversial"
+  | "missing_minutes";
+
+/** Postgres `anomaly_severity` enum — see backend/migrations/011_create_anomaly_flags.ts */
 export type AnomalySeverity = "critical" | "high" | "medium" | "low";
+
+/** `anomaly_flags.source` — see backend/migrations/014_harden_anomaly_flags.ts */
+export type AnomalySource = "auto" | "manual";
 
 export interface Member {
   id: string;
@@ -89,7 +97,8 @@ export interface Member {
   name: string;
   title: string | null;
   email: string | null;
-  term_start: string | null;
+  /** `term_start` is NOT NULL in the members table. */
+  term_start: string;
   term_end: string | null;
   created_at: string;
   updated_at: string;
@@ -99,22 +108,25 @@ export interface Member {
 export interface Vote {
   id: string;
   meeting_id: string;
-  agenda_item_id: string;
+  /** Nullable: a vote can be recorded against a meeting with no agenda item. */
+  agenda_item_id: string | null;
   member_id: string;
-  value: VoteValue;
+  /** The votes table stores the cast vote in a column named `vote`. */
+  vote: VoteValue;
   created_at: string;
-  updated_at: string;
   member?: Member;
 }
 
 export interface AnomalyFlag {
   id: string;
   meeting_id: string;
+  agenda_item_id: string | null;
   flag_type: AnomalyFlagType;
   severity: AnomalySeverity;
   description: string;
+  metadata: Record<string, unknown> | null;
+  source: AnomalySource;
   created_at: string;
-  updated_at: string;
   meeting?: Meeting;
 }
 

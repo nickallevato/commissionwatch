@@ -7,7 +7,7 @@ services:
       - "3001:3001"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgres://commwatch:commwatch@db:5432/commwatch
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/commissionwatch
       - MINIO_ENDPOINT=minio
       - MINIO_PORT=9000
       - MINIO_ACCESS_KEY=commwatch
@@ -32,14 +32,19 @@ services:
 
   db:
     image: pgvector/pgvector:pg16
+    # Published so local `npm run migrate` / `npm test` in backend/ can reach it
+    # at the localhost:5432 that backend/knexfile.ts defaults to.
+    ports:
+      - "127.0.0.1:5432:5432"
     environment:
-      - POSTGRES_USER=commwatch
-      - POSTGRES_PASSWORD=commwatch
-      - POSTGRES_DB=commwatch
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=commissionwatch
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/01-init-databases.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U commwatch"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d commissionwatch"]
       interval: 5s
       timeout: 3s
       retries: 5

@@ -1,6 +1,6 @@
 import { Router, Request } from "express";
 import db from "../config/database";
-import { detectAnomaliesBatch } from "../services/anomaly-detection";
+import { detectAnomalies, detectAnomaliesBatch } from "../services/anomaly-detection";
 
 const router = Router();
 
@@ -94,6 +94,31 @@ router.post("/detect-batch", async (req: Request<unknown, unknown, DetectBatchBo
 
 router.get("/:id", async (req, res, next) => {
   try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) throw badRequest("Invalid anomaly flag ID format");
+
+    const flag = await db("anomaly_flags").where({ id }).first();
+    if (!flag) {
+      res.status(404).json({ error: "Anomaly flag not found", statusCode: 404 });
+      return;
+    }
+
+    res.json(flag);
+  } catch (err) {
+    next(err);
+  }
+});
+
+interface CreateAnomalyBody {
+  meeting_id?: string;
+  flag_type?: string;
+  description?: string;
+  severity?: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+router.post("/", async (req: Request<unknown, unknown, CreateAnomalyBody>, res, next) => {
+  try {
     const { meeting_id, flag_type, description, severity, metadata } = req.body;
 
     if (!meeting_id || !UUID_RE.test(meeting_id))
@@ -108,8 +133,15 @@ router.get("/:id", async (req, res, next) => {
     const meeting = await db("meetings").where({ id: meeting_id }).first();
     if (!meeting) throw badRequest("Meeting not found");
 
-    const [flag] = await db("anomaly_flags")
-      .insert({ meeting_id, flag_type, description, severity, source: "manual" })
+    const [created] = await db("anomaly_flags")
+      .insert({
+        meeting_id,
+        flag_type,
+        description,
+        severity,
+        source: "manual",
+        metadata: metadata ? JSON.stringify(metadata) : null,
+      })
       .returning("*");
 
     res.status(201).json(created);
@@ -167,7 +199,7 @@ router.post("/meeting/:id/detect", async (req, res, next) => {
       return;
     }
 
-    const flags = await detectAnomalies(id);
+    const flags = await detectAnomalies(db, id);
 
     res.json({ data: flags, total: flags.length });
   } catch (err) {

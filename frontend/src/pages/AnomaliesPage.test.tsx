@@ -16,7 +16,7 @@ describe("AnomaliesPage", () => {
   it("renders anomaly cards after loading", async () => {
     renderWithProviders(<AnomaliesPage />);
     await waitFor(() => {
-      expect(screen.getByText("Unanimous Streak")).toBeInTheDocument();
+      expect(screen.getByText("Unanimous Controversial Vote")).toBeInTheDocument();
     });
   });
 });

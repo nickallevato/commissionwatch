@@ -4,7 +4,7 @@ Production deployment config for the your-org multi-customer Caddy+Docker server
 
 ## Architecture
 
-- **Caddy** terminates TLS and applies IP allowlist for `commissionwatch.legacy-platform.example`
+- **Caddy** terminates TLS and applies IP allowlist for `commissionwatch.bmux.sh`
 - **Backend** (Node.js) serves the API on port 3001
 - **Frontend** (Node.js) serves the dashboard on port 3000
 - **PostgreSQL 16** with pgvector for data storage

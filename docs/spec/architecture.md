@@ -32,17 +32,17 @@ CommissionWatch is an agent-orchestrated civic monitoring system. Each jurisdict
 - Deep Dive Report generator (pattern-triggered investigations)
 - Follow-the-Money visualization engine
 - Alert/notification system (email, webhook, RSS)
-- Public web dashboard (Next.js)
+- Public web dashboard (React + Vite single-page app)
 
 ## Tech Stack
 
 | Component | Technology |
 |---|---|
 | Agent Runtime | Claude Code harness |
-| Backend API | Python / FastAPI |
-| Database | PostgreSQL + pgvector |
+| Backend API | TypeScript / Express 5 on Node 22 |
+| Database | PostgreSQL + pgvector (Knex migrations) |
 | Object Storage | MinIO |
-| Frontend | Next.js |
+| Frontend | TypeScript / React 18 + Vite 5 + Tailwind |
 | Deployment | Docker Compose |
 | Hosting | AWS (<$20/mo) |
 | CI/CD | GitHub Actions |
@@ -50,10 +50,12 @@ CommissionWatch is an agent-orchestrated civic monitoring system. Each jurisdict
 ## Deployment
 
 Single Docker Compose stack for self-hosting:
-- `backend` — FastAPI app + agent orchestrator
-- `frontend` — Next.js dashboard
+- `backend` — Express 5 API + agent orchestrator (Node 22)
+- `frontend` — React + Vite dashboard, built to static assets and served by nginx
 - `db` — PostgreSQL with pgvector extension
 - `minio` — S3-compatible document storage
-- `worker` — Background agent runner
+
+Scheduled background work (digest scheduling, notification delivery) currently runs in-process
+inside `backend` via `node-cron` rather than in a separate worker container.
 
 Production demo runs on a single AWS instance with DNS on Route53.
