@@ -245,7 +245,19 @@ jobs:
     env:
       DEPLOY_HOST: 184.34.114.153
       DEPLOY_USER: ec2-user
-      REMOTE_DIR: /opt/commissionwatch
+      # Deliberately under the deploy user's home rather than /opt.
+      #
+      # platform-aws deploys to /opt/platform-aws, and copying that looked like
+      # consistency — but ec2-user cannot write to /opt, so that directory must
+      # have been created by root out of band. The convention therefore carries
+      # an undocumented per-product provisioning step, and a deploy that fails
+      # with "Permission denied" gives no hint that a human has to run mkdir as
+      # root before CI can ever succeed.
+      #
+      # $HOME needs no provisioning, so a fresh product deploys with nothing
+      # done by hand. If these ever need to live under /opt, that belongs in the
+      # host's user-data or the platform bootstrap, not in a per-repo workaround.
+      REMOTE_DIR: /home/ec2-user/commissionwatch
       ECR_REGISTRY: 123456789012.dkr.ecr.us-west-2.amazonaws.com
       AWS_REGION: us-west-2
     steps:
