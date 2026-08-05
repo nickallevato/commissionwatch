@@ -25,10 +25,6 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     env:
-      # Must match backend/knexfile.ts's `test` connection, which `npm test`
-      # (NODE_ENV=test) uses.
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/commissionwatch_test
-      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/commissionwatch_test
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +32,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      # The database host differs by runner backend, and guessing wrong costs a
+      # full red build with a misleading ECONNREFUSED.
+      #
+      #   GitHub Actions      -> job runs on the VM, service ports are published
+      #                          to the host, so the database is at localhost.
+      #   Gitea act_runner    -> job runs INSIDE a container on a shared docker
+      #   (docker backend)       network, so localhost is the job container
+      #                          itself and the database answers to `postgres`.
+      #
+      # Probe both instead of assuming, and fail with something diagnostic if
+      # neither answers.
+      - name: Resolve database host
+        shell: bash
+        run: |
+          set -uo pipefail
+          for host in postgres localhost 127.0.0.1; do
+            for attempt in $(seq 1 15); do
+              if (echo > /dev/tcp/"$host"/5432) >/dev/null 2>&1; then
+                echo "Postgres reachable at ${host}:5432"
+                URL="postgresql://postgres:postgres@${host}:5432/commissionwatch_test"
+                echo "DATABASE_URL=${URL}" >> "$GITHUB_ENV"
+                echo "TEST_DATABASE_URL=${URL}" >> "$GITHUB_ENV"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "no answer from ${host}:5432"
+          done
+          echo "Postgres unreachable at postgres, localhost and 127.0.0.1 on :5432." >&2
+          echo "The service container did not start, or this runner exposes services differently." >&2
+          exit 1
 
       - name: Install dependencies
         working-directory: backend
