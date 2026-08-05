@@ -90,7 +90,7 @@ See [deploy/README.md](deploy/README.md) for production deployment using Caddy, 
 - **Frontend:** React 19 / Vite / TypeScript
 - **Object Storage:** MinIO (S3-compatible)
 - **Deployment:** Docker Compose / Nginx
-- **CI:** GitHub Actions
+- **CI:** Gitea Actions
 - **License:** MIT
 
 ## Contributing

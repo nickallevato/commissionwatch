@@ -26,6 +26,7 @@ the stack for months.
 | Frontend | React + Vite + Tailwind (**not** Next.js) |
 | Queue | Postgres `SKIP LOCKED` — no Redis |
 | Agents | `agents/meeting-monitor` — scraper, parser, anomaly detectors, rundown generator |
+| CI/CD | **Gitea Actions only** — `.gitea/workflows/deploy.yml` |
 | Deploy | Docker Compose behind Caddy, images to ECR |
 | Domain | `commissionwatch.bmux.sh` |
 
@@ -63,6 +64,11 @@ Backend tests need PostgreSQL: `docker compose up -d db`.
 - Nothing naming a person auto-publishes — it goes to the operator review queue
 - Do not reintroduce `legacy-platform` anywhere
 - Probe external data sources before designing against them
+- CI is **Gitea Actions**. Never add `.github/workflows/` — it does not run here, and a
+  "fixed" workflow nobody executes is worse than a visibly broken one. Runner labels in use:
+  `ubuntu-latest` for checks, `dh1` for build and deploy.
+- Gitea's `act_runner` runs jobs inside a container, so a `services:` database answers to its
+  service name, not `localhost`
 
 ## Deliberately dormant
 

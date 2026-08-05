@@ -45,7 +45,7 @@ CommissionWatch is an agent-orchestrated civic monitoring system. Each jurisdict
 | Frontend | TypeScript / React 18 + Vite 5 + Tailwind |
 | Deployment | Docker Compose |
 | Hosting | AWS (<$20/mo) |
-| CI/CD | GitHub Actions |
+| CI/CD | Gitea Actions (`.gitea/workflows/deploy.yml`) |
 
 ## Deployment
 
