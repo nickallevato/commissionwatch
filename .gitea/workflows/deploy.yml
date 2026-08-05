@@ -13,6 +13,15 @@ on:
 jobs:
   ci-backend:
     runs-on: ubuntu-latest
+    # Node comes from the job image rather than actions/setup-node.
+    #
+    # act_runner caches actions on disk, and a partially-extracted cache entry
+    # makes setup-node fail with an lstat error naming a file from the ACTION's
+    # own repository (eslint.config.mjs), which reads like a problem in this
+    # repo and is not. A pinned image removes the action, the cache, and that
+    # whole class of failure.
+    container:
+      image: node:22-bookworm
     services:
       postgres:
         # pgvector image required: migration 007 runs CREATE EXTENSION vector.
@@ -32,10 +41,6 @@ jobs:
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
 
       # The database host differs by runner backend, and guessing wrong costs a
       # full red build with a misleading ECONNREFUSED.
@@ -106,12 +111,11 @@ jobs:
 
   ci-frontend:
     runs-on: ubuntu-latest
+    # See ci-backend: Node comes from the image, not actions/setup-node.
+    container:
+      image: node:22-bookworm
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
 
       - name: Install dependencies
         working-directory: frontend
