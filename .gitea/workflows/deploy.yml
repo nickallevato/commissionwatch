@@ -100,72 +100,6 @@ jobs:
           set -o pipefail
           npm run build 2>&1 | tee -a /tmp/ci-output.txt
 
-      # ── Notify Tracker on failure ─────────────────────────────────────
-      # Creates a Tracker triage issue when any prior step fails.
-      # Required Gitea secret: TRACKER_API_KEY
-      - name: Notify Tracker of CI failure
-        if: failure()
-        env:
-          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
-          GH_SHA: ${{ github.sha }}
-          GH_REF_NAME: ${{ github.ref_name }}
-          GH_RUN_ID: ${{ github.run_id }}
-          GH_SERVER_URL: ${{ github.server_url }}
-          GH_REPOSITORY: ${{ github.repository }}
-          JOB_LABEL: ci backend
-        run: |
-          set +e  # notification must never fail the build
-          API_KEY="$(printf '%s' "$TRACKER_API_KEY" | tr -d '[:space:]')"
-
-          if [ -z "$API_KEY" ]; then
-            echo "TRACKER_API_KEY not set — skipping failure notification"
-            exit 0
-          fi
-
-          SHORT_SHA="${GH_SHA:0:7}"
-          RUN_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
-          COMMIT_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/commit/${GH_SHA}"
-
-          # Capture last ~80 lines of CI output (tee'd by earlier steps), capped to 4KB
-          LOG_FILE="/tmp/ci-output.txt"
-          LOG_TAIL_FILE="/tmp/ci-output.tail"
-          if [ -f "$LOG_FILE" ]; then
-            tail -n 80 "$LOG_FILE" | tail -c 4000 > "$LOG_TAIL_FILE"
-          else
-            echo "(no captured CI output found at $LOG_FILE)" > "$LOG_TAIL_FILE"
-          fi
-
-          PAYLOAD=$(jq -n \
-            --arg title "CI Failure: ${JOB_LABEL} @ ${SHORT_SHA}" \
-            --arg runUrl "$RUN_URL" \
-            --arg commitUrl "$COMMIT_URL" \
-            --arg sha "$SHORT_SHA" \
-            --arg branch "$GH_REF_NAME" \
-            --arg job "$JOB_LABEL" \
-            --rawfile logTail "$LOG_TAIL_FILE" \
-            '{
-              title: $title,
-              status: "todo",
-              priority: "critical",
-              projectId: "REDACTED-PROJECT-ID",
-              assigneeAgentId: "REDACTED-AGENT-ID",
-              description: ("CI failed on `" + $branch + "` @ " + $sha + " (" + $job + ")\n\nRun: " + $runUrl + "\nCommit: " + $commitUrl + "\n\n--- last log lines ---\n\n```\n" + $logTail + "\n```")
-            }') || { echo "WARNING: jq failed — skipping Tracker notification"; exit 0; }
-
-          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
-            -H "Authorization: Bearer ${API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD")
-          CURL_EXIT=$?
-          HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
-          HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n 1)
-          if [ "$CURL_EXIT" -ne 0 ] || [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ] 2>/dev/null; then
-            echo "WARNING: Failed to create Tracker failure ticket (curl=$CURL_EXIT, http=$HTTP_CODE, body=$HTTP_BODY)"
-          else
-            echo "Tracker failure ticket created: HTTP $HTTP_CODE"
-          fi
-          exit 0
-
   ci-frontend:
     runs-on: ubuntu-latest
     steps:
@@ -210,71 +144,6 @@ jobs:
           set -o pipefail
           npm run build 2>&1 | tee -a /tmp/ci-output.txt
 
-      # ── Notify Tracker on failure ─────────────────────────────────────
-      # Creates a Tracker triage issue when any prior step fails.
-      # Required Gitea secret: TRACKER_API_KEY
-      - name: Notify Tracker of CI failure
-        if: failure()
-        env:
-          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
-          GH_SHA: ${{ github.sha }}
-          GH_REF_NAME: ${{ github.ref_name }}
-          GH_RUN_ID: ${{ github.run_id }}
-          GH_SERVER_URL: ${{ github.server_url }}
-          GH_REPOSITORY: ${{ github.repository }}
-          JOB_LABEL: ci frontend
-        run: |
-          set +e  # notification must never fail the build
-          API_KEY="$(printf '%s' "$TRACKER_API_KEY" | tr -d '[:space:]')"
-
-          if [ -z "$API_KEY" ]; then
-            echo "TRACKER_API_KEY not set — skipping failure notification"
-            exit 0
-          fi
-
-          SHORT_SHA="${GH_SHA:0:7}"
-          RUN_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
-          COMMIT_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/commit/${GH_SHA}"
-
-          # Capture last ~80 lines of CI output (tee'd by earlier steps), capped to 4KB
-          LOG_FILE="/tmp/ci-output.txt"
-          LOG_TAIL_FILE="/tmp/ci-output.tail"
-          if [ -f "$LOG_FILE" ]; then
-            tail -n 80 "$LOG_FILE" | tail -c 4000 > "$LOG_TAIL_FILE"
-          else
-            echo "(no captured CI output found at $LOG_FILE)" > "$LOG_TAIL_FILE"
-          fi
-
-          PAYLOAD=$(jq -n \
-            --arg title "CI Failure: ${JOB_LABEL} @ ${SHORT_SHA}" \
-            --arg runUrl "$RUN_URL" \
-            --arg commitUrl "$COMMIT_URL" \
-            --arg sha "$SHORT_SHA" \
-            --arg branch "$GH_REF_NAME" \
-            --arg job "$JOB_LABEL" \
-            --rawfile logTail "$LOG_TAIL_FILE" \
-            '{
-              title: $title,
-              status: "todo",
-              priority: "critical",
-              projectId: "REDACTED-PROJECT-ID",
-              assigneeAgentId: "REDACTED-AGENT-ID",
-              description: ("CI failed on `" + $branch + "` @ " + $sha + " (" + $job + ")\n\nRun: " + $runUrl + "\nCommit: " + $commitUrl + "\n\n--- last log lines ---\n\n```\n" + $logTail + "\n```")
-            }') || { echo "WARNING: jq failed — skipping Tracker notification"; exit 0; }
-
-          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
-            -H "Authorization: Bearer ${API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD")
-          CURL_EXIT=$?
-          HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
-          HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n 1)
-          if [ "$CURL_EXIT" -ne 0 ] || [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ] 2>/dev/null; then
-            echo "WARNING: Failed to create Tracker failure ticket (curl=$CURL_EXIT, http=$HTTP_CODE, body=$HTTP_BODY)"
-          else
-            echo "Tracker failure ticket created: HTTP $HTTP_CODE"
-          fi
-          exit 0
   # ── Build and push images to ECR ────────────────────────────────────
   # The ai2-daedalus runner and its SSH-tunnelled localhost:5000 registry are
   # both gone. Images now go to ECR in account 123456789012, which the shared
@@ -310,6 +179,39 @@ jobs:
               | docker login --username AWS --password-stdin "$ECR_REGISTRY"
           } 2>&1 | tee -a /tmp/ci-output.txt
 
+      # ECR does not create a repository on first push the way Docker Hub does.
+      # Pushing to one that does not exist fails with `403 Forbidden` on the
+      # blob HEAD request — not a 404, and not anything mentioning the
+      # repository — which reads as a credentials problem and sends you looking
+      # in the wrong place entirely.
+      - name: Ensure ECR repositories exist
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set -uo pipefail
+          {
+            for repo in commissionwatch-backend commissionwatch-frontend; do
+              if aws ecr describe-repositories --repository-names "$repo" \
+                   --region "$AWS_REGION" >/dev/null 2>&1; then
+                echo "ECR repository exists: $repo"
+                continue
+              fi
+              echo "ECR repository missing, creating: $repo"
+              if ! aws ecr create-repository \
+                     --repository-name "$repo" \
+                     --region "$AWS_REGION" \
+                     --image-scanning-configuration scanOnPush=true >/dev/null; then
+                echo "Could not create $repo." >&2
+                echo "The CI credentials need ecr:CreateRepository, or an operator must run:" >&2
+                echo "  aws ecr create-repository --repository-name $repo --region $AWS_REGION" >&2
+                exit 1
+              fi
+              echo "Created $repo"
+            done
+          } 2>&1 | tee -a /tmp/ci-output.txt
+
       - name: Set up buildx for cross-architecture builds
         shell: bash
         run: |
@@ -341,42 +243,6 @@ jobs:
               -t "$ECR_REGISTRY/commissionwatch-frontend:latest" \
               ./frontend
           } 2>&1 | tee -a /tmp/ci-output.txt
-
-      - name: Notify Tracker of build failure
-        if: failure()
-        env:
-          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
-          GH_SHA: ${{ github.sha }}
-          GH_REF_NAME: ${{ github.ref_name }}
-          GH_RUN_ID: ${{ github.run_id }}
-          GH_SERVER_URL: ${{ github.server_url }}
-          GH_REPOSITORY: ${{ github.repository }}
-          JOB_LABEL: build-and-push
-        run: |
-          set +e
-          API_KEY="$(printf '%s' "$TRACKER_API_KEY" | tr -d '[:space:]')"
-          [ -z "$API_KEY" ] && { echo "TRACKER_API_KEY not set — skipping"; exit 0; }
-          SHORT_SHA="${GH_SHA:0:7}"
-          RUN_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
-          LOG_TAIL_FILE="/tmp/ci-output.tail"
-          if [ -f /tmp/ci-output.txt ]; then
-            tail -n 80 /tmp/ci-output.txt | tail -c 4000 > "$LOG_TAIL_FILE"
-          else
-            echo "(no captured output)" > "$LOG_TAIL_FILE"
-          fi
-          PAYLOAD=$(jq -n \
-            --arg title "Build Failure: ${JOB_LABEL} @ ${SHORT_SHA}" \
-            --arg runUrl "$RUN_URL" --arg sha "$SHORT_SHA" \
-            --arg branch "$GH_REF_NAME" --arg job "$JOB_LABEL" \
-            --rawfile logTail "$LOG_TAIL_FILE" \
-            '{title: $title, status: "todo", priority: "critical",
-              projectId: "REDACTED-PROJECT-ID",
-              assigneeAgentId: "REDACTED-AGENT-ID",
-              description: ("Build failed on `" + $branch + "` @ " + $sha + " (" + $job + ")\n\nRun: " + $runUrl + "\n\n```\n" + $logTail + "\n```")}') \
-            || { echo "jq failed — skipping"; exit 0; }
-          curl -s -o /dev/null -X POST "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
-            -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" -d "$PAYLOAD"
-          exit 0
 
   # ── Deploy to the shared bmux.sh platform ───────────────────────────
   # Replaces deploy-ai2. Follows the SSH pattern that your-org/platform-aws
@@ -477,39 +343,3 @@ jobs:
             echo "Site did not return 200 after 6 attempts." >&2
             exit 1
           } 2>&1 | tee -a /tmp/ci-output.txt
-
-      - name: Notify Tracker of deploy failure
-        if: failure()
-        env:
-          TRACKER_API_KEY: ${{ secrets.TRACKER_API_KEY }}
-          GH_SHA: ${{ github.sha }}
-          GH_REF_NAME: ${{ github.ref_name }}
-          GH_RUN_ID: ${{ github.run_id }}
-          GH_SERVER_URL: ${{ github.server_url }}
-          GH_REPOSITORY: ${{ github.repository }}
-          JOB_LABEL: deploy-aws
-        run: |
-          set +e
-          API_KEY="$(printf '%s' "$TRACKER_API_KEY" | tr -d '[:space:]')"
-          [ -z "$API_KEY" ] && { echo "TRACKER_API_KEY not set — skipping"; exit 0; }
-          SHORT_SHA="${GH_SHA:0:7}"
-          RUN_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}"
-          LOG_TAIL_FILE="/tmp/ci-output.tail"
-          if [ -f /tmp/ci-output.txt ]; then
-            tail -n 80 /tmp/ci-output.txt | tail -c 4000 > "$LOG_TAIL_FILE"
-          else
-            echo "(no captured output)" > "$LOG_TAIL_FILE"
-          fi
-          PAYLOAD=$(jq -n \
-            --arg title "Deploy Failure: ${JOB_LABEL} @ ${SHORT_SHA}" \
-            --arg runUrl "$RUN_URL" --arg sha "$SHORT_SHA" \
-            --arg branch "$GH_REF_NAME" --arg job "$JOB_LABEL" \
-            --rawfile logTail "$LOG_TAIL_FILE" \
-            '{title: $title, status: "todo", priority: "critical",
-              projectId: "REDACTED-PROJECT-ID",
-              assigneeAgentId: "REDACTED-AGENT-ID",
-              description: ("Deploy failed on `" + $branch + "` @ " + $sha + " (" + $job + ")\n\nRun: " + $runUrl + "\n\n```\n" + $logTail + "\n```")}') \
-            || { echo "jq failed — skipping"; exit 0; }
-          curl -s -o /dev/null -X POST "https://tracker.example.invalid/api/companies/REDACTED-COMPANY-ID/issues" \
-            -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" -d "$PAYLOAD"
-          exit 0
