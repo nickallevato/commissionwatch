@@ -1,0 +1,71 @@
+# CommissionWatch
+
+AI-powered civic transparency. Open-source watchdog agents monitoring local government —
+Bozeman City Commission and Gallatin County, MT.
+
+## Read this first
+
+**`.claude/skills/commissionwatch-development/SKILL.md`** holds the development process and the
+project invariants. Invoke it before planning or implementing anything substantial. It covers the
+brainstorm → spec → plan → fan-out pipeline, the rules for parallel agents, and the constraints
+that make published output defensible.
+
+Current design of record:
+`docs/superpowers/specs/2026-08-04-commissionwatch-production-design.md`
+
+## Stack
+
+Verify against `package.json` rather than trusting prose — `docs/spec/architecture.md` misstated
+the stack for months.
+
+| Part | Reality |
+|---|---|
+| Backend | Express 5 + TypeScript, Node 22, Knex migrations |
+| Database | PostgreSQL 16 + pgvector |
+| Storage | MinIO (S3-compatible) |
+| Frontend | React + Vite + Tailwind (**not** Next.js) |
+| Queue | Postgres `SKIP LOCKED` — no Redis |
+| Agents | `agents/meeting-monitor` — scraper, parser, anomaly detectors, rundown generator |
+| Deploy | Docker Compose behind Caddy, images to ECR |
+| Domain | `commissionwatch.bmux.sh` |
+
+## Layout
+
+```
+backend/    Express API, migrations, seeds
+frontend/   React SPA
+agents/     Watchdog agents
+deploy/     Caddy + compose for production
+docs/       specs, plans, roadmap
+```
+
+## Commands
+
+```bash
+# Backend
+cd backend && npm run typecheck && npm test && npm run build
+
+# Frontend
+cd frontend && npm run typecheck && npm test && npm run build
+
+# Full stack
+docker compose up -d
+```
+
+Backend tests need PostgreSQL: `docker compose up -d db`.
+
+## Hard rules
+
+- Never silence a type error — no `any`, no `@ts-ignore`, no cast to quiet the compiler
+- Never delete or skip a test to go green
+- The database schema is the source of truth for types
+- No unsourced claim reaches the public site
+- Nothing naming a person auto-publishes — it goes to the operator review queue
+- Do not reintroduce `legacy-platform` anywhere
+- Probe external data sources before designing against them
+
+## Deliberately dormant
+
+Alert subscriptions, the digest scheduler, and email delivery exist in `backend/src/services/`.
+They must keep compiling and passing tests, but send nothing until the review queue ships —
+emailing generated claims about named officials would bypass the publication gate.
