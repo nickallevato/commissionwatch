@@ -1,51 +1,110 @@
 import type { Member } from "@/types";
 
-interface Props {
-  member: Member;
+/** A member's cast votes, counted by `vote_value`. */
+export interface MemberVotingRecord {
+  yes: number;
+  no: number;
+  abstain: number;
+  absent: number;
+  total: number;
 }
 
-export function MemberCard({ member }: Props) {
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/**
+ * Format a `YYYY-MM-DD` term date as a readable date. Parsed by hand rather
+ * than through `new Date()` so a date-only column never slips a day in a
+ * negative-offset timezone.
+ */
+function formatTermDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return value;
+  const [, year, month, day] = match;
+  return `${MONTHS[Number(month) - 1]} ${Number(day)}, ${year}`;
+}
+
+interface Props {
+  member: Member;
+  /** Omitted when the roster has no vote data for this official. */
+  record?: MemberVotingRecord;
+}
+
+/**
+ * One line of the officials roster: name set in the display serif, office and
+ * term in muted sans, voting record in tabular mono.
+ */
+export function MemberCard({ member, record }: Props) {
+  const headingId = `official-${member.id}`;
+
+  const term = `${formatTermDate(member.term_start)} – ${
+    member.term_end ? formatTermDate(member.term_end) : "Present"
+  }`;
+
+  const office = [
+    member.title,
+    member.jurisdiction
+      ? `${member.jurisdiction.name}, ${member.jurisdiction.state}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-800/50 p-5">
-      <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 font-semibold text-sm">
-          {member.name
-            .split(" ")
-            .map((n) => n[0])
-            .join("")
-            .slice(0, 2)
-            .toUpperCase()}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-gray-100 font-semibold truncate">{member.name}</h3>
-          {member.title && (
-            <p className="text-sm text-gray-400 mt-0.5">{member.title}</p>
-          )}
-          {member.jurisdiction && (
-            <p className="text-sm text-gray-500 mt-0.5">
-              {member.jurisdiction.name}, {member.jurisdiction.state}
-            </p>
-          )}
-        </div>
+    <article
+      aria-labelledby={headingId}
+      className="grid grid-cols-1 gap-x-8 gap-y-4 border-t border-rule py-6 sm:grid-cols-12"
+    >
+      <div className="sm:col-span-5">
+        <h3
+          id={headingId}
+          className="font-display text-xl leading-headline tracking-headline text-ink"
+        >
+          {member.name}
+        </h3>
+        {office && <p className="mt-1 text-sm text-muted">{office}</p>}
+        {member.email && (
+          <a className="cite mt-2" href={`mailto:${member.email}`}>
+            {member.email}
+          </a>
+        )}
       </div>
-      {(member.term_start || member.term_end) && (
-        <div className="mt-3 text-xs text-gray-500">
-          Term:{" "}
-          {member.term_start
-            ? new Date(member.term_start).toLocaleDateString("en-US", {
-                month: "short",
-                year: "numeric",
-              })
-            : "?"}{" "}
-          –{" "}
-          {member.term_end
-            ? new Date(member.term_end).toLocaleDateString("en-US", {
-                month: "short",
-                year: "numeric",
-              })
-            : "Present"}
-        </div>
-      )}
-    </div>
+
+      <div className="sm:col-span-3">
+        <span className="label-sm">Term</span>
+        <p className="figure mt-1 text-sm text-ink-soft">{term}</p>
+      </div>
+
+      <div className="sm:col-span-4">
+        <span className="label-sm">Voting record</span>
+        {record && record.total > 0 ? (
+          <>
+            <p className="mt-1 flex items-baseline gap-2">
+              <span className="figure text-xl text-ink">{record.total}</span>
+              <span className="text-xs text-muted">
+                {record.total === 1 ? "vote recorded" : "votes recorded"}
+              </span>
+            </p>
+            <p className="figure mt-1 text-xs text-muted">
+              {`${record.yes} yes · ${record.no} no · ${record.abstain} abstain · ${record.absent} absent`}
+            </p>
+          </>
+        ) : (
+          <p className="mt-1 text-sm text-muted">No recorded votes</p>
+        )}
+      </div>
+    </article>
   );
 }

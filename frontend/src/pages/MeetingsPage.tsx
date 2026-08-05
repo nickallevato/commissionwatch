@@ -3,8 +3,58 @@ import { Link } from "react-router-dom";
 import { useMeetings, useJurisdictions } from "@/hooks/useMeetings";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { StatusBadge } from "@/components/StatusBadge";
-import { AnomalyBadge } from "@/components/AnomalyBadge";
-import type { MeetingStatus, AnomalyFlag, AnomalySeverity } from "@/types";
+import { AnomalyBadge, severityOrder } from "@/components/AnomalyBadge";
+import type { Meeting, MeetingStatus, AnomalyFlag } from "@/types";
+
+/** Hairline control on paper — square corners, ink on hover. No pills. */
+const controlClass =
+  "rounded-none border border-rule bg-paper px-2 py-1 text-sm text-ink hover:border-ink focus:border-ink";
+
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Format a `YYYY-MM-DD` meeting date in UTC, so a date-only value never slides
+ * a day backwards for a reader west of Greenwich.
+ */
+function formatMeetingDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return value;
+  const [, year, month, day] = match;
+  const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${WEEKDAYS[date.getUTCDay()]}, ${MONTHS[Number(month) - 1]} ${Number(
+    day,
+  )}, ${year}`;
+}
+
+/** `18:00:00` → `18:00`. The seconds the API sends are never meaningful here. */
+function formatMeetingTime(value: string): string {
+  const match = /^(\d{2}:\d{2})/.exec(value);
+  return match ? match[1] : value;
+}
+
+/** Jurisdiction dateline, or an honest note that the record does not carry one. */
+function datelineOf(meeting: Meeting): string {
+  const jurisdiction = meeting.commission?.jurisdiction;
+  return jurisdiction
+    ? `${jurisdiction.name}, ${jurisdiction.state}`
+    : "Jurisdiction unrecorded";
+}
 
 export function MeetingsPage() {
   const [jurisdictionId, setJurisdictionId] = useState("");
@@ -25,134 +75,190 @@ export function MeetingsPage() {
     return map;
   }, [allAnomalies]);
 
-  const { data: meetings, isLoading } = useMeetings({
+  const {
+    data: meetings,
+    isLoading,
+    isError,
+  } = useMeetings({
     jurisdiction_id: jurisdictionId || undefined,
     status: status || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
 
+  const filtersActive = Boolean(jurisdictionId || status || dateFrom || dateTo);
+
   return (
     <div>
-      <h2 className="text-2xl font-bold text-gray-100 mb-6">Meetings</h2>
+      <header>
+        <p className="kicker">The calendar</p>
+        <h2 className="headline mt-1">Meetings</h2>
+        <p className="mt-3 max-w-xl text-sm text-muted">
+          Every sitting we track, newest first — when it was held, who held it,
+          and what our checks flagged in the record it left behind.
+        </p>
+      </header>
 
-      <div className="flex flex-wrap gap-3 mb-6">
-        <select
-          value={jurisdictionId}
-          onChange={(e) => setJurisdictionId(e.target.value)}
-          className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-accent-500 focus:border-accent-500"
-        >
-          <option value="">All Jurisdictions</option>
-          {jurisdictions?.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.name}, {j.state}
-            </option>
-          ))}
-        </select>
+      <div className="rule-hi mt-6" />
 
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-accent-500 focus:border-accent-500"
-        >
-          <option value="">All Statuses</option>
-          <option value="scheduled">Scheduled</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-rule py-3">
+        <label className="flex items-center gap-2">
+          <span className="label-sm">Jurisdiction</span>
+          <select
+            value={jurisdictionId}
+            onChange={(e) => setJurisdictionId(e.target.value)}
+            className={controlClass}
+          >
+            <option value="">All jurisdictions</option>
+            {jurisdictions?.map((j) => (
+              <option key={j.id} value={j.id}>
+                {j.name}, {j.state}
+              </option>
+            ))}
+          </select>
+        </label>
 
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          placeholder="From"
-          className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-accent-500 focus:border-accent-500"
-        />
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          placeholder="To"
-          className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-accent-500 focus:border-accent-500"
-        />
+        <label className="flex items-center gap-2">
+          <span className="label-sm">Status</span>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className={controlClass}
+          >
+            <option value="">All statuses</option>
+            <option value="scheduled">Scheduled</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </label>
 
-        {(jurisdictionId || status || dateFrom || dateTo) && (
+        <label className="flex items-center gap-2">
+          <span className="label-sm">From</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className={`${controlClass} figure`}
+          />
+        </label>
+
+        <label className="flex items-center gap-2">
+          <span className="label-sm">To</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className={`${controlClass} figure`}
+          />
+        </label>
+
+        {filtersActive && (
           <button
+            type="button"
             onClick={() => {
               setJurisdictionId("");
               setStatus("");
               setDateFrom("");
               setDateTo("");
             }}
-            className="text-sm text-gray-400 hover:text-gray-200 px-3 py-2"
+            className="label-sm underline underline-offset-4 hover:text-ink"
           >
             Clear filters
           </button>
         )}
+
+        {meetings && (
+          <p className="label-sm ml-auto">
+            <span className="figure text-sm text-ink">{meetings.length}</span>{" "}
+            {meetings.length === 1 ? "meeting" : "meetings"}
+          </p>
+        )}
       </div>
 
-      {isLoading ? (
-        <div className="space-y-3">
+      {isError ? (
+        <p className="border-b border-rule py-12 text-center text-sm text-accent">
+          The meeting calendar could not be loaded.
+        </p>
+      ) : isLoading ? (
+        <div role="status" aria-live="polite">
+          <span className="sr-only">Loading meetings</span>
           {[1, 2, 3].map((i) => (
             <div
               key={i}
-              className="h-20 rounded-lg bg-gray-800 animate-pulse"
+              className="animate-pulse border-b border-rule py-5"
+              aria-hidden="true"
+            >
+              <div className="h-5 w-64 max-w-full bg-paper-sunk" />
+              <div className="mt-2 h-3 w-48 max-w-full bg-paper-sunk" />
+            </div>
+          ))}
+        </div>
+      ) : meetings && meetings.length > 0 ? (
+        <div>
+          {meetings.map((meeting) => (
+            <MeetingRow
+              key={meeting.id}
+              meeting={meeting}
+              anomalies={anomaliesByMeeting.get(meeting.id)}
             />
           ))}
         </div>
       ) : (
-        <div className="space-y-3">
-          {meetings?.map((meeting) => (
-            <Link
-              key={meeting.id}
-              to={`/meetings/${meeting.id}`}
-              className="block rounded-lg border border-gray-800 bg-gray-800/50 p-4 hover:border-accent-500/50 hover:bg-gray-800 transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-gray-100 font-semibold truncate">
-                    {meeting.commission?.name ?? "Commission Meeting"}
-                  </h3>
-                  <p className="text-sm text-gray-400 mt-0.5">
-                    {meeting.commission?.jurisdiction?.name},{" "}
-                    {meeting.commission?.jurisdiction?.state} &middot;{" "}
-                    {new Date(meeting.date).toLocaleDateString("en-US", {
-                      weekday: "short",
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                    {meeting.time && ` at ${meeting.time}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {(() => {
-                    const meetingAnomalies = anomaliesByMeeting.get(meeting.id);
-                    if (!meetingAnomalies?.length) return null;
-                    const severityOrder: AnomalySeverity[] = ["critical", "high", "medium", "low"];
-                    const maxSeverity = severityOrder.find((s) =>
-                      meetingAnomalies.some((a) => a.severity === s),
-                    ) ?? "low";
-                    return (
-                      <AnomalyBadge
-                        count={meetingAnomalies.length}
-                        maxSeverity={maxSeverity}
-                      />
-                    );
-                  })()}
-                  <StatusBadge status={meeting.status} />
-                </div>
-              </div>
-            </Link>
-          ))}
-          {meetings?.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
-              No meetings match your filters.
-            </div>
-          )}
-        </div>
+        <p className="border-b border-rule py-12 text-center text-sm text-muted">
+          {filtersActive
+            ? "No meetings match these filters."
+            : "No meetings on record yet."}
+        </p>
       )}
     </div>
+  );
+}
+
+interface MeetingRowProps {
+  meeting: Meeting;
+  anomalies: AnomalyFlag[] | undefined;
+}
+
+/**
+ * One sitting in the calendar: a hairline row, not a card. Serif commission
+ * name, dateline and date in muted sans, flags and status set to the right.
+ */
+function MeetingRow({ meeting, anomalies }: MeetingRowProps) {
+  const name = meeting.commission?.name ?? "Commission meeting";
+  const date = formatMeetingDate(meeting.date);
+  const maxSeverity = anomalies?.length
+    ? (severityOrder.find((s) => anomalies.some((a) => a.severity === s)) ??
+      "low")
+    : null;
+
+  return (
+    <article aria-label={`${name}, ${date}`} className="border-b border-rule">
+      <Link
+        to={`/meetings/${meeting.id}`}
+        className="group flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 py-5"
+      >
+        <div className="min-w-0 flex-1">
+          <h3 className="font-display text-lg font-semibold leading-snug tracking-headline text-ink underline-offset-4 group-hover:underline">
+            {name}
+          </h3>
+          {/* Prose dateline, so the numerals are tabular but not mono — a
+              monospaced weekday and month read as data, not as a dateline. */}
+          <p className="tabular mt-1 text-[0.8125rem] leading-normal text-muted">
+            {datelineOf(meeting)}
+            {" · "}
+            {date}
+            {meeting.time && ` at ${formatMeetingTime(meeting.time)}`}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-3">
+          {maxSeverity && anomalies && (
+            <AnomalyBadge count={anomalies.length} maxSeverity={maxSeverity} />
+          )}
+          <StatusBadge status={meeting.status} />
+        </div>
+      </Link>
+    </article>
   );
 }
 

@@ -1,34 +1,91 @@
 import type { AnomalySeverity } from "@/types";
 
-const severityStyles: Record<AnomalySeverity, string> = {
-  critical: "bg-red-500/10 text-red-400 border-red-500/20",
-  high: "bg-red-500/10 text-red-400 border-red-500/20",
-  medium: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  low: "bg-gray-500/10 text-gray-400 border-gray-500/20",
+/**
+ * The four `anomaly_severity` enum members projected onto the 1–5 scale the
+ * editorial palette is built around: 4–5 accent red, 3 amber, 1–2 grey.
+ * The numeral is the primary signal; colour only reinforces it, because colour
+ * alone is not an accessible way to encode severity.
+ */
+export const severityRank: Record<AnomalySeverity, number> = {
+  critical: 5,
+  high: 4,
+  medium: 3,
+  low: 2,
 };
+
+/** Sentence-case display names for the severity enum. */
+export const severityLabels: Record<AnomalySeverity, string> = {
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+/** Descending — highest first. Filter menus and max-severity lookups use this. */
+export const severityOrder: AnomalySeverity[] = [
+  "critical",
+  "high",
+  "medium",
+  "low",
+];
+
+/**
+ * Square fill plus numeral colour. Written as whole literal class names so the
+ * Tailwind content scanner keeps them. Numeral contrast against each fill:
+ * paper on sev4/sev5 ≈ 6.0:1, ink on sev3 ≈ 5.8:1, ink on sev2 ≈ 4.9:1.
+ */
+const severitySquare: Record<AnomalySeverity, string> = {
+  critical: "bg-sev5 text-paper",
+  high: "bg-sev4 text-paper",
+  medium: "bg-sev3 text-ink",
+  low: "bg-sev2 text-ink",
+};
+
+interface SeverityMarkProps {
+  severity: AnomalySeverity;
+  /** `md` for a ledger entry, `sm` for inline chrome such as a list row. */
+  size?: "sm" | "md";
+}
+
+/**
+ * The severity square: a solid block of the severity colour with its rank
+ * printed inside it.
+ */
+export function SeverityMark({ severity, size = "md" }: SeverityMarkProps) {
+  const rank = severityRank[severity];
+  const dims =
+    size === "md" ? "h-7 w-7 text-[0.8125rem]" : "h-4 w-4 text-[0.625rem]";
+
+  return (
+    <span
+      className={`figure inline-flex shrink-0 items-center justify-center font-semibold leading-none ${dims} ${severitySquare[severity]}`}
+      title={`Severity ${rank} of 5 — ${severityLabels[severity]}`}
+    >
+      <span aria-hidden="true">{rank}</span>
+      <span className="sr-only">
+        Severity {rank} of 5, {severityLabels[severity].toLowerCase()}
+      </span>
+    </span>
+  );
+}
 
 interface Props {
   count: number;
   maxSeverity: AnomalySeverity;
 }
 
+/**
+ * Inline tally of the flags raised against one record: the highest severity as
+ * a square, then how many entries sit behind it.
+ */
 export function AnomalyBadge({ count, maxSeverity }: Props) {
   if (count === 0) return null;
 
   return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${severityStyles[maxSeverity]}`}
-    >
-      <AlertTriangleIcon />
-      {count}
+    <span className="inline-flex items-center gap-1.5">
+      <SeverityMark severity={maxSeverity} size="sm" />
+      <span className="figure text-xs leading-none text-ink">{count}</span>
+      <span className="label-sm">{count === 1 ? "flag" : "flags"}</span>
     </span>
-  );
-}
-
-function AlertTriangleIcon() {
-  return (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-    </svg>
   );
 }

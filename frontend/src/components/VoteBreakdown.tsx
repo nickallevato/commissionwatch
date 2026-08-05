@@ -1,82 +1,126 @@
 import { useState } from "react";
 import type { Vote, Member, VoteValue } from "@/types";
 
-const voteStyles: Record<VoteValue, string> = {
-  yes: "bg-green-500/10 text-green-400 border-green-500/20",
-  no: "bg-red-500/10 text-red-400 border-red-500/20",
-  abstain: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
-  absent: "bg-gray-500/10 text-gray-400 border-gray-500/20",
+/**
+ * Every member of the Postgres `vote_value` enum, in tally display order.
+ * This is the only vote vocabulary the interface speaks: yes / no / abstain /
+ * absent. Never "yea" / "nay" — the database does not store those.
+ */
+export const VOTE_ORDER: VoteValue[] = ["yes", "no", "abstain", "absent"];
+
+/** Display capitalisation for each `vote_value`. */
+export const VOTE_LABEL: Record<VoteValue, string> = {
+  yes: "Yes",
+  no: "No",
+  abstain: "Abstain",
+  absent: "Absent",
 };
 
-/** Every member of the `vote_value` enum, in tally display order. */
-const voteOrder: VoteValue[] = ["yes", "no", "abstain", "absent"];
+/** Counts keyed by every `vote_value`, including the zeroes. */
+export type VoteTally = Record<VoteValue, number>;
+
+/** Count a set of cast votes into a complete tally. */
+export function tallyVotes(votes: Vote[]): VoteTally {
+  const counts: VoteTally = { yes: 0, no: 0, abstain: 0, absent: 0 };
+  for (const vote of votes) {
+    counts[vote.vote] += 1;
+  }
+  return counts;
+}
+
+const voteColor: Record<VoteValue, string> = {
+  yes: "text-pass",
+  no: "text-fail",
+  abstain: "text-sev3",
+  absent: "text-muted",
+};
+
+/** Small uppercase treatment shared by the tally captions and roll-call values. */
+const valueLabel =
+  "text-[0.6875rem] font-semibold uppercase tracking-label leading-none";
 
 interface Props {
   votes: Vote[];
   members: Member[];
+  /**
+   * `summary` (default) prints the tally with a disclosure that reveals the
+   * roll call. `roll-call` prints the per-member roll call on its own, for
+   * callers that already show the tally themselves.
+   */
+  mode?: "summary" | "roll-call";
 }
 
-export function VoteBreakdown({ votes, members }: Props) {
+export function VoteBreakdown({ votes, members, mode = "summary" }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const counts = tallyVotes(votes);
 
-  const memberMap = new Map(members.map((m) => [m.id, m]));
-
-  const counts: Record<VoteValue, number> = { yes: 0, no: 0, abstain: 0, absent: 0 };
-  for (const v of votes) {
-    counts[v.vote]++;
+  if (mode === "roll-call") {
+    return <RollCall votes={votes} members={members} />;
   }
 
   return (
     <div>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-sm text-gray-300 hover:text-gray-100"
-      >
-        <div className="flex gap-1.5">
-          {voteOrder
-            .filter((value) => counts[value] > 0)
-            .map((value) => (
-              <span
-                key={value}
-                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${voteStyles[value]}`}
-              >
-                {counts[value]} {value}
-              </span>
-            ))}
-        </div>
-        <svg
-          className={`w-4 h-4 transition-transform ${expanded ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={1.5}
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        {VOTE_ORDER.filter((value) => counts[value] > 0).map((value) => (
+          <span key={value} className="flex items-baseline gap-1.5">
+            <span className={`figure text-sm ${voteColor[value]}`}>
+              {counts[value]}
+            </span>
+            <span className={`${valueLabel} text-muted`}>
+              {VOTE_LABEL[value]}
+            </span>
+          </span>
+        ))}
+
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          className={`${valueLabel} text-muted underline-offset-4 hover:text-ink hover:underline`}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-        </svg>
-      </button>
+          {expanded ? "Hide roll call" : "Roll call"}
+        </button>
+      </div>
 
       {expanded && (
-        <div className="mt-2 space-y-1">
-          {votes.map((vote) => {
-            const member = memberMap.get(vote.member_id);
-            return (
-              <div
-                key={vote.id}
-                className="flex items-center justify-between text-sm px-2 py-1 rounded bg-gray-800/50"
-              >
-                <span className="text-gray-300">
-                  {member?.name ?? "Unknown member"}
-                </span>
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${voteStyles[vote.vote]}`}
-                >
-                  {vote.vote}
-                </span>
-              </div>
-            );
-          })}
+        <div className="mt-3">
+          <RollCall votes={votes} members={members} />
         </div>
       )}
+    </div>
+  );
+}
+
+function RollCall({ votes, members }: { votes: Vote[]; members: Member[] }) {
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+
+  const ordered = [...votes].sort((a, b) => {
+    const an = memberMap.get(a.member_id)?.name ?? "";
+    const bn = memberMap.get(b.member_id)?.name ?? "";
+    return an.localeCompare(bn);
+  });
+
+  return (
+    <div>
+      <span className="label-sm">Roll call</span>
+      <ul className="mt-1.5 border-t border-rule">
+        {ordered.map((vote) => {
+          const member = memberMap.get(vote.member_id);
+          return (
+            <li
+              key={vote.id}
+              className="flex items-baseline justify-between gap-6 border-b border-rule py-1.5"
+            >
+              <span className="text-sm text-ink-soft">
+                {member?.name ?? "Unidentified member"}
+              </span>
+              <span className={`${valueLabel} ${voteColor[vote.vote]}`}>
+                {VOTE_LABEL[vote.vote]}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

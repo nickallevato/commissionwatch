@@ -10,6 +10,22 @@ import {
   anomalyFlags,
 } from "./data";
 
+/** Newest first — matches `.orderBy("created_at", "desc")` on /votes and /anomalies. */
+function byCreatedAtDesc<T extends { created_at: string }>(a: T, b: T): number {
+  return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+}
+
+/** Oldest first — the /meetings/:id/{votes,anomalies,documents} sub-resources
+ *  use the knex default direction, `.orderBy("created_at")`, i.e. ascending. */
+function byCreatedAtAsc<T extends { created_at: string }>(a: T, b: T): number {
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+}
+
+/** Alphabetical — /jurisdictions and /members both `.orderBy("name")`. */
+function byName<T extends { name: string }>(a: T, b: T): number {
+  return a.name.localeCompare(b.name);
+}
+
 export const handlers = [
   http.get("/api/meetings", ({ request }) => {
     const url = new URL(request.url);
@@ -56,7 +72,9 @@ export const handlers = [
   }),
 
   http.get("/api/meetings/:id/documents", ({ params }) => {
-    const docs = meetingDocuments.filter((d) => d.meeting_id === params.id);
+    const docs = meetingDocuments
+      .filter((d) => d.meeting_id === params.id)
+      .sort(byCreatedAtAsc);
     return HttpResponse.json(docs);
   }),
 
@@ -67,17 +85,23 @@ export const handlers = [
   }),
 
   http.get("/api/meetings/:id/votes", ({ params }) => {
-    const data = votes.filter((v) => v.meeting_id === params.id);
+    const data = votes
+      .filter((v) => v.meeting_id === params.id)
+      .sort(byCreatedAtAsc);
     return HttpResponse.json({ data, total: data.length });
   }),
 
   http.get("/api/meetings/:id/anomalies", ({ params }) => {
-    const data = anomalyFlags.filter((a) => a.meeting_id === params.id);
+    const data = anomalyFlags
+      .filter((a) => a.meeting_id === params.id)
+      .sort(byCreatedAtAsc);
     return HttpResponse.json({ data, total: data.length });
   }),
 
   http.get("/api/jurisdictions", () => {
-    return HttpResponse.json(jurisdictions);
+    // The route is `.orderBy("jurisdictions.name")`, not insertion order.
+    const data = [...jurisdictions].sort(byName);
+    return HttpResponse.json(data);
   }),
 
   http.get("/api/members", ({ request }) => {
@@ -88,6 +112,9 @@ export const handlers = [
     if (jurisdictionId) {
       filtered = filtered.filter((m) => m.jurisdiction_id === jurisdictionId);
     }
+
+    // The route is `.orderBy("name", "asc")`, not insertion order.
+    filtered.sort(byName);
 
     return HttpResponse.json({ data: filtered, total: filtered.length });
   }),
@@ -109,6 +136,8 @@ export const handlers = [
     if (agendaItemId) filtered = filtered.filter((v) => v.agenda_item_id === agendaItemId);
     if (memberId) filtered = filtered.filter((v) => v.member_id === memberId);
 
+    filtered.sort(byCreatedAtDesc);
+
     return HttpResponse.json({ data: filtered, total: filtered.length });
   }),
 
@@ -122,6 +151,8 @@ export const handlers = [
     if (meetingId) filtered = filtered.filter((a) => a.meeting_id === meetingId);
     if (severity) filtered = filtered.filter((a) => a.severity === severity);
     if (flagType) filtered = filtered.filter((a) => a.flag_type === flagType);
+
+    filtered.sort(byCreatedAtDesc);
 
     return HttpResponse.json({ data: filtered, total: filtered.length });
   }),

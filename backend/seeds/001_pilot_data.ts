@@ -17,14 +17,25 @@ const MEETINGS = {
   ],
 };
 
+// DEVELOPMENT FIXTURES ONLY — every person below is fictional.
+//
+// This file previously named real, living Bozeman and Gallatin County
+// officials and attached fabricated votes and anomaly flags to them. That is
+// defamatory content sitting one `npm run seed` away from a public database,
+// and an adversarial audit caught it before launch.
+//
+// The rule: seed data never names a real person. Real officials enter the
+// database only through the ingestion pipeline, sourced from a stored
+// artifact, with provenance. Fictional names make it obvious at a glance
+// whether you are looking at seeded or ingested data.
 const MEMBERS = {
   bozeman: [
-    { id: 'd0e1f2a3-b4c5-6789-abcd-012345678901', name: 'Terry Cunningham', title: 'Mayor', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
-    { id: 'e1f2a3b4-c5d6-7890-bcde-123456789012', name: 'Jennifer Madgic', title: 'Deputy Mayor', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
-    { id: 'f2a3b4c5-d6e7-8901-cdef-234567890123', name: 'Christopher Coburn', title: 'Commissioner', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
+    { id: 'd0e1f2a3-b4c5-6789-abcd-012345678901', name: 'Avery Sample', title: 'Mayor', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
+    { id: 'e1f2a3b4-c5d6-7890-bcde-123456789012', name: 'Jordan Placeholder', title: 'Deputy Mayor', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
+    { id: 'f2a3b4c5-d6e7-8901-cdef-234567890123', name: 'Riley Fixture', title: 'Commissioner', jurisdiction_id: BOZEMAN_ID, term_start: '2024-01-01', term_end: '2027-12-31' },
   ],
   gallatin: [
-    { id: 'a3b4c5d6-e7f8-9012-defa-345678901234', name: 'Scott MacFarlane', title: 'Chair', jurisdiction_id: GALLATIN_ID, term_start: '2023-01-01', term_end: '2026-12-31' },
+    { id: 'a3b4c5d6-e7f8-9012-defa-345678901234', name: 'Casey Example', title: 'Chair', jurisdiction_id: GALLATIN_ID, term_start: '2023-01-01', term_end: '2026-12-31' },
   ],
 };
 
@@ -42,8 +53,8 @@ export async function seed(knex: Knex): Promise<void> {
   await knex('jurisdictions').del();
 
   await knex('jurisdictions').insert([
-    { id: BOZEMAN_ID, name: 'City of Bozeman', state: 'MT', type: 'city', website_url: 'https://www.bozeman.net' },
-    { id: GALLATIN_ID, name: 'Gallatin County', state: 'MT', type: 'county', website_url: 'https://www.gallatin.mt.gov' },
+    { id: BOZEMAN_ID, name: 'City of Bozeman', state: 'MT', type: 'city', website_url: 'https://www.bozemanmt.gov' },
+    { id: GALLATIN_ID, name: 'Gallatin County', state: 'MT', type: 'county', website_url: 'https://www.gallatinmt.gov' },
   ]);
 
   await knex('commissions').insert([
@@ -67,11 +78,11 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   await knex('meeting_documents').insert([
-    { meeting_id: MEETINGS.bozeman[0].id, title: 'May 12 Agenda Packet', document_type: 'agenda', url: 'https://www.bozeman.net/meetings/2026-05-12/agenda.pdf' },
-    { meeting_id: MEETINGS.bozeman[1].id, title: 'April 28 Agenda Packet', document_type: 'agenda', url: 'https://www.bozeman.net/meetings/2026-04-28/agenda.pdf' },
-    { meeting_id: MEETINGS.bozeman[1].id, title: 'April 28 Minutes', document_type: 'minutes', url: 'https://www.bozeman.net/meetings/2026-04-28/minutes.pdf' },
-    { meeting_id: MEETINGS.gallatin[1].id, title: 'April 22 Agenda', document_type: 'agenda', url: 'https://www.gallatin.mt.gov/meetings/2026-04-22/agenda.pdf' },
-    { meeting_id: MEETINGS.gallatin[1].id, title: 'April 22 Minutes', document_type: 'minutes', url: 'https://www.gallatin.mt.gov/meetings/2026-04-22/minutes.pdf' },
+    { meeting_id: MEETINGS.bozeman[0].id, title: 'May 12 Agenda Packet', document_type: 'agenda', url: 'https://example.invalid/seed/bozeman/2026-05-12/agenda.pdf' },
+    { meeting_id: MEETINGS.bozeman[1].id, title: 'April 28 Agenda Packet', document_type: 'agenda', url: 'https://example.invalid/seed/bozeman/2026-04-28/agenda.pdf' },
+    { meeting_id: MEETINGS.bozeman[1].id, title: 'April 28 Minutes', document_type: 'minutes', url: 'https://example.invalid/seed/bozeman/2026-04-28/minutes.pdf' },
+    { meeting_id: MEETINGS.gallatin[1].id, title: 'April 22 Agenda', document_type: 'agenda', url: 'https://example.invalid/seed/gallatin/2026-04-22/agenda.pdf' },
+    { meeting_id: MEETINGS.gallatin[1].id, title: 'April 22 Minutes', document_type: 'minutes', url: 'https://example.invalid/seed/gallatin/2026-04-22/minutes.pdf' },
   ]);
 
   await knex('members').insert([

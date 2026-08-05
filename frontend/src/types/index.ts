@@ -97,8 +97,16 @@ export interface Member {
   name: string;
   title: string | null;
   email: string | null;
-  /** `term_start` is NOT NULL in the members table. */
+  /**
+   * `term_start` is NOT NULL in the members table.
+   *
+   * Serialized as a full ISO 8601 timestamp, NOT "YYYY-MM-DD": the column is a
+   * Postgres `date`, node-pg parses OID 1082 into a JS `Date`, and `res.json()`
+   * stringifies that to e.g. "2023-01-15T00:00:00.000Z". Format for display
+   * rather than slicing the string.
+   */
   term_start: string;
+  /** ISO 8601 timestamp — see the note on {@link Member.term_start}. */
   term_end: string | null;
   created_at: string;
   updated_at: string;
@@ -124,6 +132,10 @@ export interface AnomalyFlag {
   flag_type: AnomalyFlagType;
   severity: AnomalySeverity;
   description: string;
+  /**
+   * Only ever non-null when `source` is "manual". The detector inserts its
+   * flags without a `metadata` value, so every "auto" row has `metadata: null`.
+   */
   metadata: Record<string, unknown> | null;
   source: AnomalySource;
   created_at: string;

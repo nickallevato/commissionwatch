@@ -1,3 +1,188 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   CommissionWatch — editorial base layer.
+   A newspaper of record: paper ground, ink text, hairline rules, one red accent.
+   No gradients, no drop shadows, no dark mode.
+   --------------------------------------------------------------------------- */
+
+@layer base {
+  /* Mirrors of the Tailwind palette, for inline styles and SVG fills where a
+     utility class cannot be used. Keep in sync with tailwind.config.ts. */
+  :root {
+    --cw-paper: #fffdf8;
+    --cw-paper-sunk: #f6f3ea;
+    --cw-ink: #16161a;
+    --cw-ink-soft: #3a3a40;
+    --cw-accent: #b03a2e;
+    --cw-rule: #e8e3d8;
+    --cw-muted: #6e6a62;
+
+    --cw-sev5: #b03a2e;
+    --cw-sev4: #b03a2e;
+    --cw-sev3: #c2860c;
+    --cw-sev2: #8a857c;
+    --cw-sev1: #8a857c;
+    --cw-pass: #1e6b45;
+    --cw-fail: #b03a2e;
+
+    --cw-font-display: "Iowan Old Style", Georgia, "Times New Roman", Times,
+      serif;
+    --cw-font-sans: system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    --cw-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas,
+      "Liberation Mono", monospace;
+
+    color-scheme: light;
+  }
+
+  html {
+    background-color: var(--cw-paper);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--cw-paper);
+    color: var(--cw-ink);
+    font-family: var(--cw-font-sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Headings default to the display serif; override with `font-sans` where a
+     heading is UI chrome rather than editorial copy. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--cw-font-display);
+    font-weight: 600;
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    color: var(--cw-ink);
+  }
+
+  /* A rule, not a box. */
+  hr {
+    border: 0;
+    border-top: 1px solid var(--cw-rule);
+  }
+
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--cw-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background-color: #f8e3df;
+    color: var(--cw-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--cw-accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Uppercase accent label above a headline or section. Use sparingly — the
+     accent is the only red on the page. */
+  .kicker {
+    display: inline-block;
+    font-family: var(--cw-font-sans);
+    font-size: 0.5rem;
+    font-weight: 700;
+    line-height: 1.4;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--cw-accent);
+  }
+
+  /* Uppercase muted micro-label: column heads, metadata keys, strap items. */
+  .label-sm {
+    display: inline-block;
+    font-family: var(--cw-font-sans);
+    font-size: 0.5rem;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--cw-muted);
+  }
+
+  /* 1px ink rule. Put it on an <hr> or an empty <div>; it draws on top. */
+  .rule-hi {
+    border: 0;
+    border-top: 1px solid var(--cw-ink);
+  }
+
+  /* 2px ink rule — the masthead rule. */
+  .rule-hi-strong {
+    border: 0;
+    border-top: 2px solid var(--cw-ink);
+  }
+
+  /* Citation chip: source attribution as a small pill. */
+  .cite {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 100%;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--cw-rule);
+    border-radius: 9999px;
+    background-color: var(--cw-paper);
+    font-family: var(--cw-font-sans);
+    font-size: 0.625rem;
+    line-height: 1.5;
+    letter-spacing: 0.04em;
+    color: var(--cw-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  a.cite:hover,
+  a.cite:focus-visible {
+    border-color: var(--cw-ink);
+    color: var(--cw-ink);
+  }
+
+  /* Serif display treatment. The size below is a default — add any `text-*`
+     utility to override it, since utilities outrank the components layer. */
+  .headline {
+    font-family: var(--cw-font-display);
+    font-weight: 600;
+    font-size: clamp(1.75rem, 1.15rem + 2.2vw, 3.25rem);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    color: var(--cw-ink);
+    text-wrap: balance;
+  }
+}
+
+@layer utilities {
+  /* Figures never reflow when they change. Applied to any element containing
+     numerals that update or align in a column. */
+  .tabular {
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+  }
+
+  /* The full numeral treatment: mono stack, always tabular. */
+  .figure {
+    font-family: var(--cw-font-mono);
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+  }
+}

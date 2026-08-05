@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import { useMembers, useMember } from "./useMembers";
 import { server } from "@/mocks/server";
+import { members } from "@/mocks/data";
 import { beforeAll, afterAll, afterEach, describe, it, expect } from "vitest";
 
 beforeAll(() => server.listen());
@@ -23,18 +24,23 @@ describe("useMembers", () => {
   });
 
   it("filters by jurisdiction", async () => {
-    const { result } = renderHook(() => useMembers("j1"), { wrapper });
+    const jurisdictionId = members[0].jurisdiction_id;
+    const { result } = renderHook(() => useMembers(jurisdictionId), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    // Guard against the filter matching nothing, which would make the
+    // assertion below vacuous.
+    expect(result.current.data!.length).toBeGreaterThan(0);
     for (const m of result.current.data!) {
-      expect(m.jurisdiction_id).toBe("j1");
+      expect(m.jurisdiction_id).toBe(jurisdictionId);
     }
   });
 });
 
 describe("useMember", () => {
   it("fetches a single member", async () => {
-    const { result } = renderHook(() => useMember("mem1"), { wrapper });
+    const member = members[0];
+    const { result } = renderHook(() => useMember(member.id), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data!.name).toBe("Sarah Chen");
+    expect(result.current.data!.name).toBe(member.name);
   });
 });

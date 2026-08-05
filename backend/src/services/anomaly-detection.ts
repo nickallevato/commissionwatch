@@ -3,6 +3,10 @@ import { anomalyEvents } from "./notification";
 
 export const RULES_VERSION = "2.0.0";
 
+/**
+ * The shape the individual `check*` rules produce — an anomaly that has not
+ * been persisted yet, so it has no `id`, `created_at`, `metadata` or `source`.
+ */
 export interface AnomalyFlag {
   meeting_id: string;
   flag_type: string;
@@ -10,6 +14,19 @@ export interface AnomalyFlag {
   severity: string;
   agenda_item_id?: string | null;
   source?: string;
+}
+
+/**
+ * A persisted `anomaly_flags` row, as returned by `INSERT ... RETURNING *`.
+ * This is what the detection endpoints serialize, so every column the API
+ * contract declares required must be present here.
+ */
+export interface AnomalyFlagRow extends AnomalyFlag {
+  id: string;
+  agenda_item_id: string | null;
+  metadata: Record<string, unknown> | null;
+  source: string;
+  created_at: string;
 }
 
 interface Meeting {
@@ -34,7 +51,7 @@ interface AgendaItem {
   created_at: string;
 }
 
-export async function detectAnomalies(db: Knex, meetingId: string): Promise<AnomalyFlag[]> {
+export async function detectAnomalies(db: Knex, meetingId: string): Promise<AnomalyFlagRow[]> {
   const meeting = await db("meetings").where({ id: meetingId }).first() as Meeting | undefined;
   if (!meeting) return [];
 
@@ -60,6 +77,11 @@ export async function detectAnomalies(db: Knex, meetingId: string): Promise<Anom
     }
   }
 
+  // The persisted rows — not `flags` — are what callers get back. The insert
+  // adds `source` and the database fills in `id`, `created_at` and `metadata`,
+  // none of which exist on the in-memory objects the rules produced.
+  let inserted: AnomalyFlagRow[] = [];
+
   await db.transaction(async (trx) => {
     await trx("anomaly_flags")
       .where({ meeting_id: meetingId, source: "auto" })
@@ -67,17 +89,17 @@ export async function detectAnomalies(db: Knex, meetingId: string): Promise<Anom
 
     if (flags.length > 0) {
       const rows = flags.map((f) => ({ ...f, source: "auto" }));
-      await trx("anomaly_flags").insert(rows);
+      inserted = await trx("anomaly_flags").insert(rows).returning("*");
     }
   });
 
-  await completeDetectionRun(db, runId, flags.length);
+  await completeDetectionRun(db, runId, inserted.length);
 
-  if (flags.length > 0) {
-    anomalyEvents.emit("anomaly.detected", flags);
+  if (inserted.length > 0) {
+    anomalyEvents.emit("anomaly.detected", inserted);
   }
 
-  return flags;
+  return inserted;
 }
 
 export async function detectAnomaliesBatch(
