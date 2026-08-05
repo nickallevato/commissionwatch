@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Lets a failed deploy be retried without a dummy commit — the usual
+  # reason a deploy fails here is a missing secret, which is fixed in
+  # Gitea rather than in the repository.
+  workflow_dispatch:
 
 jobs:
   ci-backend:
@@ -155,7 +159,7 @@ jobs:
   # wrong architecture.
   build-and-push:
     needs: [ci-backend, ci-frontend]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: dh1
     env:
       AWS_REGION: us-west-2
@@ -232,7 +236,7 @@ jobs:
   # matching every other product on the shared stack.
   deploy-aws:
     needs: build-and-push
-    if: github.event_name == 'push' && vars.SHARED_STACK_LIVE == 'true'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.SHARED_STACK_LIVE == 'true'
     runs-on: dh1
     env:
       DEPLOY_HOST: 184.34.114.153
