@@ -1,0 +1,131 @@
+name: commissionwatch
+
+# Deployment onto the shared `*.bmux.sh` platform host (your-org/platform-aws).
+#
+# Shape differs from deploy/docker-compose.yml in three ways that matter:
+#
+# 1. NETWORKS. `edge` is the platform's external network that the shared Caddy
+#    lives on; only the web container joins it, because only the web container
+#    should be reachable from the front door. Everything else sits on a PRIVATE
+#    network created by this stack.
+#
+#    Note we deliberately do NOT join the platform's shared `internal` network.
+#    That network exists so products can reach the shared Postgres. This product
+#    runs its own database (see 2), so joining it would only make our Postgres
+#    and MinIO reachable by the seven other products on the host for no benefit.
+#
+# 2. OWN DATABASE. The platform's shared Postgres is postgres:15-alpine, which
+#    does not ship pgvector. Migration 007 runs `CREATE EXTENSION vector` at
+#    container start, so on the shared database the backend would crash-loop
+#    forever. `drift` sets the precedent for a per-product data sidecar with its
+#    own Redis.
+#
+# 3. NO PUBLISHED PORTS. Not one service maps a host port. The host's security
+#    group leaves :80 open to the world for ACME, so anything bound to
+#    0.0.0.0 is internet-reachable. Caddy reaches the web container over `edge`.
+#
+# The host is a t4g.medium: 2 vCPU / 4 GB, arm64. Images MUST be built for
+# linux/arm64 or they fail at startup with `exec format error`. Memory limits
+# below are deliberate — this stack shares 4 GB with Caddy, the shared Postgres,
+# and seven other product stacks.
+
+services:
+  web:
+    image: ${IMAGE_FRONTEND}
+    container_name: commissionwatch-web
+    restart: unless-stopped
+    networks:
+      - edge
+      - cw-internal
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  backend:
+    image: ${IMAGE_BACKEND}
+    container_name: commissionwatch-backend
+    restart: unless-stopped
+    networks:
+      - cw-internal
+    mem_limit: 512m
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@commissionwatch-db:5432/${POSTGRES_DB}
+      - MINIO_ENDPOINT=commissionwatch-minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET=${MINIO_BUCKET:-meeting-documents}
+      # Delivery channels (W7). Encrypts webhook URLs at rest.
+      - CHANNEL_SECRET_KEY=${CHANNEL_SECRET_KEY}
+      - CI_EVENT_TOKEN=${CI_EVENT_TOKEN}
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: commissionwatch-db
+    restart: unless-stopped
+    networks:
+      - cw-internal
+    mem_limit: 512m
+    # Postgres sizes shared_buffers from total HOST memory, not the container
+    # limit, so on a shared 4 GB box it will happily reserve far more than its
+    # share. These are set explicitly for that reason.
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c max_connections=25
+      -c effective_cache_size=256MB
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - commissionwatch-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  minio:
+    image: minio/minio:latest
+    container_name: commissionwatch-minio
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    networks:
+      - cw-internal
+    mem_limit: 256m
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
+    volumes:
+      - commissionwatch-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+networks:
+  # Created out-of-band by the platform's bootstrap; shared with Caddy.
+  edge:
+    external: true
+  # Private to this stack. Not the platform's shared `internal` network.
+  cw-internal:
+    driver: bridge
+
+volumes:
+  commissionwatch-pgdata:
+  commissionwatch-minio:
