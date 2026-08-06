@@ -51,7 +51,14 @@ services:
       backend:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      # 127.0.0.1, NOT localhost. /etc/hosts in this image maps localhost to
+      # both 127.0.0.1 and ::1, busybox wget tries ::1 first, and nginx listens
+      # only on IPv4 0.0.0.0:3000 — so `wget http://localhost:3000/` fails with
+      # "can't connect to remote host: Connection refused" and this container
+      # never becomes healthy. `up -d --wait` then blocks until its timeout and
+      # fails the deploy, with a healthcheck that looks obviously correct.
+      # Verified 2026-08-06: localhost fails, 127.0.0.1 succeeds, same image.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 15s
       timeout: 5s
       retries: 5

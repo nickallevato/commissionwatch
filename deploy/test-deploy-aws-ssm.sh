@@ -58,6 +58,9 @@ case "$*" in
   # race. Drain stdin so the stub behaves like the thing it stands in for.
   login*) cat > /dev/null; exit 0 ;;
   "network inspect edge") exit 0 ;;   # pretend the platform network exists
+  *"ps -q web") echo "webcid"; exit 0 ;;
+  *version.json) printf '{"service":"frontend","sha":"%s"}\n' "${STUB_WEB_SHA-}"; exit 0 ;;
+  *"/api/version") printf '{"service":"backend","sha":"%s"}\n' "${STUB_API_SHA-}"; exit 0 ;;
 esac
 exit 0
 STUB
@@ -99,11 +102,21 @@ bash -n "$TMP/roundtrip.sh" && ok "payload still valid bash after JSON+base64 ro
 # ── Drive the host-side script ──────────────────────────────────────────────
 run_remote() {
   local dir="$1"; shift
+  # REMOTE_DIR and EXPECT_SHA are rewritten rather than passed in the
+  # environment, because the payload assigns them in its header and that
+  # assignment correctly wins over any inherited value — which is the whole
+  # point of stamping them at build time. Editing the header is the only
+  # faithful way to vary them.
+  local body
+  body="$(sed -e "s|^REMOTE_DIR=.*|REMOTE_DIR='$dir'|" \
+              -e "s|^EXPECT_SHA=.*|EXPECT_SHA='${RUN_EXPECT_SHA-}'|" \
+              "$TMP/roundtrip.sh")"
+  # Defaults first so "$@" can override them — env applies assignments left to
+  # right, last wins. VERSION_POLL_INTERVAL=0 keeps the timeout path from
+  # costing 30 seconds.
   STUB_DOCKER_LOG="$TMP/docker.log" PATH="$TMP/bin:$PATH" \
-    env "$@" bash -c "
-      REMOTE_DIR='$dir'
-      $(sed "s|^REMOTE_DIR=.*|REMOTE_DIR='$dir'|" "$TMP/roundtrip.sh")
-    " > "$TMP/run.log" 2>&1
+    env STUB_WEB_SHA=deadbeef STUB_API_SHA=deadbeef VERSION_POLL_INTERVAL=0 "$@" \
+    bash -c "$body" > "$TMP/run.log" 2>&1
 }
 
 echo
@@ -150,6 +163,98 @@ check "no credentials anywhere fails" "$rc" "3"
 grep -q "ssm:GetParameter" "$TMP/run.log" \
   && ok "failure names the required IAM statement" || bad "failure gave no IAM guidance"
 [ -f "$D/.env" ] && bad "wrote a .env despite having no secrets" || ok "no .env written on failure"
+
+# ── Version skew ────────────────────────────────────────────────────────────
+# `up -d --wait` proves the containers started, not that they are the ones we
+# meant. The images roll independently, so a stack serving the old API behind
+# the new UI passes every health check. These cases are that detector.
+echo
+echo "version skew"
+
+D="$TMP/case-skew"; mkdir -p "$D"; : > "$TMP/docker.log"
+run_remote "$D" STUB_PARAM_OK=1 STUB_WEB_SHA=aaaa111 STUB_API_SHA=bbbb222 && rc=0 || rc=$?
+check "mismatched web/api versions fail the deploy" "$rc" "25"
+grep -q "version skew" "$TMP/run.log" \
+  && ok "skew failure says which side is which" || bad "skew failure was not explained"
+
+D="$TMP/case-match"; mkdir -p "$D"; : > "$TMP/docker.log"
+run_remote "$D" STUB_PARAM_OK=1 STUB_WEB_SHA=cafe123 STUB_API_SHA=cafe123 && rc=0 || rc=$?
+check "matching versions pass" "$rc" "0"
+grep -q "both containers serving cafe123" "$TMP/run.log" \
+  && ok "reports the deployed version" || bad "did not report the deployed version"
+# Both fetches go THROUGH the web container, so a pass also proves the nginx
+# proxy reaches the backend — which /api/health alone does not.
+grep -q "exec webcid wget -qO- http://127.0.0.1:3000/api/version" "$TMP/docker.log" \
+  && ok "api version is fetched through the web container's proxy" \
+  || bad "api version was not fetched through the proxy"
+
+D="$TMP/case-stale"; mkdir -p "$D"; : > "$TMP/docker.log"
+RUN_EXPECT_SHA=new1111 run_remote "$D" STUB_PARAM_OK=1 STUB_WEB_SHA=old9999 STUB_API_SHA=old9999 \
+  && rc=0 || rc=$?
+check "agreeing but stale versions fail against EXPECT_SHA" "$rc" "26"
+grep -q "stale pull rather than skew" "$TMP/run.log" \
+  && ok "stale failure is distinguished from skew" || bad "stale failure not distinguished"
+
+D="$TMP/case-noversion"; mkdir -p "$D"; : > "$TMP/docker.log"
+run_remote "$D" STUB_PARAM_OK=1 STUB_WEB_SHA= STUB_API_SHA= && rc=0 || rc=$?
+check "unreachable version endpoints fail the deploy" "$rc" "24"
+
+# Two unstamped images always agree, so the check would pass while proving
+# nothing. That has to be said out loud or it is worse than no check at all.
+D="$TMP/case-unstamped"; mkdir -p "$D"; : > "$TMP/docker.log"
+run_remote "$D" STUB_PARAM_OK=1 STUB_WEB_SHA=unknown STUB_API_SHA=unknown && rc=0 || rc=$?
+check "unstamped images still deploy" "$rc" "0"
+grep -q "proved" "$TMP/run.log" \
+  && ok "warns that an unstamped comparison proves nothing" \
+  || bad "silently passed an unstamped comparison"
+
+# ── Runner traps ────────────────────────────────────────────────────────────
+echo
+echo "runner traps"
+grep -q 'export AWS_PAGER=""' "$TMP/roundtrip.sh" \
+  && ok "remote payload disables the CLI pager" \
+  || bad "remote payload does not set AWS_PAGER (aws v2 hangs on less)"
+grep -q 'export AWS_PAGER=""' "$HERE/deploy-aws-ssm.sh" \
+  && ok "local script disables the CLI pager" || bad "local script does not set AWS_PAGER"
+grep -q "unset AWS_PROFILE" "$TMP/roundtrip.sh" \
+  && ok "remote payload clears an empty AWS_PROFILE" || bad "remote payload keeps AWS_PROFILE"
+
+# In this image /etc/hosts maps localhost to both 127.0.0.1 and ::1, busybox
+# wget tries ::1 first, and nginx listens only on IPv4 — so a `localhost` URL
+# fails with a flat "Connection refused". The old web healthcheck used one,
+# which meant the container could never go healthy and `up -d --wait` would
+# block until timeout. It looks obviously correct, so it needs a test.
+grep -q "http://localhost:" "$TMP/roundtrip.sh" \
+  && bad "deploy payload probes localhost (resolves to ::1; nginx is IPv4-only)" \
+  || ok "deploy payload probes 127.0.0.1, not localhost"
+# Comments are stripped first — the compose file explains this trap in prose,
+# and matching that would fail the test for documenting the thing it checks.
+grep -v '^[[:space:]]*#' "$HERE/docker-compose.shared.yml" | grep -q "http://localhost:" \
+  && bad "a compose healthcheck probes localhost; it can never pass" \
+  || ok "no compose healthcheck probes localhost"
+
+# ── Compose networking ──────────────────────────────────────────────────────
+# A service declaring `networks:` joins ONLY those. The public service and the
+# internal one must therefore share a network explicitly, or the proxy 502s
+# with both containers healthy.
+echo
+echo "compose networking"
+python3 - "$HERE" <<'PY' > "$TMP/net.out" 2>&1 || true
+import sys, yaml
+c = yaml.safe_load(open(f"{sys.argv[1]}/docker-compose.shared.yml"))
+svc = c["services"]
+web, api = set(svc["web"]["networks"]), set(svc["backend"]["networks"])
+print("SHARED", bool(web & api))
+print("WEB_ON_EDGE", "edge" in web)
+print("API_OFF_EDGE", "edge" not in api)
+print("EDGE_EXTERNAL", c["networks"]["edge"].get("external") is True)
+PY
+for a in "SHARED True:web and backend share a network" \
+         "WEB_ON_EDGE True:web is on the platform edge network" \
+         "API_OFF_EDGE True:backend is kept off edge" \
+         "EDGE_EXTERNAL True:edge is external, never created by this stack"; do
+  grep -q "^${a%%:*}$" "$TMP/net.out" && ok "${a#*:}" || bad "${a#*:}"
+done
 
 # ── Shared-host safety ──────────────────────────────────────────────────────
 # These are the flags that reach outside our compose project. A regression here

@@ -123,6 +123,58 @@ replaces the request URI when the directive specifies one.
 The compose `depends_on` is kept for ordering but is no longer load-bearing — it never helped on a
 host reboot anyway.
 
+## Version skew, and two defects found proving it
+
+`up -d --wait` proves the containers started. It does not prove they are the containers we meant to
+start. The web and api images roll **independently**, so a stack serving the old API behind the new
+UI passes every health check and looks perfectly fine from outside.
+
+Both images are now stamped at build time from one `github.sha` expansion — `GET /version.json`
+from the web image, `GET /api/version` from the api. After `up -d`, the deploy fetches both
+**through the web container**, so a pass also proves the nginx proxy reaches the backend, which
+`/api/health` alone does not. Distinct exit codes, because these have different causes and
+different fixes:
+
+| | Meaning | Exit |
+|---|---|---|
+| web ≠ api | one image rolled, the other did not | 25 |
+| both agree but ≠ `EXPECT_SHA` | stale pull — the tag resolved to an older image | 26 |
+| either unreadable | image predates the endpoints, or the proxy is broken | 24 |
+
+An unstamped build reports `"unknown"`, never a commit-shaped string: two unstamped images always
+agree, so the check would otherwise pass while proving nothing. That case deploys but warns loudly,
+and a backend test asserts the unstamped value cannot look like a SHA.
+
+Verified 2026-08-06 against real images: a genuinely skewed pair (`different99` vs `testsha123`)
+was detected, and a matched pair reported `testsha123` from both endpoints through the proxy.
+
+### `localhost` resolves to `::1`, and nginx listens only on IPv4
+
+Found while verifying the above. In `nginx:alpine`, `/etc/hosts` maps `localhost` to both
+`127.0.0.1` and `::1`; busybox wget tries `::1` first; nginx listens on `0.0.0.0:3000` only. So
+`wget http://localhost:3000/` fails with a flat `Connection refused`.
+
+**The `web` healthcheck in `docker-compose.shared.yml` used exactly that URL.** Verified by running
+the same image twice with only the healthcheck differing:
+
+| Healthcheck | Result after 25s |
+|---|---|
+| `wget -qO- http://localhost:3000/` | **unhealthy** |
+| `wget -qO- http://127.0.0.1:3000/` | **healthy** |
+
+The container could therefore never become healthy, and `up -d --wait` — used by both the old SSH
+job and this one — would have blocked until its timeout and failed the deploy, pointing at a
+healthcheck that reads as obviously correct. This would have bitten on the first automated deploy
+regardless of anything else in this change. Both the healthcheck and the version probe now use
+`127.0.0.1`, and a test asserts neither reverts.
+
+### `AWS_PAGER`
+
+CLI v2 pages output through `less(1)`. On a runner `TERM` is undriveable, so every `aws` call
+stalls on "Press RETURN" rather than failing — the step looks merely slow until something times
+out. Set on both ends and in the workflow job env. Asserted in tests, because a hang is far harder
+to diagnose than an error.
+
 ## What is not done here
 
 - **Instance-role grant** for `ssm:GetParameter` + `kms:Decrypt`. Out of band, not ours. Until it

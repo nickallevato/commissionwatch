@@ -163,8 +163,39 @@ Each of these cost a failed deploy.
   the database; rotation is an `ALTER ROLE` on the running instance.
 - **Never `--remove-orphans`, never `--volumes`.** They reach outside our compose project;
   `--remove-orphans` can delete the platform's Caddy container. Asserted in the tests.
+- **`AWS_PAGER` must be `""`.** CLI v2 pages through `less(1)`; on a runner `TERM` is undriveable,
+  so every `aws` call stalls on "Press RETURN" instead of failing. The step looks merely slow.
+  Set in the script, in the remote payload, and in the workflow job env.
+- **Probe `127.0.0.1`, never `localhost`, inside these containers.** `/etc/hosts` maps `localhost`
+  to `::1` as well, busybox wget tries `::1` first, and nginx listens only on IPv4 — so a
+  `localhost` URL gives a flat `Connection refused`. The `web` healthcheck used one, which meant it
+  could never go healthy and `up -d --wait` would block until timeout. Verified 2026-08-06: same
+  image, `localhost` → unhealthy, `127.0.0.1` → healthy.
 - **SSM output truncates at 24000 characters.** Nothing here configures S3 or CloudWatch delivery,
   so a very chatty failure loses its tail. Re-run the failing piece by hand if you need more.
+
+## Version skew
+
+Both images are stamped at build time and serve their build SHA — `/version.json` from the web
+image, `/api/version` from the api. The deploy fetches both through the web container and fails if
+they disagree. The images roll independently, so a stack serving the old API behind the new UI is
+healthy by every other measure; this is the only thing that makes it visible.
+
+| Exit | Meaning | What to do |
+|---|---|---|
+| 25 | web and api report different SHAs | redeploy with both `IMAGE_*` pinned to one commit |
+| 26 | both agree but differ from `EXPECT_SHA` | a stale pull — the tag resolved to an older image |
+| 24 | an endpoint was unreadable | image predates the endpoints, or the `/api/` proxy is broken |
+
+Checking by hand:
+
+```bash
+curl -s https://commissionwatch.bmux.sh/version.json
+curl -s https://commissionwatch.bmux.sh/api/version
+```
+
+An unstamped image reports `"unknown"` rather than anything commit-shaped, and the deploy says
+outright that comparing two unstamped images proves nothing.
 
 ## When something breaks
 

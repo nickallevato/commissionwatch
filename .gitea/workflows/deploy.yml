@@ -193,6 +193,10 @@ jobs:
     env:
       AWS_REGION: us-west-2
       ECR_REGISTRY: 123456789012.dkr.ecr.us-west-2.amazonaws.com
+      # AWS CLI v2 pages output through less(1). On a runner TERM is
+      # undriveable, so every aws call stalls on "Press RETURN" rather than
+      # failing — the step looks merely slow until something times out.
+      AWS_PAGER: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -235,12 +239,30 @@ jobs:
             docker buildx inspect --bootstrap
           } 2>&1 | tee -a /tmp/ci-output.txt
 
+      # BUILD_SHA is baked into both images and served by GET /api/version and
+      # GET /version.json. The deploy compares the two: the images roll
+      # independently, so a stack serving the old API behind the new UI is
+      # perfectly healthy from the outside and otherwise invisible.
+      #
+      # Both images are stamped with the SAME value from one shell expansion,
+      # so a mismatch can only mean a genuinely skewed deploy.
+      - name: Stamp the build identifiers
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo "BUILD_SHA=${{ github.sha }}" >> "$GITHUB_ENV"
+            echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          } 2>&1 | tee -a /tmp/ci-output.txt
+
       - name: Build and push backend (arm64)
         shell: bash
         run: |
           set -o pipefail
           {
             docker buildx build --platform linux/arm64 --push \
+              --build-arg "BUILD_SHA=$BUILD_SHA" \
+              --build-arg "BUILD_TIME=$BUILD_TIME" \
               -t "$ECR_REGISTRY/your-org/commissionwatch-backend:${{ github.sha }}" \
               -t "$ECR_REGISTRY/your-org/commissionwatch-backend:latest" \
               ./backend
@@ -252,6 +274,8 @@ jobs:
           set -o pipefail
           {
             docker buildx build --platform linux/arm64 --push \
+              --build-arg "BUILD_SHA=$BUILD_SHA" \
+              --build-arg "BUILD_TIME=$BUILD_TIME" \
               -t "$ECR_REGISTRY/your-org/commissionwatch-frontend:${{ github.sha }}" \
               -t "$ECR_REGISTRY/your-org/commissionwatch-frontend:latest" \
               ./frontend
@@ -285,6 +309,8 @@ jobs:
       AWS_REGION: us-west-2
       INSTANCE_ID: i-0123456789abcdef0
       ECR_REGISTRY: 123456789012.dkr.ecr.us-west-2.amazonaws.com
+      # See build-and-push: without this every aws call hangs on less(1).
+      AWS_PAGER: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -333,6 +359,10 @@ jobs:
             # is the same script with an older tag.
             export IMAGE_BACKEND="$ECR_REGISTRY/your-org/commissionwatch-backend:${{ github.sha }}"
             export IMAGE_FRONTEND="$ECR_REGISTRY/your-org/commissionwatch-frontend:${{ github.sha }}"
+
+            # Makes the deploy assert that both containers actually came up
+            # serving THIS commit, rather than only that they came up.
+            export EXPECT_SHA="${{ github.sha }}"
 
             bash ./deploy/deploy-aws-ssm.sh
           } 2>&1 | tee -a /tmp/ci-output.txt

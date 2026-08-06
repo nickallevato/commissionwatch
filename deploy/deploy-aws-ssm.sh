@@ -56,6 +56,15 @@ if [ -z "${AWS_PROFILE:-}" ]; then
   unset AWS_PROFILE 2>/dev/null || true
 fi
 
+# ── AWS CLI v2 pages its output through less(1) ─────────────────────────────
+# On a CI runner TERM is undriveable, so every aws call stalls waiting on
+# "Press RETURN" until something times out. It does not fail — it hangs, which
+# is worse, because the step looks merely slow. Measured elsewhere on this
+# platform: a 12-second deploy became a 13m22s step.
+#
+# Must be set on BOTH ends: here, and in the script the host runs.
+export AWS_PAGER=""
+
 PRODUCT="${PRODUCT:-commissionwatch}"
 AWS_REGION="${AWS_REGION:-us-west-2}"
 INSTANCE_ID="${INSTANCE_ID:-i-0123456789abcdef0}"
@@ -191,16 +200,20 @@ COMPOSE_B64="$(base64 < "$COMPOSE_FILE" | tr -d '\n')"
   printf 'ENV_PARAM=%q\n'     "$ENV_PARAM"
   printf 'IMAGE_BACKEND=%q\n' "$IMAGE_BACKEND"
   printf 'IMAGE_FRONTEND=%q\n' "$IMAGE_FRONTEND"
+  printf 'EXPECT_SHA=%q\n'    "${EXPECT_SHA:-}"
   printf 'COMPOSE_B64=%q\n'   "$COMPOSE_B64"
   cat <<'REMOTE'
 
 set -euo pipefail
 
-# Trap 3 applies on the host too: the SSM agent runs commands as root with an
-# environment we do not control.
+# Both of these apply on the host too: the SSM agent runs commands as root with
+# an environment we do not control. An empty AWS_PROFILE reads as missing
+# credentials, and an unset AWS_PAGER makes CLI v2 hang on `less` rather than
+# fail — a deploy that appears merely slow until the SSM command times out.
 if [ -z "${AWS_PROFILE:-}" ]; then
   unset AWS_PROFILE 2>/dev/null || true
 fi
+export AWS_PAGER=""
 export AWS_DEFAULT_REGION="$AWS_REGION"
 
 echo "== $PRODUCT -> $REMOTE_DIR on $(hostname), $(date -u +%FT%TZ)"
@@ -294,7 +307,69 @@ if ! "${COMPOSE[@]}" up -d --wait --wait-timeout 180; then
   exit 22
 fi
 "${COMPOSE[@]}" ps
-echo "== deploy complete"
+
+# ── Version skew check ──────────────────────────────────────────────────────
+# `up -d --wait` proves the containers started. It does not prove they are the
+# containers we meant to start. The two images roll INDEPENDENTLY, so a stack
+# serving the old API behind the new UI passes every health check and looks
+# perfectly fine from outside — this is the only thing that makes it visible.
+#
+# Both are fetched THROUGH the web container, so a pass also proves the nginx
+# proxy actually reaches the backend, which /api/health alone does not.
+WEB_CID="$("${COMPOSE[@]}" ps -q web)"
+[ -n "$WEB_CID" ] || { echo "FATAL: web container not found after up" >&2; exit 23; }
+
+sha_of() {
+  # busybox wget, which is what nginx:alpine ships. 127.0.0.1 rather than
+  # localhost: that name resolves to ::1 first here and nginx listens only on
+  # IPv4, so localhost gives a flat "Connection refused". See the healthcheck
+  # note in docker-compose.shared.yml.
+  docker exec "$WEB_CID" wget -qO- "http://127.0.0.1:3000$1" 2>/dev/null \
+    | sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+# Overridable so the test suite does not spend 30s proving the timeout path.
+VERSION_POLL_INTERVAL="${VERSION_POLL_INTERVAL:-3}"
+WEB_SHA=""; API_SHA=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  WEB_SHA="$(sha_of /version.json || true)"
+  API_SHA="$(sha_of /api/version || true)"
+  [ -n "$WEB_SHA" ] && [ -n "$API_SHA" ] && break
+  sleep "$VERSION_POLL_INTERVAL"
+done
+
+echo "   web  version: ${WEB_SHA:-<unreachable>}"
+echo "   api  version: ${API_SHA:-<unreachable>}"
+
+if [ -z "$WEB_SHA" ] || [ -z "$API_SHA" ]; then
+  echo "FATAL: could not read both version endpoints." >&2
+  echo "  An image predating the version endpoints will do this. Deploy one" >&2
+  echo "  built after they were added, or check the nginx proxy for /api/." >&2
+  exit 24
+fi
+
+if [ "$WEB_SHA" != "$API_SHA" ]; then
+  echo "FATAL: version skew — web is $WEB_SHA but api is $API_SHA." >&2
+  echo "  One image rolled and the other did not. The site is serving a" >&2
+  echo "  mismatched pair right now. Redeploy with both IMAGE_* pinned to the" >&2
+  echo "  same commit." >&2
+  exit 25
+fi
+
+if [ -n "$EXPECT_SHA" ] && [ "$WEB_SHA" != "$EXPECT_SHA" ]; then
+  echo "FATAL: deployed $WEB_SHA but expected $EXPECT_SHA." >&2
+  echo "  Both containers agree, so this is a stale pull rather than skew:" >&2
+  echo "  the tag likely resolved to an older image than the one just built." >&2
+  exit 26
+fi
+
+if [ "$WEB_SHA" = "unknown" ]; then
+  echo "WARNING: images carry no build stamp, so the skew check above proved" >&2
+  echo "  nothing — two unstamped images always agree. Build with" >&2
+  echo "  --build-arg BUILD_SHA=<sha> to make this check meaningful." >&2
+fi
+
+echo "== deploy complete, both containers serving $WEB_SHA"
 REMOTE
 } > "$WORK/remote.sh"
 

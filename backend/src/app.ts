@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import healthRouter from "./routes/health";
+import versionRouter from "./routes/version";
 import jurisdictionsRouter from "./routes/jurisdictions";
 import meetingsRouter from "./routes/meetings";
 import membersRouter from "./routes/members";
@@ -18,6 +19,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/health", healthRouter);
+app.use("/api/version", versionRouter);
 app.use("/api/jurisdictions", jurisdictionsRouter);
 app.use("/api/meetings", meetingsRouter);
 app.use("/api/members", membersRouter);
