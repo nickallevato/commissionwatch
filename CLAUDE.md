@@ -33,7 +33,7 @@ the stack for months.
 | Queue | Postgres `SKIP LOCKED` — no Redis |
 | Agents | `agents/meeting-monitor` — scraper, parser, anomaly detectors, rundown generator |
 | CI/CD | **Gitea Actions only** — `.gitea/workflows/deploy.yml` |
-| Deploy | Docker Compose behind Caddy, images to ECR |
+| Deploy | Docker Compose behind Caddy, images to ECR, shipped over **SSM Run Command** — never SSH |
 | Domain | `commissionwatch.bmux.sh` |
 
 ## Layout
@@ -75,6 +75,11 @@ Backend tests need PostgreSQL: `docker compose up -d db`.
   `ubuntu-latest` for checks, `dh1` for build and deploy.
 - Gitea's `act_runner` runs jobs inside a container, so a `services:` database answers to its
   service name, not `localhost`
+- **Deploy over SSM, never SSH.** The shared host's SSH private key is not retrievable from AWS by
+  anyone, so an SSH deploy job can never go green. Do not add one back, and do not go looking for
+  the key. `deploy/deploy-aws-ssm.sh` is the single deploy path — CI and operator both call it
+- Never put secrets in an SSM command payload — `send-command` parameters are retained in plaintext
+  for 30 days and land in CloudTrail. They go in Parameter Store, fetched by the host
 
 ## Deliberately dormant
 

@@ -152,6 +152,31 @@ jobs:
           set -o pipefail
           npm run build 2>&1 | tee -a /tmp/ci-output.txt
 
+  # ── Deploy script checks ────────────────────────────────────────────
+  # The deploy path cannot be exercised against AWS from CI, but the two parts
+  # that break silently can be: the payload SSM receives, and the host-side
+  # branch that decides whether the live site keeps running when the instance
+  # role cannot read Parameter Store.
+  #
+  # "No secrets in the SSM payload" is the security property under test.
+  # send-command parameters are retained in plaintext for 30 days and land in
+  # CloudTrail, readable by anyone in the account with ssm:GetCommandInvocation
+  # — on a host shared with seven other products.
+  #
+  # python rather than node here only because the test asserts on the payload
+  # as JSON; the deploy script itself needs neither.
+  ci-deploy-script:
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the SSM deploy script
+        shell: bash
+        run: |
+          set -o pipefail
+          bash ./deploy/test-deploy-aws-ssm.sh 2>&1 | tee -a /tmp/ci-output.txt
+
   # ── Build and push images to ECR ────────────────────────────────────
   # The ai2-daedalus runner and its SSH-tunnelled localhost:5000 registry are
   # both gone. Images now go to ECR in account 123456789012, which the shared
@@ -162,7 +187,7 @@ jobs:
   # with "exec format error", which reads like a broken image rather than a
   # wrong architecture.
   build-and-push:
-    needs: [ci-backend, ci-frontend]
+    needs: [ci-backend, ci-frontend, ci-deploy-script]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: dh1
     env:
@@ -232,9 +257,23 @@ jobs:
               ./frontend
           } 2>&1 | tee -a /tmp/ci-output.txt
 
-  # ── Deploy to the shared bmux.sh platform ───────────────────────────
-  # Replaces deploy-ai2. Follows the SSH pattern that your-org/platform-aws
-  # already proves works against this host.
+  # ── Deploy to the shared bmux.sh platform, over SSM ──────────────────
+  # This job used to open with "Configure SSH", and it never once ran green.
+  # It could not: the host is your-org/platform-aws, shared across products,
+  # and its SSH key pair belongs to whoever provisioned it. EC2 stores only the
+  # key pair's NAME — the private half is not retrievable from AWS by anybody.
+  # Port 22 being open made that look like a missing secret rather than a
+  # missing capability, which is how a lot of time went into sourcing a key
+  # that was never going to be handed out.
+  #
+  # SSM Run Command needs neither a key nor a host address. It addresses the
+  # instance by id, executes through the instance's own SSM agent, and the host
+  # pulls from ECR with its instance role.
+  #
+  # The deploy itself lives in deploy/deploy-aws-ssm.sh rather than here, so
+  # that the manual path and the automated path are the same code. When the
+  # pipeline is blocked — which is where every product on this host starts —
+  # the operator runs that script by hand with identical arguments.
   #
   # Gated on SHARED_STACK_LIVE so the job is inert until the operator opts in,
   # matching every other product on the shared stack.
@@ -243,86 +282,59 @@ jobs:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.SHARED_STACK_LIVE == 'true'
     runs-on: dh1
     env:
-      DEPLOY_HOST: 184.34.114.153
-      DEPLOY_USER: ec2-user
-      # Deliberately under the deploy user's home rather than /opt.
-      #
-      # platform-aws deploys to /opt/platform-aws, and copying that looked like
-      # consistency — but ec2-user cannot write to /opt, so that directory must
-      # have been created by root out of band. The convention therefore carries
-      # an undocumented per-product provisioning step, and a deploy that fails
-      # with "Permission denied" gives no hint that a human has to run mkdir as
-      # root before CI can ever succeed.
-      #
-      # $HOME needs no provisioning, so a fresh product deploys with nothing
-      # done by hand. If these ever need to live under /opt, that belongs in the
-      # host's user-data or the platform bootstrap, not in a per-repo workaround.
-      REMOTE_DIR: /home/ec2-user/commissionwatch
-      ECR_REGISTRY: 123456789012.dkr.ecr.us-west-2.amazonaws.com
       AWS_REGION: us-west-2
+      INSTANCE_ID: i-0123456789abcdef0
+      ECR_REGISTRY: 123456789012.dkr.ecr.us-west-2.amazonaws.com
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy over SSH
+      - name: Deploy over SSM Run Command
         shell: bash
         env:
-          PLATFORM_AWS_SSH_KEY: ${{ secrets.PLATFORM_AWS_SSH_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # Optional. When set, the script refreshes the SecureString in
+          # Parameter Store before deploying; when absent, the deploy reuses
+          # whatever the parameter already holds. That is deliberate — a code
+          # deploy should not require the credentials secret to be present.
           DEPLOY_ENV_FILE_AWS: ${{ secrets.DEPLOY_ENV_FILE_AWS }}
         run: |
           set -o pipefail
           {
             set -euo pipefail
-            if [ -z "${PLATFORM_AWS_SSH_KEY:-}" ]; then
-              echo "PLATFORM_AWS_SSH_KEY not set; cannot deploy." >&2
+
+            # Trap 2: an absent Gitea secret renders as "", not as unset, and
+            # every aws call then fails with something that reads like an auth
+            # or network problem. Trap 1 is why it is usually empty:
+            # ORGANISATION secrets are NOT inherited by repositories.
+            if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+              echo "FATAL: AWS credentials are empty in this repository's scope." >&2
+              echo "Gitea organisation secrets are not inherited. Add AWS_ACCESS_KEY_ID" >&2
+              echo "and AWS_SECRET_ACCESS_KEY under Settings -> Actions -> Secrets on" >&2
+              echo "THIS REPOSITORY." >&2
               exit 1
             fi
-            if [ -z "${DEPLOY_ENV_FILE_AWS:-}" ]; then
-              echo "DEPLOY_ENV_FILE_AWS not set; refusing to deploy without credentials." >&2
-              exit 1
+
+            TMPENV=""
+            cleanup() { [ -n "$TMPENV" ] && rm -f "$TMPENV"; }
+            trap cleanup EXIT
+
+            if [ -n "${DEPLOY_ENV_FILE_AWS:-}" ]; then
+              umask 077
+              TMPENV="$(mktemp)"
+              printf '%s\n' "$DEPLOY_ENV_FILE_AWS" > "$TMPENV"
+              export DEPLOY_ENV_FILE="$TMPENV"
+              echo "will refresh the SecureString in Parameter Store"
+            else
+              echo "DEPLOY_ENV_FILE_AWS not set; reusing the existing Parameter Store value"
             fi
 
-            mkdir -p ~/.ssh && chmod 700 ~/.ssh
-            printf '%s\n' "$PLATFORM_AWS_SSH_KEY" > ~/.ssh/platform_aws
-            chmod 600 ~/.ssh/platform_aws
-            SSH_OPTS="-i $HOME/.ssh/platform_aws -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
-            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+            # Pinned to this commit, so a deploy is reproducible and a rollback
+            # is the same script with an older tag.
+            export IMAGE_BACKEND="$ECR_REGISTRY/your-org/commissionwatch-backend:${{ github.sha }}"
+            export IMAGE_FRONTEND="$ECR_REGISTRY/your-org/commissionwatch-frontend:${{ github.sha }}"
 
-            # `edge` is created by the platform stack's bootstrap; create only if
-            # absent so a first deploy in either order works.
-            ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-              "mkdir -p $REMOTE_DIR && (docker network create edge 2>/dev/null || true)"
-
-            rsync -az --delete --exclude '.git' --exclude '.gitea' --exclude 'node_modules' \
-              -e "ssh $SSH_OPTS" ./deploy/ "$DEPLOY_USER@$DEPLOY_HOST:$REMOTE_DIR/"
-
-            # Credentials travel out of band, never in the repo or the image.
-            # Image tags are pinned to this commit so a deploy is reproducible
-            # and a rollback is just re-running an older commit.
-            {
-              printf '%s\n' "$DEPLOY_ENV_FILE_AWS"
-              printf 'IMAGE_BACKEND=%s/your-org/commissionwatch-backend:%s\n' "$ECR_REGISTRY" "${{ github.sha }}"
-              printf 'IMAGE_FRONTEND=%s/your-org/commissionwatch-frontend:%s\n' "$ECR_REGISTRY" "${{ github.sha }}"
-            } > /tmp/commissionwatch.env
-            scp $SSH_OPTS /tmp/commissionwatch.env "$DEPLOY_USER@$DEPLOY_HOST:$REMOTE_DIR/.env"
-            rm -f /tmp/commissionwatch.env
-
-            ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-              REMOTE_DIR="$REMOTE_DIR" ECR_REGISTRY="$ECR_REGISTRY" AWS_REGION="$AWS_REGION" bash -s <<'REMOTE'
-          set -euo pipefail
-          cd "$REMOTE_DIR"
-          # The host pulls with its instance role (bmux-platform-host-ecr-pull).
-          aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-
-          COMPOSE="docker compose --env-file .env -f docker-compose.shared.yml"
-          $COMPOSE pull
-          if ! $COMPOSE up -d --wait; then
-            $COMPOSE ps
-            $COMPOSE logs --tail=120
-            exit 22
-          fi
-          $COMPOSE ps
-          REMOTE
+            bash ./deploy/deploy-aws-ssm.sh
           } 2>&1 | tee -a /tmp/ci-output.txt
 
       - name: Verify the site responds

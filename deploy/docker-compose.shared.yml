@@ -38,13 +38,15 @@ services:
       - edge
       - cw-internal
     mem_limit: 128m
-    # nginx resolves upstream hostnames once, at config-parse time, and exits if
-    # one does not resolve — it does not retry. Without this, `web` starts before
-    # `backend` exists in DNS and dies with:
-    #   [emerg] host not found in upstream "backend"
-    # It recovers only because restart: unless-stopped keeps trying, which is
-    # luck rather than design: observed on the first production deploy, where it
-    # crash-looped until the backend finished starting.
+    # Ordering only, no longer load-bearing. The crash-loop this was added for —
+    # nginx resolving a literal upstream at config-parse time and exiting with
+    # `[emerg] host not found in upstream "backend"` — is fixed properly in
+    # frontend/nginx.conf, which now defers resolution to request time. Verified
+    # 2026-08-06: the proxy starts and stays up with the backend absent, and
+    # recovers with zero restarts once it appears.
+    #
+    # Kept because starting in a sensible order still avoids a window of 502s,
+    # and because depends_on does not help on a host reboot anyway.
     depends_on:
       backend:
         condition: service_started

@@ -1,6 +1,6 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-05, after first production deploy.
+> Last updated: 2026-08-06, after moving the deploy from SSH to SSM.
 > Read this before starting work. It records what is true, not what was planned.
 
 ## Live state
@@ -22,7 +22,9 @@ This is the single most important thing to understand. It is a working, well-bui
 
 ### The running deployment was done by hand
 
-`deploy-aws` in CI has **never completed successfully**. The live containers were started manually over SSH on 2026-08-05. CI's own path is unproven end to end, so there is drift risk: the next CI deploy is also the first real test of it. Treat a green pipeline with suspicion until one full CI deploy has been observed working.
+The live containers were started manually over SSH on 2026-08-05. `deploy-aws` in CI has **never completed successfully**, and the SSH version of it never could have: the shared host's SSH private key is not retrievable from AWS by anyone, so the job was blocked on a secret that does not exist to be supplied.
+
+**Rewritten on 2026-08-06 to deploy over SSM Run Command** (`deploy/deploy-aws-ssm.sh`), which needs no key and no host address. Everything testable without AWS credentials is tested and green — payload construction, secret resolution, shared-host safety flags. **The SSM round trip from CI is still unproven end to end.** Treat a green pipeline with suspicion until one full CI deploy has been observed working. Design: `docs/superpowers/specs/2026-08-06-ssm-deploy-design.md`.
 
 ## Operational facts
 
@@ -36,8 +38,12 @@ Learned the hard way; each cost a failed deploy.
 - **`actions/setup-node` had a corrupt runner cache**, failing with an `lstat` error naming a file from the action's own repo. Replaced with `container: node:22-bookworm`.
 - **CI is Gitea Actions only.** Never add `.github/workflows/` — it does not run.
 - **`POSTGRES_PASSWORD` is fixed at volume initialisation.** Changing the secret later will not change the database; rotation is an `ALTER ROLE` on the running instance.
-- **SSM works on the host** (`AmazonSSMManagedInstanceCore` attached 2026-08-04), so `aws ssm send-command` can inspect or repair it without SSH.
-- **Deploy key**: `~/.ssh/commissionwatch_deploy` on the operator workstation, public half in the host's `authorized_keys`, private half stored as the Gitea secret `PLATFORM_AWS_SSH_KEY`.
+- **SSM works on the host** (`AmazonSSMManagedInstanceCore` attached 2026-08-04). This is now the deploy path, not just a repair tool.
+- **The shared host's SSH private key is unobtainable.** EC2 stores only the key pair's *name*; the private half belongs to whoever provisioned `platform-aws` and cannot be retrieved from AWS. Port 22 being open makes this look like a missing secret rather than a missing capability. Do not try to source it — that is a dead end, and it is why the old `deploy-aws` job could never go green.
+- **`AWS_PROFILE` set but empty** makes every CLI call fail with *"The config profile () could not be found"*, which reads as missing credentials. Reproduced on the operator workstation 2026-08-06. `deploy-aws-ssm.sh` clears it when empty on both ends.
+- **Secrets belong in SSM Parameter Store**, fetched by the host with its instance role. Never in the SSM command payload — `send-command` parameters sit in plaintext in command history for 30 days and in CloudTrail, readable by anyone in the account with `ssm:GetCommandInvocation`.
+- **The instance role cannot yet read `/commissionwatch/*`.** That grant is on a role shared with other products and is not ours to make; see `deploy/README.md` §3. Until it lands, deploys run **DEGRADED** off the secret file already on the host and say so loudly on every run.
+- **The `amazon/aws-cli` container fallback works** — verified 2026-08-06 with `aws` off `PATH`. The runners have docker but not the CLI.
 
 ### Going public
 
@@ -60,8 +66,10 @@ Ordered by how much each blocks the product being real.
 
 ## Known defects and debt
 
-- **CI `deploy-aws` unverified.** See above.
-- **Deploy pattern is push-based SSH** — long-lived key in CI, imperative rsync, secrets passed through CI. Better: secrets in SSM Parameter Store fetched by the host, and a pull-based rollout watching ECR. Worth doing before the pattern spreads to more products.
+- **CI `deploy-aws` unverified.** The SSM round trip has not yet completed once from a runner. See above.
+- ~~**Deploy pattern is push-based SSH**~~ — resolved 2026-08-06. No SSH key in CI, no rsync; secrets live in Parameter Store and are fetched by the host. Still push-based; a pull-based rollout watching ECR remains the better end state but is not blocking anything.
+- **The instance-role grant for Parameter Store is outstanding**, so deploys run degraded. Not a defect in this repo — it needs whoever administers `your-org/platform-aws`. `deploy/README.md` §3 has the exact policy.
+- **Images are tagged `:sha` and `:latest` only.** No `:version` tag: deriving one from `git describe` is unsafe on Gitea's shallow checkouts, where `--always` silently degrades to a bare SHA that looks like a valid answer. Rollback is by explicit pin instead, which works today.
 - **Homepage findings section is a placeholder constant** in `HomePage.tsx` with a TODO naming W3. It must not be filled with invented content about a real person.
 - **`Layout.tsx` hardcodes "Last sweep 12 min ago."** Once real data exists this is a false statement on a transparency site. Wire it to the real sweep timestamp or remove it.
 - **`meetings` has no `adjourned_at` or `meeting_type`.** `MeetingDetailPage` prints "Adjourned — Not recorded" verbatim.
