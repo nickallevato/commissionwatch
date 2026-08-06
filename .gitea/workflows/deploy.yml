@@ -163,12 +163,19 @@ jobs:
   # CloudTrail, readable by anyone in the account with ssm:GetCommandInvocation
   # — on a host shared with seven other products.
   #
-  # python rather than node here only because the test asserts on the payload
-  # as JSON; the deploy script itself needs neither.
+  # Same image as the other check jobs, and that is load-bearing:
+  # actions/checkout is a JavaScript action, so act_runner needs `node` INSIDE
+  # the job container. A python image fails before the first step with
+  #   OCI runtime exec failed: exec: "node": executable file not found in $PATH
+  # which reads as a broken action rather than a wrong base image.
+  #
+  # The test therefore uses node and awk, never python — node:22-bookworm ships
+  # python3 but not PyYAML, and a test that needs pip install is a test that
+  # breaks the first time the network hiccups.
   ci-deploy-script:
     runs-on: ubuntu-latest
     container:
-      image: python:3.12-bookworm
+      image: node:22-bookworm
     steps:
       - uses: actions/checkout@v4
       - name: Test the SSM deploy script

@@ -76,26 +76,34 @@ check "dry run exits 0" "$?" "0"
 bash -n "$TMP/remote.sh" && ok "generated remote script is valid bash" \
   || bad "generated remote script is not valid bash"
 
-python3 - "$TMP" "$HERE" <<'PY' > "$TMP/py.out" 2>&1 || true
-import json, base64, sys
-tmp, here = sys.argv[1], sys.argv[2]
-p = json.load(open(f"{tmp}/params.json"))
-assert list(p) == ["commands"], p
-d = base64.b64decode(p["commands"][2].split("'")[3]).decode()
-open(f"{tmp}/roundtrip.sh", "w").write(d)
-inner = [l for l in d.splitlines() if l.startswith("COMPOSE_B64=")][0].split("=", 1)[1]
-same = base64.b64decode(inner) == open(f"{here}/docker-compose.shared.yml", "rb").read()
-print("COMPOSE_IDENTICAL", same)
-# A password with shell metacharacters must never be able to reach the payload.
-print("NO_SECRETS", not any(
-    k in d for k in ("POSTGRES_PASSWORD=", "MINIO_SECRET_KEY=", "CHANNEL_SECRET_KEY=")))
-PY
+# node, not python: actions/checkout is a JavaScript action, so node is present
+# wherever this can run at all. node:22-bookworm ships python3 but not PyYAML,
+# and a test that needs `pip install` breaks the first time the network hiccups.
+node -e '
+  const fs = require("fs");
+  const [tmp, here] = process.argv.slice(1);
+  const p = JSON.parse(fs.readFileSync(tmp + "/params.json", "utf8"));
+  if (Object.keys(p).join() !== "commands") throw new Error("unexpected params shape");
+  // commands[2] is: printf %s <b64> | base64 -d > ...  — the blob is the 4th
+  // single-quoted field.
+  const payload = Buffer.from(p.commands[2].split("'"'"'")[3], "base64").toString();
+  fs.writeFileSync(tmp + "/roundtrip.sh", payload);
+  const line = payload.split("\n").find((l) => l.startsWith("COMPOSE_B64="));
+  // Split on the first = only; base64 padding contains = too.
+  const inner = line.slice("COMPOSE_B64=".length);
+  const same = Buffer.from(inner, "base64")
+    .equals(fs.readFileSync(here + "/docker-compose.shared.yml"));
+  console.log("COMPOSE_IDENTICAL", same);
+  // A password with shell metacharacters must never reach the payload.
+  console.log("NO_SECRETS", !["POSTGRES_PASSWORD=", "MINIO_SECRET_KEY=",
+    "CHANNEL_SECRET_KEY="].some((k) => payload.includes(k)));
+' "$TMP" "$HERE" > "$TMP/py.out" 2>&1 || true
 check "params.json is valid JSON with a commands array" \
   "$(grep -c COMPOSE_IDENTICAL "$TMP/py.out")" "1"
 check "compose file survives base64 round-trip byte-for-byte" \
-  "$(grep -o 'COMPOSE_IDENTICAL True' "$TMP/py.out" | wc -l)" "1"
+  "$(grep -o 'COMPOSE_IDENTICAL true' "$TMP/py.out" | wc -l)" "1"
 check "no secret material in the SSM command payload" \
-  "$(grep -o 'NO_SECRETS True' "$TMP/py.out" | wc -l)" "1"
+  "$(grep -o 'NO_SECRETS true' "$TMP/py.out" | wc -l)" "1"
 bash -n "$TMP/roundtrip.sh" && ok "payload still valid bash after JSON+base64 round-trip" \
   || bad "payload corrupted by JSON+base64 round-trip"
 
@@ -239,22 +247,46 @@ grep -v '^[[:space:]]*#' "$HERE/docker-compose.shared.yml" | grep -q "http://loc
 # with both containers healthy.
 echo
 echo "compose networking"
-python3 - "$HERE" <<'PY' > "$TMP/net.out" 2>&1 || true
-import sys, yaml
-c = yaml.safe_load(open(f"{sys.argv[1]}/docker-compose.shared.yml"))
-svc = c["services"]
-web, api = set(svc["web"]["networks"]), set(svc["backend"]["networks"])
-print("SHARED", bool(web & api))
-print("WEB_ON_EDGE", "edge" in web)
-print("API_OFF_EDGE", "edge" not in api)
-print("EDGE_EXTERNAL", c["networks"]["edge"].get("external") is True)
-PY
-for a in "SHARED True:web and backend share a network" \
-         "WEB_ON_EDGE True:web is on the platform edge network" \
-         "API_OFF_EDGE True:backend is kept off edge" \
-         "EDGE_EXTERNAL True:edge is external, never created by this stack"; do
-  grep -q "^${a%%:*}$" "$TMP/net.out" && ok "${a#*:}" || bad "${a#*:}"
-done
+# awk rather than a YAML parser: node has none built in and PyYAML is absent
+# from the CI image. The structure being read is two levels deep and fully
+# under our control, so indentation tracking is honest here rather than clever.
+nets_of() {  # $1 = service name -> one network name per line
+  awk -v want="$1" '
+    /^services:/            { in_svc = 1; next }
+    /^[^[:space:]]/         { in_svc = 0 }
+    in_svc && /^  [^[:space:]-]/ {
+      svc = $0; sub(/^  /, "", svc); sub(/:.*$/, "", svc); in_net = 0; next
+    }
+    in_svc && svc == want && /^    networks:/ { in_net = 1; next }
+    in_svc && in_net && /^      - /           { print $2; next }
+    in_svc && in_net && /^    [^[:space:]]/   { in_net = 0 }
+  ' "$2"
+}
+
+WEB_NETS="$(nets_of web "$HERE/docker-compose.shared.yml")"
+API_NETS="$(nets_of backend "$HERE/docker-compose.shared.yml")"
+# Guard against the parser silently matching nothing, which would make every
+# assertion below pass vacuously.
+check "compose parses: web declares networks" "$([ -n "$WEB_NETS" ] && echo yes)" "yes"
+check "compose parses: backend declares networks" "$([ -n "$API_NETS" ] && echo yes)" "yes"
+
+comm -12 <(echo "$WEB_NETS" | sort) <(echo "$API_NETS" | sort) | grep -q . \
+  && ok "web and backend share a network" \
+  || bad "web and backend share NO network (the proxy will 502 with both healthy)"
+echo "$WEB_NETS" | grep -qx edge && ok "web is on the platform edge network" \
+  || bad "web is not on edge"
+echo "$API_NETS" | grep -qx edge && bad "backend is exposed on edge" \
+  || ok "backend is kept off edge"
+awk '
+  /^networks:/          { in_net = 1; next }
+  /^[^[:space:]]/       { in_net = 0 }
+  in_net && /^  edge:/  { in_edge = 1; next }
+  in_net && in_edge && /^    external:[[:space:]]*true/ { found = 1 }
+  in_net && in_edge && /^  [^[:space:]]/ { in_edge = 0 }
+  END { exit !found }
+' "$HERE/docker-compose.shared.yml" \
+  && ok "edge is external, never created by this stack" \
+  || bad "edge is not declared external"
 
 # ── Shared-host safety ──────────────────────────────────────────────────────
 # These are the flags that reach outside our compose project. A regression here
