@@ -59,7 +59,7 @@ is the single biggest time sink in onboarding a product here. Add under
 |---|---|---|
 | `AWS_ACCESS_KEY_ID` | yes | ECR push and `ssm:SendCommand` |
 | `AWS_SECRET_ACCESS_KEY` | yes | ” |
-| `DEPLOY_ENV_FILE_AWS` | no | When set, refreshes the Parameter Store SecureString. A code deploy does not need it. |
+| `DEPLOY_ENV_FILE_AWS` | **leave unset** | When set, CI refreshes the Parameter Store SecureString on every deploy — which needs `ssm:PutParameter` and sends the secret through a runner. Seed out of band instead (§4). If it is set and the policy is absent, the deploy stops at the refresh. |
 
 An absent secret renders as `""`, not as unset, and every `aws` call then fails with something that
 reads like an auth or network problem. Both the workflow and the script preflight for exactly this
@@ -89,44 +89,60 @@ only yields a token; what the token can do is bounded by the second statement.
 ```bash
 aws iam put-user-policy --user-name commissionwatch-ci --policy-name commissionwatch-ci-ssm \
   --policy-document '{"Version":"2012-10-17","Statement":[
-    {"Effect":"Allow","Action":["ssm:SendCommand"],
+    {"Sid":"SendCommandToTheSharedHost","Effect":"Allow","Action":"ssm:SendCommand",
      "Resource":["arn:aws:ec2:us-west-2:123456789012:instance/i-0123456789abcdef0",
                  "arn:aws:ssm:us-west-2::document/AWS-RunShellScript"]},
-    {"Effect":"Allow","Action":["ssm:GetCommandInvocation","ssm:ListCommandInvocations"],
-     "Resource":"*"},
-    {"Effect":"Allow","Action":["ssm:PutParameter"],
-     "Resource":"arn:aws:ssm:us-west-2:123456789012:parameter/commissionwatch/*"},
-    {"Effect":"Allow","Action":["kms:Encrypt","kms:GenerateDataKey"],
-     "Resource":"*",
-     "Condition":{"StringEquals":{"kms:ViaService":"ssm.us-west-2.amazonaws.com"}}}]}'
+    {"Sid":"ReadBackTheResult","Effect":"Allow",
+     "Action":["ssm:GetCommandInvocation","ssm:ListCommandInvocations"],"Resource":"*"}]}'
 ```
 
 **Understand what the first statement grants before applying it:** the pipeline can run shell
 commands as root on a host shared with other tenants. It is the same power the manual script uses,
 moved from a person into automation. That is a real decision, not a formality.
 
-`ssm:PutParameter` and the KMS statement are only needed if CI refreshes secrets. Drop them if
-`DEPLOY_ENV_FILE_AWS` is never set.
+**CI is deliberately not granted `ssm:PutParameter` or `kms:Encrypt`.** The secret is seeded out of
+band (§4) and read by the host, so the pipeline never writes it and the value never traverses a
+runner. Add those two only if you want CI to refresh secrets on every deploy, and set
+`DEPLOY_ENV_FILE_AWS` to match — otherwise the deploy stops at the refresh with a message naming
+both ways out.
 
-### 3. Instance role — the one grant that is not ours
+> **This bit the first real run.** On 2026-08-06 `commissionwatch-ci` had
+> `commissionwatch-ecr-push-pull` and nothing else, while `DEPLOY_ENV_FILE_AWS` *was* set. So the
+> first call to fail was `PutParameter` — the optional half — which reads like a broken deploy and
+> hides the fact that `ssm:SendCommand` was missing too. Grant the policy above and clear the
+> secret, and both go away at once.
 
-The **host** reads the secrets, using its own instance role. That role is shared with other
-products, so whoever administers `your-org/platform-aws` must add:
+### 3. Instance role — the host reads its own secrets
 
-```json
-{"Version":"2012-10-17","Statement":[
-  {"Effect":"Allow","Action":["ssm:GetParameter"],
-   "Resource":"arn:aws:ssm:us-west-2:123456789012:parameter/commissionwatch/*"},
-  {"Effect":"Allow","Action":["kms:Decrypt"],
-   "Resource":"*",
-   "Condition":{"StringEquals":{"kms:ViaService":"ssm.us-west-2.amazonaws.com"}}}]}
+The **host** reads the secrets, using its own instance role, `platform-aws-host`. That role is
+shared with the other products on this box, so add an **inline** policy scoped to our path rather
+than editing anything already attached to it:
+
+```bash
+aws iam put-role-policy --role-name platform-aws-host \
+  --policy-name commissionwatch-param-read \
+  --policy-document '{"Version":"2012-10-17","Statement":[
+    {"Sid":"ReadCommissionwatchSecrets","Effect":"Allow",
+     "Action":["ssm:GetParameter","ssm:GetParameters"],
+     "Resource":"arn:aws:ssm:us-west-2:123456789012:parameter/commissionwatch/*"},
+    {"Sid":"DecryptThroughSsmOnly","Effect":"Allow","Action":"kms:Decrypt","Resource":"*",
+     "Condition":{"StringEquals":{"kms:ViaService":"ssm.us-west-2.amazonaws.com"}}}]}'
 ```
+
+> An earlier version of this file said this grant "is not ours to make" and had to come from
+> whoever administers `your-org/platform-aws`. **That was wrong** — the account holder has
+> `AdministratorAccess`, and an inline policy on the role is additive: it touches no managed policy
+> and no other tenant's access. Verified 2026-08-06: before this, `platform-aws-host` carried only
+> `bmux-platform-host-ecr-pull` and `AmazonSSMManagedInstanceCore`, and no inline policies at all.
 
 **Until this lands, deploys still work but run DEGRADED**, falling back to the secret file already
 on the host and warning loudly on every run. That is deliberate: a working public site should not go
-down over an IAM ticket we cannot file ourselves. The run output always names which source it used.
+down over an IAM grant that has not happened yet. The run output always names which source it used.
 
-### 4. Seed the parameter
+### 4. Seed the parameter, out of band
+
+The parameter is written **once, by a human**, and read by the host from then on. CI never writes
+it. If you hold the plaintext:
 
 ```bash
 DEPLOY_ENV_FILE=./prod.env ./deploy/deploy-aws-ssm.sh
@@ -136,6 +152,41 @@ The file needs `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `MINIO_ACCES
 `MINIO_SECRET_KEY`, `CHANNEL_SECRET_KEY`, `CI_EVENT_TOKEN`. `IMAGE_*` lines are stripped — image
 pins are per-deploy, and a stale one in the parameter would override the version being deployed.
 Standard-tier parameters cap at 4096 bytes; the script checks and says so.
+
+#### When nobody holds the plaintext
+
+This is the normal case here, and it is not a dead end. The secret lives in a Gitea Actions secret,
+which is **write-only** — the UI will replace or delete a value, never show it — and in the `.env`
+the 2026-08-05 hand deploy left on the host.
+
+So let the host seed the parameter from its own copy. Grant `ssm:PutParameter` **temporarily**:
+
+```bash
+aws iam put-role-policy --role-name platform-aws-host --policy-name commissionwatch-param-seed \
+  --policy-document '{"Version":"2012-10-17","Statement":[
+    {"Effect":"Allow","Action":"ssm:PutParameter",
+     "Resource":"arn:aws:ssm:us-west-2:123456789012:parameter/commissionwatch/*"},
+    {"Effect":"Allow","Action":["kms:Encrypt","kms:GenerateDataKey"],"Resource":"*",
+     "Condition":{"StringEquals":{"kms:ViaService":"ssm.us-west-2.amazonaws.com"}}}]}'
+
+aws ssm send-command --region us-west-2 --instance-ids i-0123456789abcdef0 \
+  --document-name AWS-RunShellScript --parameters 'commands=[
+    "set -euo pipefail",
+    "umask 077",
+    "T=$(mktemp)",
+    "trap \"rm -f $T\" EXIT",
+    "grep -v \"^IMAGE_\" /home/ec2-user/commissionwatch/.env > $T",
+    "test -s $T",
+    "aws ssm put-parameter --region us-west-2 --name /commissionwatch/env --type SecureString --overwrite --value file://$T > /dev/null",
+    "echo seeded $(wc -c < $T) bytes"]'
+
+# then take the write back — the host only needs to read
+aws iam delete-role-policy --role-name platform-aws-host --policy-name commissionwatch-param-seed
+```
+
+The value goes **host → SSM API directly**. It is not in the command text and not in the command
+output, so it stays out of CloudTrail and out of the 30-day command history — the same property
+that keeps secrets out of the deploy payload. Only the byte count is echoed.
 
 ### 5. Caddy site block
 

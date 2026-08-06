@@ -177,9 +177,39 @@ if [ -n "${DEPLOY_ENV_FILE:-}" ]; then
     echo "   [dry-run] would put ${SIZE} bytes to SecureString $ENV_PARAM"
   else
     echo "== updating SecureString $ENV_PARAM (${SIZE} bytes)"
-    aws_cli ssm put-parameter --region "$AWS_REGION" \
-      --name "$ENV_PARAM" --type SecureString --overwrite \
-      --value "file://$WORK/env.secrets" >/dev/null
+    # Writing secrets is the OPTIONAL half of this script and the half that
+    # needs the widest permissions — ssm:PutParameter plus kms:Encrypt. A
+    # deploy that only ships code needs neither.
+    #
+    # So a denial here must not read as "the deploy is broken". It means this
+    # caller was asked to push secrets and cannot, and there are two ways out:
+    # widen the policy, or stop asking it to (the better one — the parameter is
+    # seeded out of band and the host just reads it).
+    if ! PUT_ERR="$(aws_cli ssm put-parameter --region "$AWS_REGION" \
+        --name "$ENV_PARAM" --type SecureString --overwrite \
+        --value "file://$WORK/env.secrets" 2>&1 >/dev/null)"; then
+      printf '%s\n' "$PUT_ERR" >&2
+      case "$PUT_ERR" in
+        *AccessDenied*|*not\ authorized*)
+          fatal "this caller may not write $ENV_PARAM.
+
+  Nothing was deployed, and nothing is wrong with the images or the host.
+  Only the optional secret refresh was denied.
+
+  Prefer: seed the parameter out of band and stop sending secrets through CI.
+    - unset DEPLOY_ENV_FILE (in CI: delete the DEPLOY_ENV_FILE_AWS secret)
+    - the host then reads $ENV_PARAM itself with its instance role
+    - CI keeps only ssm:SendCommand, and secrets never touch a runner
+
+  Or, to keep refreshing secrets from here, grant this identity:
+    ssm:PutParameter on arn:aws:ssm:${AWS_REGION}:*:parameter${ENV_PARAM%/*}/*
+    kms:Encrypt, kms:GenerateDataKey  (Condition kms:ViaService = ssm.${AWS_REGION}.amazonaws.com)"
+          ;;
+        *)
+          fatal "could not write $ENV_PARAM; see the error above."
+          ;;
+      esac
+    fi
   fi
 fi
 

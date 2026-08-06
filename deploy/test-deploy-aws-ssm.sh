@@ -44,6 +44,15 @@ if [ "${1:-}" = "ssm" ] && [ "${2:-}" = "get-parameter" ]; then
   echo "An error occurred (AccessDeniedException) when calling GetParameter" >&2
   exit 254
 fi
+if [ "${1:-}" = "ssm" ] && [ "${2:-}" = "put-parameter" ]; then
+  if [ "${STUB_PUT_DENIED:-}" = "1" ]; then
+    echo "An error occurred (AccessDeniedException) when calling the PutParameter" \
+         "operation: User: arn:aws:iam::123456789012:user/commissionwatch-ci is not" \
+         "authorized to perform: ssm:PutParameter" >&2
+    exit 254
+  fi
+  exit 0
+fi
 if [ "${1:-}" = "ecr" ]; then echo "stub-ecr-token"; exit 0; fi
 exit 0
 STUB
@@ -106,6 +115,39 @@ check "no secret material in the SSM command payload" \
   "$(grep -o 'NO_SECRETS true' "$TMP/py.out" | wc -l)" "1"
 bash -n "$TMP/roundtrip.sh" && ok "payload still valid bash after JSON+base64 round-trip" \
   || bad "payload corrupted by JSON+base64 round-trip"
+
+# ── The optional secret refresh, when the caller may not write ──────────────
+# Observed for real on 2026-08-06: commissionwatch-ci had ecr push but no ssm
+# policy at all, so the first thing to fail was PutParameter. The raw AWS error
+# reads as "the deploy is broken" when in fact only the OPTIONAL half was
+# denied, and the better fix is to stop sending secrets through CI rather than
+# to widen the policy. That guidance is the thing under test.
+echo
+echo "secret refresh denial"
+
+printf 'POSTGRES_PASSWORD=hunter2\nIMAGE_BACKEND=reg/be:pinned\n' > "$TMP/prod.env"
+
+PATH="$TMP/bin:$PATH" STUB_PUT_DENIED=1 DEPLOY_ENV_FILE="$TMP/prod.env" \
+  IMAGE_BACKEND="reg/be:testsha" IMAGE_FRONTEND="reg/fe:testsha" \
+  "$SCRIPT" > "$TMP/denied.log" 2>&1 && rc=0 || rc=$?
+check "a denied secret refresh fails the deploy" "$rc" "1"
+grep -q "only the optional secret refresh was denied" -i "$TMP/denied.log" \
+  && ok "says the images and the host are not the problem" \
+  || bad "does not distinguish an optional-step denial from a broken deploy"
+grep -q "DEPLOY_ENV_FILE_AWS" "$TMP/denied.log" \
+  && ok "names the out-of-band fix (drop the CI secret)" \
+  || bad "does not name the out-of-band fix"
+grep -q "ssm:PutParameter on arn:aws:ssm" "$TMP/denied.log" \
+  && ok "names the policy to grant if you keep refreshing from CI" \
+  || bad "does not name the policy needed to keep refreshing from CI"
+grep -q "hunter2" "$TMP/denied.log" \
+  && bad "the denial message leaked a secret value" \
+  || ok "the denial message leaks no secret value"
+
+# A denial must stop before the host is touched at all.
+grep -q "send-command\|sending to" "$TMP/denied.log" \
+  && bad "kept going and contacted the host after the refresh was denied" \
+  || ok "does not contact the host after a denied refresh"
 
 # ── Drive the host-side script ──────────────────────────────────────────────
 run_remote() {
