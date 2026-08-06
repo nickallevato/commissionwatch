@@ -135,9 +135,13 @@ aws iam put-role-policy --role-name platform-aws-host \
 > and no other tenant's access. Verified 2026-08-06: before this, `platform-aws-host` carried only
 > `bmux-platform-host-ecr-pull` and `AmazonSSMManagedInstanceCore`, and no inline policies at all.
 
-**Until this lands, deploys still work but run DEGRADED**, falling back to the secret file already
-on the host and warning loudly on every run. That is deliberate: a working public site should not go
-down over an IAM grant that has not happened yet. The run output always names which source it used.
+**Applied 2026-08-06.** `platform-aws-host` now carries `commissionwatch-param-read` as its only
+inline policy, and the host has been observed reading the decrypted parameter with no write grant.
+
+Before it landed, deploys still worked but ran DEGRADED, falling back to the secret file already
+on the host and warning loudly on every run. That fallback is deliberate and still in place: a
+working public site should not go down over an IAM grant that has not happened yet. The run output
+always names which source it used.
 
 ### 4. Seed the parameter, out of band
 
@@ -187,6 +191,16 @@ aws iam delete-role-policy --role-name platform-aws-host --policy-name commissio
 The value goes **host → SSM API directly**. It is not in the command text and not in the command
 output, so it stays out of CloudTrail and out of the 30-day command history — the same property
 that keeps secrets out of the deploy payload. Only the byte count is echoed.
+
+**Done 2026-08-06.** `/commissionwatch/env` is a SecureString at version 1: 419 bytes, 8 keys
+(`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`,
+`MINIO_BUCKET`, `CHANNEL_SECRET_KEY`, `CI_EVENT_TOKEN`). The seed grant was revoked in the same
+session and the host was then made to read the value back to prove read-without-write works.
+Re-run this procedure only to rotate — it needs the temporary grant again each time, because the
+host deliberately holds no standing write.
+
+Note `MINIO_BUCKET` is present but is not in §4's required list above; the list understates what
+the compose file actually consumes. Trust the parameter over the prose.
 
 ### 5. Caddy site block
 
