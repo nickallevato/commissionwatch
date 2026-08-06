@@ -349,7 +349,12 @@ jobs:
             fi
 
             TMPENV=""
-            cleanup() { [ -n "$TMPENV" ] && rm -f "$TMPENV"; }
+            # `[ -n "$X" ] && rm ...` as the LAST command of an EXIT trap sets
+            # the script's exit status when the test fails, so an entirely
+            # successful deploy exited 1 whenever TMPENV was empty — i.e. on
+            # exactly the path where DEPLOY_ENV_FILE_AWS is unset, which is the
+            # normal one. `if` with no else always returns 0.
+            cleanup() { if [ -n "$TMPENV" ]; then rm -f "$TMPENV"; fi; }
             trap cleanup EXIT
 
             if [ -n "${DEPLOY_ENV_FILE_AWS:-}" ]; then

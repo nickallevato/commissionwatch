@@ -20,9 +20,9 @@
 
 This is the single most important thing to understand. It is a working, well-built shell. The Gallatin adapter exists and passes 68 tests, but **nothing schedules it**, so no public record has ever been ingested. Making that true is the highest-value next task.
 
-### The running deployment was done by hand
+### The running deployment now comes from CI
 
-The live containers were started manually over SSH on 2026-08-05. `deploy-aws` in CI has **never completed successfully**, and the SSH version of it never could have: the shared host's SSH private key is not retrievable from AWS by anyone, so the job was blocked on a secret that does not exist to be supplied.
+As of 2026-08-06 the live containers are the ones `deploy-aws` shipped over SSM, serving `71217e2`. Before that they had been started by hand over SSH on 2026-08-05, and the SSH version of the job could never have replaced them: the shared host's SSH private key is not retrievable from AWS by anyone, so it was blocked on a secret that does not exist to be supplied.
 
 **Rewritten on 2026-08-06 to deploy over SSM Run Command** (`deploy/deploy-aws-ssm.sh`), which needs no key and no host address. Everything testable without AWS credentials is tested and green — payload construction, secret resolution, shared-host safety flags. Design: `docs/superpowers/specs/2026-08-06-ssm-deploy-design.md`.
 
@@ -30,7 +30,9 @@ The live containers were started manually over SSH on 2026-08-05. `deploy-aws` i
 
 **Second run, 2026-08-06 (`af7097f`, v0.2.0).** Failed at the same line, and that was informative: it proved `DEPLOY_ENV_FILE_AWS` was still set even though the IAM grants had landed. The Gitea *Variables* tab had been cleared, but the value is a **secret**, and secrets are a separate tab. The diagnostic block printed as designed and the job died before touching the host, so nothing on the box changed.
 
-All three blockers are now cleared: the CI user has `commissionwatch-ci-ssm`, `platform-aws-host` has `commissionwatch-param-read`, and `/commissionwatch/env` exists at version 1. **The SSM round trip is still unproven end to end** — no run has yet reached compose on the host. Treat a green pipeline with suspicion until one full CI deploy has been observed working.
+**Third run, 2026-08-06 (`71217e2`). The SSM round trip works end to end.** The host pulled both images, recreated `backend` and `web`, waited on `db` and `minio` health, and reported both containers serving `71217e2`. Secrets came from `/commissionwatch/env` — no DEGRADED fallback. Verified independently: `https://commissionwatch.bmux.sh/api/health`, `/api/version` and `/version.json` all return 200, and `/api/version` reports sha `71217e2`, built `2026-08-06T22:40:39Z`.
+
+**The job still reported failure**, after the deploy had fully succeeded. Cause was in the workflow, not the deploy script: `cleanup() { [ -n "$TMPENV" ] && rm -f "$TMPENV"; }` as an `EXIT` trap. When a `&&` chain is the *last command of an EXIT trap* and its test fails, bash makes that the script's exit status — so a completely successful deploy exited 1 whenever `TMPENV` was empty. That is precisely the path taken when `DEPLOY_ENV_FILE_AWS` is unset, i.e. the normal one, which is why deleting the secret is what exposed a latent bug rather than causing a new one. Fixed with an `if`, which returns 0 with no else branch.
 
 ## Operational facts
 
