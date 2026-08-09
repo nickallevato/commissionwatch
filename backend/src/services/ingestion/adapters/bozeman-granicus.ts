@@ -436,6 +436,20 @@ const consoleLogger: BozemanLogger = {
   warn: (message) => console.warn(message),
 };
 
+/**
+ * `City Commission` -> `Bozeman City Commission`, and `Bozeman Historic Preservation
+ * Advisory Board` -> itself.
+ *
+ * `commissions` is keyed on `(jurisdiction_id, name)`, so the prefix is not needed to keep
+ * two jurisdictions' Study Commissions apart — it is there so an operator reading a list of
+ * commission names does not have to guess whose they are. Five of the sixteen panels
+ * already say Bozeman, and "Bozeman Bozeman Historic Preservation Advisory Board" is the
+ * kind of detail that makes a reader stop trusting the rest of the page.
+ */
+export function qualifiedBodyName(name: string): string {
+  return /^bozeman\b/i.test(name) ? name : `Bozeman ${name}`;
+}
+
 interface ResolvedBody {
   key: string;
   name: string;
@@ -557,7 +571,7 @@ export function createBozemanGranicusAdapter(
         bodies: bodies.map(
           (body): BodyDescriptor => ({
             key: body.key,
-            name: `Bozeman ${body.name}`,
+            name: qualifiedBodyName(body.name),
             listingUrl: BOZEMAN_ARCHIVE_URL,
           }),
         ),

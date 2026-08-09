@@ -522,11 +522,15 @@ describe('bozeman-granicus descriptor', () => {
     expect(descriptor.notes).toContain('Methodology page');
   });
 
-  it('names the bodies with a jurisdiction prefix, so `commissions` rows stay distinct', () => {
-    // Both jurisdictions have a "Study Commission". `commissions` is keyed on
-    // (jurisdiction_id, name) so this is not strictly required — but an operator reading a
-    // list of commission names should not have to guess which county they belong to.
-    expect(descriptor.bodies.map((body) => body.name)).toContain('Bozeman City Commission');
+  it('qualifies a body name with the city, without saying Bozeman twice', () => {
+    // Both jurisdictions have a "Study Commission", and an operator reading a list of
+    // commission names should not have to guess whose it is. Five of the sixteen panels
+    // already say Bozeman; "Bozeman Bozeman Historic Preservation Advisory Board" is the
+    // kind of detail that makes a reader stop trusting the rest of the page.
+    const names = descriptor.bodies.map((body) => body.name);
+    expect(names).toContain('Bozeman City Commission');
+    expect(names).toContain('Bozeman Historic Preservation Advisory Board');
+    expect(names.some((name) => /Bozeman Bozeman/.test(name))).toBe(false);
     expect(descriptor.bodies.map((body) => body.key)).toContain('city-commission');
   });
 });

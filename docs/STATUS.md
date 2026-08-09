@@ -1,6 +1,7 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-09, after landing P1 (ingestion scheduling) and P3 (backups).
+> Last updated: 2026-08-09, after landing P1 (ingestion scheduling), P3 (backups) and P4
+> (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
 
 ## Archive salvage — what has landed
@@ -85,6 +86,58 @@ Two things the sweep taught us, both now in the spec:
   document. Parse records that as `parse_unsupported` and completes — the bytes are still stored
   and still citable. That meeting has 0 agenda items and the reason is recorded.
 
+### Bozeman is the second source, and it has swept too
+
+**A real sweep ran against `bozeman.granicus.com` on 2026-08-09**, 14-day lookback, one request
+every **ten seconds**. What landed locally:
+
+| | |
+|---|---|
+| `jurisdictions` | 1 — City of Bozeman |
+| `commissions` | **16** |
+| `meetings` | **18** (6 completed, 12 scheduled) |
+| `agenda_items` | **88**, extracted from real agenda **HTML** |
+| `meeting_documents` / `artifacts` | 8 |
+| `ingestion_runs` | 2, both `succeeded` |
+
+The second sweep re-fetched nothing — `artifacts_unchanged: 8` — which is the content address
+doing its job.
+
+Four things this source taught us:
+
+- **The whole archive is one request.** `ViewPublisher.php?view_id=1` is 5.9 MB holding 1,135
+  meetings across 16 bodies, 2013→2026, plus 17 upcoming. The year tabs are client-side. There is
+  no per-year endpoint, which is the opposite of Gallatin.
+- **`bozeman-access-spike.md` was wrong about several counts.** 519 City Commission meetings, not
+  520; **16 bodies in total**, not "20+ others"; and 507/434 were City-Commission-only figures
+  against 1,102/956 across all bodies. Corrections are inline in that document and in
+  `backend/test/fixtures/bozeman-granicus/PROVENANCE.md`. Its **access** analysis held up exactly.
+- **The archive's time column is the video clip's start, not the meeting's.** The 2026-08-04 City
+  Commission row says 1:17 PM; that meeting's own agenda states an early start of 2:00 PM. Only
+  upcoming meetings carry a time.
+- **Agendas are HTML.** The parse stage only read PDFs, so every Bozeman agenda would have landed
+  `parse_unsupported` with zero items. `services/ingestion/document-text.ts` now dispatches on the
+  bytes, and `agenda-items.ts` learned dotted `G.1` markers and rejoins a marker the source put in
+  its own element. The 2026-08-04 agenda yields 30 items.
+
+**The robots.txt exception is now in force and is disclosed.** `bozeman.granicus.com/robots.txt`
+is `Disallow: /` for this agent. We fetch anyway under the operator decision of 2026-08-04, at the
+10-second `Crawl-delay` the file itself publishes, with the project's honest user agent. The
+Methodology page carries the disclosure as of the same release, and three tests assert it is there.
+**If that disclosure comes down, the adapter must be disabled with it** —
+`respectRobotsTxt: true` makes it obey the file and discover nothing, which is the switch.
+
+Enabling Bozeman is the same deliberate act as Gallatin, with one caveat:
+
+```bash
+npm run sweep -- --adapter bozeman-granicus --enable --lookback-days 14
+```
+
+**Use a short lookback the first time.** At 10 s per document a 365-day sweep runs for hours and
+will blow the scheduler's 15-minute `sweepTimeoutMs`, leaving the run `failed` and its jobs queued
+for the next tick until it catches up. Agenda packets (28 MB, 439 pages, 724 of them) are **not**
+fetched unless `includePackets` is set.
+
 The live host has **not** been swept: `ingestion_sources` rows are created **disabled**, so nothing
 sweeps because a container started. Enabling Gallatin in production is a deliberate act:
 
@@ -147,7 +200,7 @@ Ordered by how much each blocks the product being real.
 
 1. ~~**Nothing ingests.**~~ Closed 2026-08-09 by P1. The scheduler is wired, a real sweep has run, and the pipeline lands meetings, documents, artifacts and agenda items. Remaining: enable the source on the live host, and move the body list out of the adapter into `ingestion_sources.config`.
 2. **W3 findings engine and review queue.** The core product. `anomaly_flags.review_state` now exists (B-d) and is the column the queue generalises: records-derived flags are written `held` and the public API filters them out. Generated narrative, mechanical claim-to-citation binding, operator approval before anything naming a person publishes. Not started. Spec exists in the production design.
-3. **Bozeman adapter.** Route identified and validated: `bozeman.granicus.com/ViewPublisher.php?view_id=1` carries **520 City Commission meetings spanning 2013–2026**, 507 with agendas, 434 with minutes. `bozemanmt.gov` is a blanket Akamai deny and must not be retried. Operator decision 2026-08-04: crawl Granicus politely and publish the public-records-request route alongside. See `docs/exploration/bozeman-access-spike.md`.
+3. ~~**Bozeman adapter.**~~ Closed 2026-08-09 by P4. `backend/src/services/ingestion/adapters/bozeman-granicus.ts`, registered **disabled**, swept for real (below). `bozemanmt.gov` is still a blanket Akamai deny and is never fetched. Outstanding from the same backlog item: the **public-records-request page**, which is P7 and is not built.
 4. **MT CERS campaign finance** (`cers-ext.mt.gov/CampaignTracker`). Not started.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.
 6. ~~**W7 delivery channels.**~~ Built. Channels, routes, encryption, the Discord transport, and — as of B-e — cadence, SMS, and a self-serve subscriber surface on the same substrate. Nothing dispatches product events yet, because nothing ingests.
@@ -172,9 +225,10 @@ Ordered by how much each blocks the product being real.
 - **The instance-role grant for Parameter Store is outstanding**, so deploys run degraded. Not a defect in this repo — it needs whoever administers `your-org/platform-aws`. `deploy/README.md` §3 has the exact policy.
 - **Images are tagged `:sha` and `:latest` only.** No `:version` tag: deriving one from `git describe` is unsafe on Gitea's shallow checkouts, where `--always` silently degrades to a bare SHA that looks like a valid answer. Rollback is by explicit pin instead, which works today.
 - **Homepage findings section is a placeholder constant** in `HomePage.tsx` with a TODO naming W3. It must not be filled with invented content about a real person.
-- **`Layout.tsx` hardcodes "Last sweep 12 min ago."** Real data now exists, so this is a false
-  statement on a transparency site rather than a placeholder. `ingestion_runs.finished_at` is the
-  value it should read. Not fixed here — it is a frontend change and P1's scope was the scheduler.
+- ~~**`Layout.tsx` hardcodes "Last sweep 12 min ago."**~~ Fixed 2026-08-09. The masthead reads
+  `GET /api/ingestion/status`, which reports the newest `finished_at` of a `succeeded` or
+  `partial` run, and says **"No sweep yet"** whenever there is nothing to report — including
+  while the request is in flight and when it fails. Seven tests, where there were none.
 - **`meetings` has no `adjourned_at` or `meeting_type`.** `MeetingDetailPage` prints "Adjourned — Not recorded" verbatim.
 - **No tests** for `MeetingDetailPage`, `StatusBadge`, `RundownViewer`.
 - **`VoteBreakdown.tsx` may be unused** by any page — verify and delete or wire up.
@@ -199,11 +253,17 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
    same time, or accept that the backup has not left the instance.
 2. **Prove CI deploy end to end.** Run `deploy-aws` and watch it succeed, so the manual deployment is no longer the only path that has ever worked.
-3. **Move the Gallatin body list into `ingestion_sources.config`.** AgendaCenter served three
-   categories on 2026-08-09 against twelve in the adapter's hardcoded list. A county standing up a
+3. **Move both body lists into `ingestion_sources.config`.** AgendaCenter served three
+   categories on 2026-08-09 against twelve in the adapter's hardcoded list. Bozeman has the same
+   shape of problem from the other side: its Upcoming Events table names bodies differently from
+   its own archive — "Tax Increment Finance Advisory Board" against the panel's "Tax Increment
+   Financing Board" — so five upcoming meetings are skipped, loudly, every sweep. Both adapters
+   already take a `bodies` option; nothing reads it from the database yet. A city standing up a
    committee should not need a deploy.
 4. **W3 findings engine and review queue**, with admin auth. The core product, and the highest-stakes component.
-5. **Bozeman Granicus adapter**, plus the public-records-request page.
+5. ~~**Bozeman Granicus adapter**~~, landed 2026-08-09 and registered disabled. The
+   **public-records-request page** that goes with it is still outstanding — it is P7, and the
+   vendor-robots exception is written on the promise that the statutory route is offered alongside.
 6. **Status page** reading `ingestion_runs`, so a silently stalled scraper is visible rather than reading as a quiet month at City Hall.
 7. Then W5 correlation, W6 funding network, W7 delivery channels, and the launch-readiness work.
 

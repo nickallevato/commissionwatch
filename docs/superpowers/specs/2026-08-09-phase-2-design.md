@@ -174,30 +174,65 @@ volume must account for that. Recorded because it has already cost this project 
 
 ## P4 · Bozeman Granicus adapter
 
-**Grounding, already done** (`docs/exploration/bozeman-access-spike.md`):
-`bozeman.granicus.com/ViewPublisher.php?view_id=1` carries **520 City Commission meetings spanning
-2013–2026**, 507 with agendas, 434 with minutes. `bozemanmt.gov` is a blanket Akamai deny and must
+> **Amended 2026-08-09, from implementation.** The adapter shipped. Six things below were wrong
+> or stale and are corrected inline; `backend/test/fixtures/bozeman-granicus/PROVENANCE.md` is
+> the grounding of record.
+
+**Grounding** (`docs/exploration/bozeman-access-spike.md`):
+`bozeman.granicus.com/ViewPublisher.php?view_id=1` carries ~~520 City Commission meetings spanning
+2013–2026, 507 with agendas, 434 with minutes~~ — re-probed 2026-08-09: **519** City Commission
+meetings, **1,135 meetings across 16 bodies**, 1,102 with agendas and 956 with minutes, 2013–2026,
+all in one 5.9 MB response. `bozemanmt.gov` is a blanket Akamai deny and must
 not be retried — that door stays closed, and the records were found by following a DNS CNAME chain
 rather than attacking the HTTP endpoint.
 
 **Design.** A second adapter implementing the existing `adapters/types.ts` contract and registered
 in `adapters/registry.ts`, so it inherits the queue, artifacts, runs and console with no new
-plumbing. Fixtures recorded under `agents/meeting-monitor/tests/fixtures/bozeman-granicus/` with a
-`PROVENANCE.md` naming the fetch date and URL, matching the Gallatin precedent.
+plumbing. Fixtures recorded under ~~`agents/meeting-monitor/tests/fixtures/bozeman-granicus/`~~
+**`backend/test/fixtures/bozeman-granicus/`** — the adapter layer moved under `backend/` in P1,
+and `backend/Dockerfile`'s build context is `./backend`, so an image cannot contain a file from
+`agents/` — with a `PROVENANCE.md` naming the fetch date and URL, matching the Gallatin precedent.
+
+**Three decisions implementation had to make that this spec did not anticipate:**
+
+- **Meetings are keyed on body and date, not on `clip_id`/`event_id`.** A meeting is listed under
+  an `event_id` while upcoming and a `clip_id` once past; keying on those makes one real meeting
+  two rows in `meetings`, one stuck at `scheduled`.
+- **The agenda is HTML, and the parse stage could not read HTML.** `AgendaViewer.php` serves
+  markup, not PDF, so every Bozeman agenda would have recorded `parse_unsupported` with zero
+  agenda items. `services/ingestion/document-text.ts` dispatches on the bytes, and
+  `agenda-items.ts` learned Bozeman's dotted `G.1` markers. That is shared code, changed here
+  rather than deferred, because without it the source lands documents and no record.
+- **The 5.9 MB index is fetched whole, every sweep.** The spike's RSS change-detection idea is
+  not implemented and remains open work.
 
 **Conduct.** One request every few seconds, never concurrent. Honest user agent naming the project —
 never a spoofed browser identity. Unchanged documents never re-fetched. The vendor-robots exception
 applies and **must remain disclosed on the Methodology page**; if that disclosure ever comes down,
 the exception ends with it.
 
-**Backfill.** 520 meetings at one request per two seconds is roughly 17 minutes of fetching for the
-index alone, and considerably more with documents. Backfill is an explicit operator action from
-screen 03 with a date range, not something a first cron tick attempts.
+**Backfill.** ~~520 meetings at one request per two seconds is roughly 17 minutes~~ — the rate is
+**one request per ten seconds**, the `Crawl-delay` the site's own `robots.txt` publishes, and
+discovery is a single request rather than one per meeting. Documents are the cost: at 10 s each,
+a 365-day sweep is several hours and will exceed the scheduler's 15-minute `sweepTimeoutMs`,
+leaving jobs queued for the next tick and the run marked `failed` until it catches up. **A first
+enable should use a short `--lookback-days`.** Full backfill remains an explicit operator action
+from screen 03 with a date range, not something a first cron tick attempts.
 
-**Acceptance.**
-- The adapter satisfies `contract.test.ts` exactly as Gallatin does.
+**Agenda packets are not fetched.** One verified packet is 28.4 MB across 439 pages and 724 rows
+carry one. `includePackets` exists and defaults false; turning it on is a storage decision.
+
+**Acceptance.** All three met 2026-08-09.
+- The adapter satisfies `contract.test.ts` exactly as Gallatin does. ✅
 - A fixture-driven parse produces meetings, agenda items and document references with no network.
-- A live sweep limited to one page produces real rows and respects the interval.
+  ✅ 64 tests; the 2026-08-04 City Commission agenda yields 30 items from the captured bytes.
+- A live sweep limited to one page produces real rows and respects the interval. ✅ 14-day
+  lookback: **18 meetings, 8 documents, 8 artifacts, 88 agenda items**, one `succeeded` run. A
+  second sweep re-fetched nothing (`artifacts_unchanged: 8`).
+
+**And one the spec omitted:** the vendor-robots exception may only operate while it is disclosed on
+the Methodology page. It was not. That disclosure ships in the same release as the adapter, with
+tests, because shipping the crawler without it would breach the project's own published standard.
 
 ---
 

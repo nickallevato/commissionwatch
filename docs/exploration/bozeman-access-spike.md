@@ -1,5 +1,13 @@
 # Bozeman City Commission — Source Access Spike
 
+> **Superseded in part, 2026-08-09.** The adapter is written and has run
+> (`backend/src/services/ingestion/adapters/bozeman-granicus.ts`). This document remains the
+> record of how the source was found and why `bozemanmt.gov` stays closed, and its access
+> analysis held up exactly. Several of its **counts did not**, and §7 items 2 and 4 were
+> overtaken by an operator decision. Corrections are marked inline and collected in §8.
+> Where this document and `backend/test/fixtures/bozeman-granicus/PROVENANCE.md` disagree,
+> PROVENANCE.md is the one written against bytes that still exist.
+
 **Status:** Investigation complete. No adapter code written.
 **Probed:** 2026-08-04 / 2026-08-05 UTC
 **Egress IP during probing:** `184.166.213.70` (residential, not a datacenter range)
@@ -119,14 +127,14 @@ is not needed for this source. The page opens with:
 
 Parsed from that single response:
 
-| Metric | Value |
-|---|---|
-| City Commission meetings listed | **520** |
-| Date range | **2013 → 2026** (18–59 meetings/yr; 25 so far in 2026) |
-| Rows with an agenda link | **507** |
-| Rows with a minutes link | **434** |
-| Other public bodies on the same page | 20+ (Community Development Board 101, Transportation Board 52, Sustainability Board 52, Study Commission 44, Economic Vitality Board 47, Historic Preservation 54, Inter-Neighborhood Council 39, MPO committees, …) |
-| Upcoming meetings section | Yes — future agendas appear before the meeting |
+| Metric | Value as parsed 2026-08-04 | **Re-measured 2026-08-09** |
+|---|---|---|
+| City Commission meetings listed | **520** | **519** |
+| Date range | **2013 → 2026** | Confirmed. 2013 ×18 … 2025 ×180, 2026 ×126 (all bodies) |
+| Rows with an agenda link | **507** | 507 was City-Commission-only. Across all bodies: **1,102** of 1,135 |
+| Rows with a minutes link | **434** | Likewise: **956** across all bodies |
+| Other public bodies on the same page | 20+ | **16 bodies in total**, City Commission included — not 20+ others |
+| Upcoming meetings section | Yes | Confirmed, 17 rows. But it names bodies differently from the archive: "Tax Increment Finance Advisory Board" vs the panel's "Tax Increment Financing Board", and "Library Board of Trustees" has no panel at all |
 
 There is only one `view_id` in use: **`view_id=1`**.
 
@@ -135,7 +143,7 @@ There is only one `view_id` in use: **`view_id=1`**.
 | Artifact | URL template | Verified response |
 |---|---|---|
 | Archive index | `https://bozeman.granicus.com/ViewPublisher.php?view_id=1` | `200`, 5.86 MB `text/html` |
-| Agenda (past meeting) | `//bozeman.granicus.com/AgendaViewer.php?view_id=1&clip_id={clip_id}` | `200`, 36 KB `text/html` |
+| Agenda (past meeting) | `//bozeman.granicus.com/AgendaViewer.php?view_id=1&clip_id={clip_id}` | **`302`** → `granicus_production_attachments.s3.amazonaws.com`, then `200`, 36 KB `text/html`. Re-verified 2026-08-09; the redirect is why that S3 host is a declared origin in the adapter |
 | Agenda (upcoming meeting) | `//bozeman.granicus.com/AgendaViewer.php?view_id=1&event_id={event_id}` | `200` `text/html` |
 | Minutes | `//bozeman.granicus.com/MinutesViewer.php?view_id=1&clip_id={clip_id}&doc_id={uuid}` | `200`, 212 KB **`application/pdf`** (older rows `302` to the document) |
 | Agenda packet | `https://d3n9y02raazwpg.cloudfront.net/bozeman/{uuid-chain}-{epoch}.pdf` | `200`, **28.4 MB, 439-page** PDF |
@@ -176,6 +184,13 @@ Note this also corrects a stale default in the current config: the 2026-08-04 me
 start of 2:00 PM**, and upcoming Commission meetings are listed at **6:00 PM**, not the `18:00` +
 fixed-location assumption baked into `BOZEMAN_CONFIG.defaults`. Meeting time must be read per-row, not
 defaulted.
+
+> **Corrected 2026-08-09.** Half right, and the wrong half matters. The **Upcoming Events** table
+> states a scheduled start and that is a real fact about the meeting. The **archive** table's time
+> column is the *video clip's* start: the 2026-08-04 City Commission row reads 1:17 PM while that
+> same meeting's agenda states the early start of 2:00 PM quoted above. Reading it "per-row" and
+> publishing it as the meeting time would put a wrong time on 1,135 meetings. The adapter emits a
+> time only for an upcoming meeting, and none at all for an archived one.
 
 ### RSS feeds exist
 
@@ -353,15 +368,29 @@ retried, worked around, or used as a fallback.
    `agents/meeting-monitor/src/scraper/bozeman-commission.ts` rather than leaving them to look
    maintained — they encode a site that no longer exists and selectors that were never true.
 
-2. **Do not ship an automated Granicus crawler until permission is in hand.** The archive is reachable
-   and complete, but `robots.txt` says `Disallow: /` and the project rule says respect it. Shipping
-   anyway would be the kind of thing that makes a transparency project indefensible.
+2. ~~**Do not ship an automated Granicus crawler until permission is in hand.**~~ **Overtaken by the
+   operator decision of 2026-08-04**, which this document predates. The rule is no longer "respect
+   `robots.txt`" without qualification: where a **vendor's** blanket `Disallow: /` would withhold
+   records a government custodian is obliged to publish, the project fetches anyway, under stated
+   conditions — one request every few seconds, never concurrent, an honest user agent, no re-fetch
+   of unchanged documents, the public-records route offered alongside, and **the practice disclosed
+   on the Methodology page**. See `.claude/skills/commissionwatch-development/SKILL.md` §"Scraping
+   conduct".
+
+   The adapter shipped 2026-08-09 under that exception, at the 10-second `Crawl-delay` the file
+   itself publishes, and the Methodology page carries the disclosure in the same release. Nothing
+   here changes for a custodian who asks us to stop: we stop.
 
 3. **Send the City Clerk request this week** (§5 above). Ask for Granicus polling permission, an Open
    Platform API key, and Akamai allow-listing, with a conventional MCA 2-6-1003 records request as the
    fallback. This is a days-to-weeks unblock with a strong statutory footing, not a research project.
 
-4. **Meanwhile, keep Bozeman in the `blocked` health state.** `backend/migrations/016_create_ingestion_sources.ts`
+4. ~~**Meanwhile, keep Bozeman in the `blocked` health state.**~~ Superseded with item 2: the source
+   registers `healthy` and **disabled**, which is where every new source starts. The paragraph
+   below is still the right description of what `blocked` is for. Its closing note was acted on —
+   the adapter registered under `bozeman-granicus`, not the migration comment's `bozeman-akamai`.
+
+   Original text: **Meanwhile, keep Bozeman in the `blocked` health state.** `backend/migrations/016_create_ingestion_sources.ts`
    already models this as first-class and non-exceptional — "an adapter whose live fetching is
    unavailable (Bozeman) sits here while every downstream stage keeps running against stored
    artifacts." That is exactly the right posture; nothing in the schema needs to change. When
@@ -379,3 +408,30 @@ retried, worked around, or used as a fallback.
    parse meeting time per-row instead of defaulting to `18:00`; and expect agenda packets in the tens
    of megabytes and hundreds of pages (one verified packet was 28.4 MB / 439 pages), so stream and cache
    them rather than holding them in memory.
+
+---
+
+## 8. Corrections, 2026-08-09
+
+Re-probed while writing the adapter, same egress IP, same honest user agent, ~6 requests spaced
+three seconds apart. The access findings all held: Granicus answers 200 with no evasion, and
+`bozemanmt.gov` was not touched and must not be. What changed:
+
+| § | This document said | Actually |
+|---|---|---|
+| 2 | 520 City Commission meetings | 519 |
+| 2 | "20+ other public bodies" | 16 bodies in total |
+| 2 | 507 agendas / 434 minutes | Those are City-Commission-only. All bodies: 1,102 / 956, out of 1,135 rows |
+| 2 | Agenda URL returns `200` `text/html` | Returns `302` to S3 first |
+| 2 | Read meeting time per-row | Only the Upcoming table's time is the meeting's. The archive's is the video clip's start |
+| 6 | "IDs (`clip_id`, `event_id`, `doc_id`) are stable primary keys for deduplication" | Stable, but not usable as the meeting's key: a meeting carries an `event_id` while upcoming and a `clip_id` once past, so keying on them makes one meeting two rows. The adapter keys on body and date |
+| 7.2 | Do not ship a crawler until permission is in hand | Superseded by the operator's vendor-robots exception |
+| 7.4 | Keep Bozeman `blocked` | Registers `healthy` and disabled |
+
+Two recommendations from §6 were **not** taken and are still open work, recorded so they are not
+lost: polling `ViewPublisherRSS.php` for change detection rather than re-fetching the 5.9 MB index
+every sweep, and streaming agenda packets rather than holding them in memory. The adapter fetches
+the index each sweep and does not fetch packets at all by default.
+
+The public-records recommendation in §5 stands on its own merits and is unaffected: the statutory
+route should still be offered alongside, which is P7's job.
