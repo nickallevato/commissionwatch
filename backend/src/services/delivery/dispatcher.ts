@@ -14,6 +14,7 @@ import {
   type DiscordEmbed,
   type DiscordMessage,
 } from "./discord";
+import { SmsSendError, TwilioClient } from "./sms";
 
 /**
  * The dispatcher turns an event into durable `deliveries` rows, then sends
@@ -56,7 +57,7 @@ export interface DeliveryRow {
   event_type: string;
   payload: StoredPayload;
   dedupe_key: string;
-  status: "pending" | "sent" | "failed" | "skipped";
+  status: "pending" | "sent" | "failed" | "skipped" | "deferred";
   attempts: number;
   next_attempt_at: Date | null;
   last_error: string | null;
@@ -65,6 +66,8 @@ export interface DeliveryRow {
 export interface DispatchResult {
   /** deliveries rows created by this call. */
   queued: string[];
+  /** Rows written as `deferred` because their route is not immediate. */
+  deferred: string[];
   /** Routes that matched but whose (channel, dedupe_key) row already existed. */
   duplicates: number;
   /** Distinct channels the event was routed to. */
@@ -78,12 +81,13 @@ export interface FlushResult {
   delivery_ids: string[];
   embeds: number;
   overflow: number;
-  status: "sent" | "failed" | "retrying" | "skipped";
+  status: "sent" | "failed" | "retrying" | "skipped" | "deferred";
   error?: string;
 }
 
 export interface DispatcherOptions {
   discord?: DiscordClient;
+  sms?: TwilioClient;
   /** Window that same-type events collapse into one message. */
   batchWindowMs?: number;
   /** When false, nothing sends until flushAll() is called. Used by tests. */
@@ -103,6 +107,24 @@ const SEVERITY_COLORS: Record<string, number> = {
 };
 
 const RESERVED_PAYLOAD_KEYS = new Set(["title", "description", "summary", "link", "url"]);
+
+/**
+ * One SMS for a batch. There are no embeds and no formatting to fall back on,
+ * so the message is a count and the first title — a text message is not a
+ * notification surface, it is a nudge towards one.
+ */
+export function buildSmsBody(
+  eventType: string,
+  rows: Array<Pick<DeliveryRow, "payload">>,
+): string {
+  const label = humanizeEventType(eventType);
+  const first = rows[0]?.payload?.data ?? {};
+  const title = typeof first.title === "string" ? first.title : label;
+  const more = rows.length > 1 ? ` (+${rows.length - 1} more)` : "";
+  // Well inside a single GSM-7 segment, so one event never becomes three
+  // billable messages.
+  return `CommissionWatch: ${title}${more}. Reply STOP to unsubscribe.`.slice(0, 140);
+}
 
 /** Deterministic JSON so the default dedupe key does not depend on key order. */
 function stableStringify(value: JsonValue): string {
@@ -201,6 +223,7 @@ interface Batch extends BatchKey {
 
 export class DeliveryDispatcher {
   private readonly discord: DiscordClient;
+  private readonly sms: TwilioClient;
   private readonly batchWindowMs: number;
   private readonly autoFlush: boolean;
   private readonly maxAttempts: number;
@@ -216,6 +239,7 @@ export class DeliveryDispatcher {
     options: DispatcherOptions = {},
   ) {
     this.discord = options.discord ?? new DiscordClient();
+    this.sms = options.sms ?? new TwilioClient();
     this.batchWindowMs = options.batchWindowMs ?? 2000;
     this.autoFlush = options.autoFlush ?? true;
     this.maxAttempts = options.maxAttempts ?? 5;
@@ -249,16 +273,23 @@ export class DeliveryDispatcher {
     };
 
     const queued: string[] = [];
+    const deferred: string[] = [];
     let duplicates = 0;
 
     for (const route of byChannel.values()) {
+      // A non-immediate route is held for a digest run rather than sent now.
+      // This is the column that lets the existing digest scheduler drive every
+      // channel instead of running as a parallel system beside the dispatcher.
+      const holdForDigest = route.cadence !== "immediate";
+
       const inserted = await this.db("deliveries")
         .insert({
           channel_id: route.channel_id,
           event_type: event.event_type,
           payload: JSON.stringify(stored),
           dedupe_key: dedupeKey,
-          status: "pending",
+          status: holdForDigest ? "deferred" : "pending",
+          last_error: holdForDigest ? `held for the ${route.cadence} digest` : null,
           attempts: 0,
         })
         .onConflict(["channel_id", "dedupe_key"])
@@ -270,6 +301,11 @@ export class DeliveryDispatcher {
         continue;
       }
 
+      if (holdForDigest) {
+        deferred.push(inserted[0].id);
+        continue;
+      }
+
       queued.push(inserted[0].id);
       this.enqueue(
         { channelId: route.channel_id, channelType: route.channel_type, eventType: event.event_type },
@@ -277,7 +313,7 @@ export class DeliveryDispatcher {
       );
     }
 
-    return { queued, duplicates, channels: byChannel.size };
+    return { queued, deferred, duplicates, channels: byChannel.size };
   }
 
   private enqueue(key: BatchKey, deliveryId: string): void {
@@ -403,9 +439,16 @@ export class DeliveryDispatcher {
       status: "sent",
     };
 
+    if (channelType === "sms") {
+      return this.sendSmsBatch(channelId, eventType, deliveryIds, base);
+    }
+
     if (channelType !== "discord") {
-      // Email keeps its own established path; generic webhooks are not wired
-      // to a transport yet. Either way the row records why nothing was sent.
+      // Email keeps its own established path — the legacy EmailDeliveryService
+      // is its only sender, which is what makes B-e's back-fill of
+      // alert_subscriptions onto delivery_channels incapable of double-sending.
+      // Generic webhooks are not wired to a transport yet. Either way the row
+      // records why nothing was sent.
       await this.db("deliveries")
         .whereIn("id", deliveryIds)
         .update({ status: "skipped", last_error: `no dispatcher transport for channel type "${channelType}"` });
@@ -459,6 +502,118 @@ export class DeliveryDispatcher {
       const status = await this.recordFailure(rows, reason, retryable);
       return { ...base, delivery_ids: ids, embeds, overflow, status, error: reason };
     }
+  }
+
+  /**
+   * SMS. Two things make this unlike every other transport, and neither is a
+   * property of the client:
+   *
+   * - **Consent is regulated.** A subscriber destination that has not confirmed
+   *   is never sent to. The gate is here rather than only at subscribe time so
+   *   no future caller can route around it.
+   * - **It costs money per message.** A route may carry a per-day cap. Over it,
+   *   the row becomes `deferred` with the reason on it — held for a digest,
+   *   never dropped silently, because a transparency project cannot have a
+   *   status that hides a backlog.
+   */
+  private async sendSmsBatch(
+    channelId: string,
+    eventType: string,
+    deliveryIds: string[],
+    base: FlushResult,
+  ): Promise<FlushResult> {
+    const channel = await this.db("delivery_channels")
+      .where({ id: channelId })
+      .first<
+        | {
+            config_encrypted: Buffer;
+            owner_kind: "operator" | "subscriber";
+            verified: boolean;
+          }
+        | undefined
+      >("config_encrypted", "owner_kind", "verified");
+
+    if (!channel) {
+      await this.db("deliveries")
+        .whereIn("id", deliveryIds)
+        .update({ status: "failed", last_error: "channel no longer exists", attempts: this.maxAttempts });
+      return { ...base, status: "failed", error: "channel no longer exists" };
+    }
+
+    if (channel.owner_kind === "subscriber" && !channel.verified) {
+      const reason = "destination has not confirmed opt-in; SMS consent is required before the first send";
+      await this.db("deliveries").whereIn("id", deliveryIds).update({ status: "skipped", last_error: reason });
+      return { ...base, status: "skipped", error: reason };
+    }
+
+    const capped = await this.dailyCapExceeded(channelId);
+    if (capped !== null) {
+      await this.db("deliveries").whereIn("id", deliveryIds).update({ status: "deferred", last_error: capped });
+      return { ...base, status: "deferred", error: capped };
+    }
+
+    const rows = await this.db("deliveries")
+      .whereIn("id", deliveryIds)
+      .where("status", "pending")
+      .orderBy("created_at", "asc")
+      .select<Array<Pick<DeliveryRow, "id" | "payload" | "attempts">>>("id", "payload", "attempts");
+
+    if (rows.length === 0) return { ...base, delivery_ids: [], status: "sent" };
+
+    const ids = rows.map((row) => row.id);
+
+    let phone: string;
+    try {
+      const config = decryptChannelConfig(channel);
+      if (!config.phone) throw new Error("channel config has no phone number");
+      phone = config.phone;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "unreadable channel config";
+      await this.db("deliveries")
+        .whereIn("id", ids)
+        .update({ status: "failed", last_error: reason, attempts: this.maxAttempts });
+      return { ...base, delivery_ids: ids, status: "failed", error: reason };
+    }
+
+    try {
+      await this.sms.send(phone, buildSmsBody(eventType, rows));
+      await this.db("deliveries")
+        .whereIn("id", ids)
+        .update({ status: "sent", sent_at: this.now(), last_error: null });
+      return { ...base, delivery_ids: ids, status: "sent" };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "unknown SMS error";
+      const retryable = !(err instanceof SmsSendError) || err.retryable;
+      const status = await this.recordFailure(rows, reason, retryable);
+      return { ...base, delivery_ids: ids, status, error: reason };
+    }
+  }
+
+  /**
+   * The reason string when today's sends on this channel have reached the
+   * tightest cap any of its routes carries, or null when they have not.
+   */
+  private async dailyCapExceeded(channelId: string): Promise<string | null> {
+    const capRow = await this.db("channel_routes")
+      .where({ channel_id: channelId, enabled: true })
+      .whereNotNull("daily_send_cap")
+      .min<{ cap: number | string | null }[]>("daily_send_cap as cap");
+
+    const cap = capRow[0]?.cap === null || capRow[0]?.cap === undefined ? null : Number(capRow[0].cap);
+    if (cap === null || Number.isNaN(cap)) return null;
+
+    const since = new Date(this.now());
+    since.setUTCHours(0, 0, 0, 0);
+
+    const sentRow = await this.db("deliveries")
+      .where({ channel_id: channelId, status: "sent" })
+      .where("sent_at", ">=", since)
+      .count<{ count: string }[]>();
+
+    const sentToday = Number(sentRow[0]?.count ?? 0);
+    if (sentToday < cap) return null;
+
+    return `daily send cap of ${cap} reached (${sentToday} sent today); held for the next digest`;
   }
 
   private async recordFailure(

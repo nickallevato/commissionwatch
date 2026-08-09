@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import sessionRouter from './session';
+import channelsRouter from './channels';
 import { requireOperator } from '../../middleware/requireOperator';
 
 const router = Router();
@@ -9,8 +10,10 @@ const router = Router();
 router.use('/session', sessionRouter);
 
 // Everything mounted after this line requires a live operator session.
-// B-e's channel management and B-d's record uploads land here.
+// B-d's record uploads land here too.
 router.use(requireOperator);
+
+router.use('/channels', channelsRouter);
 
 // A guarded catch-all. Without it an unknown admin path 404s before the guard
 // runs, which confirms to an unauthenticated caller which routes exist.

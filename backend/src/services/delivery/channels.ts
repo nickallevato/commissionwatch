@@ -12,9 +12,9 @@ import { assertDiscordWebhookUrl, assertPublicWebhookUrl, type HostLookup } from
  * exception, used by the dispatcher at send time.
  */
 
-export type ChannelType = "discord" | "email" | "webhook";
+export type ChannelType = "discord" | "email" | "webhook" | "sms";
 
-export const CHANNEL_TYPES: readonly ChannelType[] = ["discord", "email", "webhook"];
+export const CHANNEL_TYPES: readonly ChannelType[] = ["discord", "email", "webhook", "sms"];
 
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
 
@@ -31,6 +31,8 @@ export interface ChannelConfig {
   webhook_url?: string;
   /** Email channels. */
   email?: string;
+  /** SMS channels. E.164, e.g. +14065550123. */
+  phone?: string;
 }
 
 export interface DeliveryChannelRow {
@@ -50,6 +52,8 @@ export interface ChannelRouteRow {
   min_severity: Severity | null;
   jurisdiction_id: string | null;
   enabled: boolean;
+  cadence?: Cadence;
+  daily_send_cap?: number | null;
 }
 
 /** Safe-to-return shape. Never contains a credential. */
@@ -85,12 +89,21 @@ export interface RouteMatchInput {
   jurisdiction_id?: string | null;
 }
 
+export type Cadence = "immediate" | "daily" | "weekly";
+
 export interface ResolvedRoute {
   route_id: string;
   channel_id: string;
   channel_type: ChannelType;
   channel_name: string;
   config_encrypted: Buffer;
+  /** Non-immediate routes are held for a digest rather than sent now. */
+  cadence: Cadence;
+  /** NULL means uncapped. Only SMS routes normally carry one. */
+  daily_send_cap: number | null;
+  owner_kind: "operator" | "subscriber";
+  /** Subscriber destinations must confirm before their first send. */
+  verified: boolean;
 }
 
 export class ChannelConfigError extends Error {
@@ -120,6 +133,12 @@ export function maskWebhookUrl(rawUrl: string): string {
 }
 
 export function maskConfig(channelType: ChannelType, config: ChannelConfig): string {
+  if (channelType === "sms") {
+    // Last four digits only. A phone number is a stronger identifier than an
+    // email address, not a weaker one.
+    const phone = config.phone ?? "";
+    return phone.length > MASK_VISIBLE_CHARS ? `…${phone.slice(-MASK_VISIBLE_CHARS)}` : "…";
+  }
   if (channelType === "email") {
     const email = config.email ?? "";
     const [local, domain] = email.split("@");
@@ -153,6 +172,17 @@ export async function validateChannelConfig(
   if (channelType === "email") {
     if (!config.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.email)) {
       throw new ChannelConfigError("Email channels require a valid email address");
+    }
+    return;
+  }
+
+  if (channelType === "sms") {
+    // E.164. Validated here as well as at the subscribe boundary, because this
+    // is the function every write path goes through.
+    if (!config.phone || !/^\+[1-9]\d{6,14}$/.test(config.phone)) {
+      throw new ChannelConfigError(
+        "SMS channels require a phone number in E.164 form, e.g. +14065550123",
+      );
     }
     return;
   }
@@ -303,6 +333,10 @@ interface RouteJoinRow {
   config_encrypted: Buffer;
   min_severity: Severity | null;
   jurisdiction_id: string | null;
+  cadence: Cadence;
+  daily_send_cap: number | null;
+  owner_kind: "operator" | "subscriber";
+  verified: boolean;
 }
 
 /**
@@ -325,10 +359,14 @@ export async function resolveRoutes(db: Knex, event: RouteMatchInput): Promise<R
       "channel_routes.id as route_id",
       "channel_routes.min_severity as min_severity",
       "channel_routes.jurisdiction_id as jurisdiction_id",
+      "channel_routes.cadence as cadence",
+      "channel_routes.daily_send_cap as daily_send_cap",
       "delivery_channels.id as channel_id",
       "delivery_channels.channel_type as channel_type",
       "delivery_channels.name as channel_name",
       "delivery_channels.config_encrypted as config_encrypted",
+      "delivery_channels.owner_kind as owner_kind",
+      "delivery_channels.verified as verified",
     );
 
   const eventRank = severityRank(event.severity);
@@ -341,5 +379,9 @@ export async function resolveRoutes(db: Knex, event: RouteMatchInput): Promise<R
       channel_type: row.channel_type,
       channel_name: row.channel_name,
       config_encrypted: row.config_encrypted,
+      cadence: row.cadence,
+      daily_send_cap: row.daily_send_cap,
+      owner_kind: row.owner_kind,
+      verified: row.verified,
     }));
 }

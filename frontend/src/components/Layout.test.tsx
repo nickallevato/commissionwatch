@@ -22,6 +22,10 @@ describe("Layout", () => {
       ["Officials", "/members"],
       ["Votes", "/votes"],
       ["Methodology", "/methodology"],
+      // B-e: the public self-serve alerts page. The admin routes are
+      // deliberately absent — an operator door does not belong in a public
+      // masthead, and this assertion is what keeps it out.
+      ["Alerts", "/subscribe"],
     ] as const;
 
     for (const [label, href] of expected) {

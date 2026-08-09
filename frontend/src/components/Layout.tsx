@@ -21,6 +21,7 @@ const navItems: NavItem[] = [
   { to: "/members", label: "Officials" },
   { to: "/votes", label: "Votes" },
   { to: "/methodology", label: "Methodology" },
+  { to: "/subscribe", label: "Alerts" },
 ];
 
 const JURISDICTIONS = "Bozeman, MT · Gallatin County";

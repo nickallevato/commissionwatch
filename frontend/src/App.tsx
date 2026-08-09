@@ -12,6 +12,8 @@ import { DataLicensePage } from "./pages/DataLicensePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminHomePage } from "./pages/AdminHomePage";
+import { AdminChannelsPage } from "./pages/AdminChannelsPage";
+import { SubscribePage } from "./pages/SubscribePage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
@@ -43,6 +45,7 @@ export function App() {
           <Route path="anomalies" element={<AnomaliesPage />} />
           <Route path="methodology" element={<MethodologyPage />} />
           <Route path="data-license" element={<DataLicensePage />} />
+          <Route path="subscribe" element={<SubscribePage />} />
 
           {/* The operator surface. Inside the Layout so it is recognisably the
             same site, and deliberately absent from the masthead nav — it is
@@ -56,6 +59,14 @@ export function App() {
             element={
               <ProtectedRoute>
                 <AdminHomePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/channels"
+            element={
+              <ProtectedRoute>
+                <AdminChannelsPage />
               </ProtectedRoute>
             }
           />

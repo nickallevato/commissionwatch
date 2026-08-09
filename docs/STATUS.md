@@ -13,7 +13,19 @@ Working from `docs/superpowers/specs/2026-08-09-archive-salvage-design.md`.
 | A2 · OpenFEC client | **Landed.** Migrations 021, plus `HttpCache` and `OpenFecClient`. No orchestration framework came with it. Needs `OPENFEC_API_KEY` to make a live call; every test is fixture-based. |
 | A1 · Operator authentication | **Landed.** Migrations 022–023, scrypt passwords, server-side sessions in an httpOnly cookie, `/api/admin/*` closed by default, CORS split. |
 | A3 · Embedding client | **Withdrawn.** Nothing consumes embeddings; see the spec. |
-| B-e, B-d | In progress. |
+| B-e · Subscriptions and delivery | **Landed.** Migrations 024–025. A subscription is a destination, a filter and a cadence. SMS added with consent and a per-day cap. |
+| B-d · Records requests | In progress. |
+
+**The dispatcher still sends no email.** That is deliberate and load-bearing.
+`alert_subscriptions` is retained read-only for one release and the legacy
+`EmailDeliveryService` remains email's only sender, which is what makes B-e's
+back-fill of those rows onto `delivery_channels` incapable of double-sending.
+`test/subscriptions-unified.test.ts` asserts it. Cutting email over to the
+dispatcher and dropping `alert_subscriptions` is a separate change, and the two
+must happen in the same commit.
+
+Per `CLAUDE.md`, nothing in the delivery layer sends product events yet —
+including SMS. The substrate exists; the review queue is still what opens it.
 
 **There is no operator account until one is seeded.** The backend creates the first
 operator at boot from `OPERATOR_SEED_EMAIL` / `OPERATOR_SEED_PASSWORD` /
@@ -93,7 +105,7 @@ Ordered by how much each blocks the product being real.
 3. **Bozeman adapter.** Route identified and validated: `bozeman.granicus.com/ViewPublisher.php?view_id=1` carries **520 City Commission meetings spanning 2013–2026**, 507 with agendas, 434 with minutes. `bozemanmt.gov` is a blanket Akamai deny and must not be retried. Operator decision 2026-08-04: crawl Granicus politely and publish the public-records-request route alongside. See `docs/exploration/bozeman-access-spike.md`.
 4. **MT CERS campaign finance** (`cers-ext.mt.gov/CampaignTracker`). Not started.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.
-6. **W7 delivery channels.** Specced only. Discord webhook posting works ad hoc; the in-app channel/routing/encryption layer is not built.
+6. ~~**W7 delivery channels.**~~ Built. Channels, routes, encryption, the Discord transport, and — as of B-e — cadence, SMS, and a self-serve subscriber surface on the same substrate. Nothing dispatches product events yet, because nothing ingests.
 7. **Launch readiness**: corrections and dispute policy, public data export and licensing, backups with a tested restore, accessibility and shareability. Specced only.
 8. **No database backups.** Nothing is backed up today. Once ingestion runs, this becomes urgent.
 9. **No monitoring.** Nothing alerts if the site goes down or ingestion silently stops.

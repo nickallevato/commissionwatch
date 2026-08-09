@@ -10,6 +10,8 @@ import votesRouter from "./routes/votes";
 import anomaliesRouter from "./routes/anomalies";
 import subscriptionsRouter from "./routes/subscriptions";
 import notificationsRouter from "./routes/notifications";
+import alertsRouter from "./routes/alerts";
+import smsRouter from "./routes/sms";
 import adminRouter from "./routes/admin";
 import { errorHandler } from "./middleware/errorHandler";
 
@@ -59,6 +61,11 @@ app.use("/api/votes", votesRouter);
 app.use("/api/anomalies", anomaliesRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/notifications", notificationsRouter);
+// The unified self-serve alerts surface. /api/subscriptions above is the
+// legacy email-only one, retained read-only for one release per B-e.
+app.use("/api/alerts", alertsRouter);
+// Twilio posts form-encoded, not JSON, so this router needs its own parser.
+app.use("/api/sms", express.urlencoded({ extended: false }), smsRouter);
 app.use("/api/admin", adminRouter);
 
 app.use(errorHandler);
