@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { Outlet, NavLink, Link } from "react-router-dom";
+import {
+  formatSweepAge,
+  useIngestionStatus,
+} from "@/hooks/useIngestionStatus";
 
 /**
  * The app shell: a newspaper masthead, a strap line, the copy well, a colophon.
@@ -25,7 +29,6 @@ const navItems: NavItem[] = [
 ];
 
 const JURISDICTIONS = "Bozeman, MT · Gallatin County";
-const LAST_SWEEP = "Last sweep 12 min ago";
 
 /** Shared measure. Generous gutters; a max width that keeps lines readable. */
 const shell = "mx-auto w-full max-w-6xl px-6 sm:px-10 lg:px-14";
@@ -36,6 +39,13 @@ const focusRing =
 
 export function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
+  // The masthead used to assert "Last sweep 12 min ago" from a constant. Real
+  // records now exist, so a made-up age is a false statement on a transparency
+  // site rather than a placeholder. `data` is undefined while the request is in
+  // flight and when it fails, and both read as "No sweep yet" — the site says it
+  // does not know instead of guessing.
+  const { data: ingestion } = useIngestionStatus();
+  const lastSweep = formatSweepAge(ingestion?.lastSuccessfulSweepAt);
 
   return (
     <div className="min-h-screen bg-paper text-ink flex flex-col">
@@ -102,7 +112,7 @@ export function Layout() {
                 aria-hidden="true"
                 className="inline-block h-1.5 w-1.5 rounded-full bg-accent"
               />
-              {LAST_SWEEP}
+              {lastSweep}
             </span>
           </div>
         </div>

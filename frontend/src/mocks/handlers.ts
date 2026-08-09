@@ -49,6 +49,15 @@ export const handlers = [
     ),
   ),
 
+  /**
+   * The masthead's sweep age. Null by default — the honest answer for a
+   * database nobody has swept, and the state every test that is not about the
+   * sweep line should see rather than an invented timestamp.
+   */
+  http.get("/api/ingestion/status", () =>
+    HttpResponse.json({ lastSuccessfulSweepAt: null }),
+  ),
+
   http.get("/api/meetings", ({ request }) => {
     const url = new URL(request.url);
     const jurisdictionId = url.searchParams.get("jurisdiction_id");

@@ -1,8 +1,28 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { within } from "@testing-library/react";
-import { renderWithProviders, screen } from "../lib/test-utils";
+import { renderWithProviders, screen, waitFor } from "../lib/test-utils";
+import { server } from "@/mocks/server";
 import { Layout } from "./Layout";
+import { formatSweepAge } from "@/hooks/useIngestionStatus";
+
+/**
+ * The sweep line is served by MSW like every other API read. The default
+ * handler answers `lastSuccessfulSweepAt: null`, so a test that is not about
+ * the sweep never sees a timestamp somebody made up.
+ */
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+function sweptAt(value: string | null) {
+  server.use(
+    http.get("/api/ingestion/status", () =>
+      HttpResponse.json({ lastSuccessfulSweepAt: value }),
+    ),
+  );
+}
 
 describe("Layout", () => {
   it("renders the masthead wordmark as a link home", () => {
@@ -37,12 +57,56 @@ describe("Layout", () => {
     expect(within(nav).getAllByRole("link")).toHaveLength(expected.length);
   });
 
-  it("renders the strap line with jurisdictions and sweep status", () => {
+  it("renders the strap line with the jurisdictions", () => {
     renderWithProviders(<Layout />);
     expect(
       screen.getByText("Bozeman, MT · Gallatin County"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Last sweep 12 min ago/)).toBeInTheDocument();
+  });
+
+  /**
+   * The masthead used to print "Last sweep 12 min ago" from a string constant,
+   * true or not. These are the tests that stop it coming back: the age has to
+   * come from `ingestion_runs`, and when there is nothing to report the site
+   * has to say so rather than pick a number.
+   */
+  it("reports the sweep age from the ingestion status endpoint", async () => {
+    const swept = new Date(Date.now() - 12 * 60 * 1000).toISOString();
+    sweptAt(swept);
+    renderWithProviders(<Layout />);
+    await waitFor(() =>
+      expect(screen.getByText("Last sweep 12 min ago")).toBeInTheDocument(),
+    );
+  });
+
+  it("says no sweep yet when nothing has ever swept", async () => {
+    sweptAt(null);
+    renderWithProviders(<Layout />);
+    await waitFor(() =>
+      expect(screen.getByText("No sweep yet")).toBeInTheDocument(),
+    );
+  });
+
+  it("says no sweep yet when the status request fails", async () => {
+    server.use(
+      http.get(
+        "/api/ingestion/status",
+        () => new HttpResponse(null, { status: 500 }),
+      ),
+    );
+    renderWithProviders(<Layout />);
+    await waitFor(() =>
+      expect(screen.getByText("No sweep yet")).toBeInTheDocument(),
+    );
+  });
+
+  it("never renders an invented sweep age", async () => {
+    sweptAt(null);
+    renderWithProviders(<Layout />);
+    await waitFor(() =>
+      expect(screen.getByText("No sweep yet")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Last sweep 12 min ago/)).not.toBeInTheDocument();
   });
 
   it("wires the menu button to the navigation with aria attributes", () => {
@@ -133,5 +197,39 @@ describe("Layout", () => {
     const skip = screen.getByRole("link", { name: "Skip to content" });
     expect(skip).toHaveAttribute("href", "#main");
     expect(screen.getByRole("main").id).toBe("main");
+  });
+});
+
+describe("formatSweepAge", () => {
+  const now = new Date("2026-08-09T12:00:00.000Z");
+
+  it("says no sweep yet for null, undefined and an unparseable instant", () => {
+    expect(formatSweepAge(null, now)).toBe("No sweep yet");
+    expect(formatSweepAge(undefined, now)).toBe("No sweep yet");
+    expect(formatSweepAge("not a date", now)).toBe("No sweep yet");
+  });
+
+  it("counts minutes, hours and days", () => {
+    expect(formatSweepAge("2026-08-09T11:48:00.000Z", now)).toBe(
+      "Last sweep 12 min ago",
+    );
+    expect(formatSweepAge("2026-08-09T11:00:00.000Z", now)).toBe(
+      "Last sweep 1 hr ago",
+    );
+    expect(formatSweepAge("2026-08-09T06:00:00.000Z", now)).toBe(
+      "Last sweep 6 hrs ago",
+    );
+    expect(formatSweepAge("2026-08-08T12:00:00.000Z", now)).toBe(
+      "Last sweep 1 day ago",
+    );
+    expect(formatSweepAge("2026-08-06T12:00:00.000Z", now)).toBe(
+      "Last sweep 3 days ago",
+    );
+  });
+
+  it("does not print a sweep in the future when the clocks disagree", () => {
+    expect(formatSweepAge("2026-08-09T12:05:00.000Z", now)).toBe(
+      "Last sweep just now",
+    );
   });
 });

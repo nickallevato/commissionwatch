@@ -8,6 +8,7 @@ import meetingsRouter from "./routes/meetings";
 import membersRouter from "./routes/members";
 import votesRouter from "./routes/votes";
 import anomaliesRouter from "./routes/anomalies";
+import ingestionRouter from "./routes/ingestion";
 import subscriptionsRouter from "./routes/subscriptions";
 import notificationsRouter from "./routes/notifications";
 import alertsRouter from "./routes/alerts";
@@ -59,6 +60,7 @@ app.use("/api/meetings", meetingsRouter);
 app.use("/api/members", membersRouter);
 app.use("/api/votes", votesRouter);
 app.use("/api/anomalies", anomaliesRouter);
+app.use("/api/ingestion", ingestionRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/notifications", notificationsRouter);
 // The unified self-serve alerts surface. /api/subscriptions above is the
