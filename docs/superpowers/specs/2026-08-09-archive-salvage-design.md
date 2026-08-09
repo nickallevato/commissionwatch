@@ -418,6 +418,56 @@ content. Every Tier D entry names why it is not a loss. If a Tier D item turns o
 behaviour someone wanted, that is a spec defect and this document should be corrected rather
 than the item quietly reinstated.
 
+## Amendments made during implementation
+
+Recorded here rather than diverged from silently, per the project's own rule that
+a spec which is wrong about the codebase gets corrected.
+
+**A1 — the sessions table is `operator_sessions`, not `sessions`.** B-e introduces
+subscriber-scoped tokens that are also session-like and are governed by a different
+permission model — `owner_kind` exists precisely to keep operator and subscriber
+identities apart. A bare `sessions` invites conflating them at exactly the point
+where conflating them is a security defect. Every column and rule is as specified;
+only the name changed.
+
+**A1 — the first-operator seed reads the environment, not SSM directly.** This
+document said the seed comes "from SSM Parameter Store at
+`/commissionwatch/operator-seed`". The backend holds no AWS SDK and must not
+acquire one: on this deployment the host fetches `/commissionwatch/env` from
+Parameter Store with its instance role and hands the result to the container as an
+env file. The parameter is therefore delivered as `OPERATOR_SEED_EMAIL` /
+`OPERATOR_SEED_PASSWORD` / `OPERATOR_SEED_NAME` — the same secret by the same route
+as every other secret this app holds. "Consumed once, only when `operators` is
+empty" is unchanged.
+
+**B-e — the unified self-serve API is mounted at `/api/alerts`.** This document
+requires that `alert_subscriptions` be "retained read-only for one release, then
+dropped in a separate change", and that the existing email path keep working with
+its tests green at every commit. Reusing `/api/subscriptions` for the unified model
+would have contradicted both. The legacy surface is untouched; the new one sits
+beside it and is what the new UI talks to.
+
+**B-e — the dispatcher still does not send email, and that is load-bearing.**
+Back-filling `alert_subscriptions` onto `delivery_channels` would be a double-send
+bug if anything besides the legacy `EmailDeliveryService` could send email. Nothing
+does: the dispatcher marks every non-Discord channel `skipped`, and a test asserts
+it. Cutting email over and dropping `alert_subscriptions` must happen in one commit.
+
+**B-d — `anomaly_flags.review_state` was required and is not in this document.**
+`GET /api/anomalies` is a public route, and extraction from a records document names
+people. Without a gate, a records-derived flag would have been publicly readable the
+moment it was written — a direct breach of "nothing naming a person auto-publishes".
+Records-derived flags are written `held` and the public reads exclude them. B-a
+generalises the column into the review queue rather than inventing a second one.
+
+**A pre-existing defect found and fixed on the way.** `backend/package.json`'s
+`test` script enumerates every test file by path, and four were missing from it —
+`anomalies`, `anomaly-detection`, `delivery` and `ingestion-queue`, 135 tests that
+had never run in CI. Registering them exposed one leak: `anomalies.test.ts` created
+anomaly flags on a seeded meeting and never removed them, which made a later
+severity assertion in `notification-service.test.ts` observe an immediate send its
+own fixtures had not caused.
+
 ## Invariants this work must not break
 
 Carried from `CLAUDE.md` and `.claude/skills/commissionwatch-development/SKILL.md`:
