@@ -104,7 +104,18 @@ on the page.
   `locked_until timestamptz null`, timestamps.
 - `operator_role` enum is created with a single value `operator`. The column exists so a
   second role is an `ALTER TYPE ... ADD VALUE`, not a migration that rewrites every row.
-- **argon2id**, not bcrypt. The archive used bcrypt; argon2id is the current default.
+- **`scrypt` from `node:crypto`**, not bcrypt and not the `argon2` package. Revised 2026-08-09
+  after checking the deployment constraint. This spec originally said argon2id, which is the
+  stronger default in the abstract — but production images **must be `linux/arm64`** (the host
+  is Graviton; an amd64 image dies at startup with `exec format error`), and the `argon2` npm
+  package is a native node-gyp addon. Adding a compiled dependency to an arm64 cross-build is a
+  category of failure this project has already paid for elsewhere. `scrypt` is memory-hard,
+  ships in Node core, needs no build step, and is what `backend/src/services/delivery/crypto.ts`
+  already establishes as the house pattern — that module is pure `node:crypto` too.
+  Parameters: `N = 2^16`, `r = 8`, `p = 1`, `keylen = 64`. **`maxmem` must be passed explicitly**
+  — Node defaults to 32 MiB and these parameters need ~64 MiB, so the call throws without it.
+  Stored as `scrypt$N$r$p$<salt-b64>$<hash-b64>` so the parameters travel with the hash and can
+  be raised later without invalidating existing rows.
 - **httpOnly, Secure, SameSite=Lax session cookie** backed by a `sessions` table, not a JWT.
   A server-side session can be revoked; a JWT cannot. Sliding expiry, 12 hours idle,
   7 days absolute.
@@ -112,7 +123,13 @@ on the page.
   `/commissionwatch/operator-seed`, consumed once at boot and only when the `operators`
   table is empty. Subsequent operators are created by an existing operator.
 - Rate limit: 5 failed attempts locks the account for 15 minutes, recorded on the row.
-  Every attempt is logged with source IP.
+  Every attempt is logged with source IP. The lockout is also what bounds scrypt's memory
+  cost — without it, concurrent sign-in attempts are a cheap way to exhaust a 4 GB host.
+- **CORS must be tightened before cookies exist.** `backend/src/app.ts` currently calls
+  `app.use(cors())` with no options, which allows any origin. That is harmless today because
+  there is nothing to steal, and unacceptable the moment a session cookie does. The admin
+  surface gets an explicit origin allowlist and `credentials: true`; the public read-only API
+  keeps its permissive policy, since open data is the point.
 - `ProtectedRoute` and `AuthContext` port with the storage layer swapped from local storage
   to a `/api/admin/session` probe, since an httpOnly cookie is unreadable from JS.
 - **Discard** `RegisterPage.tsx` entirely.
