@@ -1,6 +1,6 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-09, after landing Tier A of the archive salvage.
+> Last updated: 2026-08-09, after landing P1 (ingestion scheduling) and P3 (backups).
 > Read this before starting work. It records what is true, not what was planned.
 
 ## Archive salvage — what has landed
@@ -48,11 +48,56 @@ open to any origin — that is deliberate, and open data is the point.
 | Footprint | ~144 MB actual against 1408 MB of declared limits |
 | Deploy dir | `/home/ec2-user/commissionwatch` on the host |
 | Access | Gated at the Caddy layer to `184.166.213.70`. Everyone else gets 403 |
-| Data | **Empty.** `members`, `meetings`, `votes` all zero rows |
+| Data | Live host not yet swept. Locally, the first real sweep landed 7 meetings, 40 agenda items, 11 artifacts (2026-08-09) |
 
-### The site has no data in it
+### Ingestion runs — the first public records have been fetched
 
-This is the single most important thing to understand. It is a working, well-built shell. The Gallatin adapter exists and passes 68 tests, but **nothing schedules it**, so no public record has ever been ingested. Making that true is the highest-value next task.
+**"Nothing ingests" stopped being true on 2026-08-09.** It was the single most important sentence
+in this file for the product's whole life, and it is now wrong, so it is gone rather than softened.
+
+`SourceScheduler` (`backend/src/services/ingestion/scheduler.ts`) is started from `index.ts`. It
+reads `ingestion_sources.cron_expression` and `.enabled`, arms one `node-cron` job per enabled
+source, takes a Postgres advisory lock keyed on the source id so one sweep runs at a time, writes
+an `ingestion_runs` row **before** any work, and closes it `succeeded`, `partial` or `failed` with
+every error text in the row. It **does not sweep on process start** — the first execution of any
+source is its first cron tick, because a crash-looping container must never become a crawl of a
+county web server. `SCHEDULER_ENABLED` defaults off under `NODE_ENV=test`.
+
+**A real sweep ran against Gallatin County on 2026-08-09**, rate-limited to one request every two
+seconds with the project's honest user agent. What landed locally:
+
+| | |
+|---|---|
+| `meetings` | **7** (Weed Board ×4, Study Commission ×2, plus one more) |
+| `agenda_items` | **40**, extracted from real agenda PDFs |
+| `meeting_documents` | 11 |
+| `artifacts` | 11, content-addressed, bytes in MinIO |
+| `ingestion_runs` | 1, status `succeeded` |
+| `ingestion_jobs` | 23, all terminal |
+
+Two things the sweep taught us, both now in the spec:
+
+- **AgendaCenter has been reorganised.** It rendered **three** categories on 2026-08-09
+  (`cat3`, `cat2`, `cat4`) where the 2026-08-04 fixture captured twelve. The adapter's hardcoded
+  body list is now mostly wrong about what the site serves; it skips an unknown category loudly, so
+  the failure mode is safe, but the list belongs in `ingestion_sources.config` and is P2's job.
+- **Not every document is a PDF.** `/AgendaCenter/ViewFile/Agenda/_08062026-108` is a Word
+  document. Parse records that as `parse_unsupported` and completes — the bytes are still stored
+  and still citable. That meeting has 0 agenda items and the reason is recorded.
+
+The live host has **not** been swept: `ingestion_sources` rows are created **disabled**, so nothing
+sweeps because a container started. Enabling Gallatin in production is a deliberate act:
+
+```bash
+npm run sweep -- --list                                    # what exists
+npm run sweep -- --adapter gallatin-civicplus --enable     # enable and sweep once, now
+```
+
+**The adapter moved.** `agents/meeting-monitor/src/adapters/` is now
+`backend/src/services/ingestion/adapters/`, with its contract suite in `backend/test/adapters/` and
+its fixtures in `backend/test/fixtures/gallatin/`. `backend/Dockerfile`'s build context is
+`./backend`, so a production image cannot contain a file from `agents/` — and the scheduler runs in
+the backend. Those 68 contract tests had **never run in CI**; they do now.
 
 ### The running deployment now comes from CI
 
@@ -100,14 +145,21 @@ Delete the two `@blocked` lines from the `commissionwatch.bmux.sh` block in `you
 
 Ordered by how much each blocks the product being real.
 
-1. **Nothing ingests.** The queue, worker and Gallatin adapter exist; no scheduler runs them. Zero records on the live site.
+1. ~~**Nothing ingests.**~~ Closed 2026-08-09 by P1. The scheduler is wired, a real sweep has run, and the pipeline lands meetings, documents, artifacts and agenda items. Remaining: enable the source on the live host, and move the body list out of the adapter into `ingestion_sources.config`.
 2. **W3 findings engine and review queue.** The core product. `anomaly_flags.review_state` now exists (B-d) and is the column the queue generalises: records-derived flags are written `held` and the public API filters them out. Generated narrative, mechanical claim-to-citation binding, operator approval before anything naming a person publishes. Not started. Spec exists in the production design.
 3. **Bozeman adapter.** Route identified and validated: `bozeman.granicus.com/ViewPublisher.php?view_id=1` carries **520 City Commission meetings spanning 2013–2026**, 507 with agendas, 434 with minutes. `bozemanmt.gov` is a blanket Akamai deny and must not be retried. Operator decision 2026-08-04: crawl Granicus politely and publish the public-records-request route alongside. See `docs/exploration/bozeman-access-spike.md`.
 4. **MT CERS campaign finance** (`cers-ext.mt.gov/CampaignTracker`). Not started.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.
 6. ~~**W7 delivery channels.**~~ Built. Channels, routes, encryption, the Discord transport, and — as of B-e — cadence, SMS, and a self-serve subscriber surface on the same substrate. Nothing dispatches product events yet, because nothing ingests.
 7. **Launch readiness**: corrections and dispute policy, public data export and licensing, backups with a tested restore, accessibility and shareability. Specced only.
-8. **No database backups.** Nothing is backed up today. Once ingestion runs, this becomes urgent.
+8. ~~**No database backups.**~~ Closed 2026-08-09 by P3. `deploy/backup.sh` takes a nightly
+   `pg_dump -Fc` plus a MinIO mirror with 7 daily / 4 weekly retention and emits
+   `ops.backup_succeeded` / `ops.backup_failed` through the delivery dispatcher.
+   `deploy/restore-drill.sh` **has been executed**: 28 tables compared against the manifest,
+   137 rows restored, no losses, 11 objects in the archive. Runbook: `deploy/README.md` §5.
+   **Outstanding:** `BACKUP_S3_URI` is unset, so an archive currently never leaves the instance —
+   that is a copy, not a backup. Setting it needs a bucket, which costs money and is the operator's
+   call. The cron entry also still has to be installed on the host.
 9. **No monitoring.** Nothing alerts if the site goes down or ingestion silently stops.
 10. ~~**No admin authentication.**~~ Closed 2026-08-09 by A1. One operator class, `scrypt` from
     `node:crypto`, revocable server-side sessions in an httpOnly cookie, no public registration.
@@ -120,7 +172,9 @@ Ordered by how much each blocks the product being real.
 - **The instance-role grant for Parameter Store is outstanding**, so deploys run degraded. Not a defect in this repo — it needs whoever administers `your-org/platform-aws`. `deploy/README.md` §3 has the exact policy.
 - **Images are tagged `:sha` and `:latest` only.** No `:version` tag: deriving one from `git describe` is unsafe on Gitea's shallow checkouts, where `--always` silently degrades to a bare SHA that looks like a valid answer. Rollback is by explicit pin instead, which works today.
 - **Homepage findings section is a placeholder constant** in `HomePage.tsx` with a TODO naming W3. It must not be filled with invented content about a real person.
-- **`Layout.tsx` hardcodes "Last sweep 12 min ago."** Once real data exists this is a false statement on a transparency site. Wire it to the real sweep timestamp or remove it.
+- **`Layout.tsx` hardcodes "Last sweep 12 min ago."** Real data now exists, so this is a false
+  statement on a transparency site rather than a placeholder. `ingestion_runs.finished_at` is the
+  value it should read. Not fixed here — it is a frontend change and P1's scope was the scheduler.
 - **`meetings` has no `adjourned_at` or `meeting_type`.** `MeetingDetailPage` prints "Adjourned — Not recorded" verbatim.
 - **No tests** for `MeetingDetailPage`, `StatusBadge`, `RundownViewer`.
 - **`VoteBreakdown.tsx` may be unused** by any page — verify and delete or wire up.
@@ -140,9 +194,14 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
 
 ## Next steps, in order
 
-1. **Schedule Gallatin ingestion.** Wire the queue worker to a cron, run a sweep, confirm real meetings appear on the live site. This turns a shell into a civic-transparency site.
+1. **Enable Gallatin on the live host and install the backup cron.** The code for both landed
+   2026-08-09; neither is switched on in production. `npm run sweep -- --adapter gallatin-civicplus
+   --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
+   same time, or accept that the backup has not left the instance.
 2. **Prove CI deploy end to end.** Run `deploy-aws` and watch it succeed, so the manual deployment is no longer the only path that has ever worked.
-3. **Backups.** Postgres and MinIO snapshots with a restore that has actually been executed, before there is data worth losing.
+3. **Move the Gallatin body list into `ingestion_sources.config`.** AgendaCenter served three
+   categories on 2026-08-09 against twelve in the adapter's hardcoded list. A county standing up a
+   committee should not need a deploy.
 4. **W3 findings engine and review queue**, with admin auth. The core product, and the highest-stakes component.
 5. **Bozeman Granicus adapter**, plus the public-records-request page.
 6. **Status page** reading `ingestion_runs`, so a silently stalled scraper is visible rather than reading as a quiet month at City Hall.

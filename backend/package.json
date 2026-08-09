@@ -9,11 +9,12 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint --ext .ts src/",
     "pretest": "NODE_ENV=test knex migrate:latest --knexfile knexfile.ts && NODE_ENV=test knex seed:run --knexfile knexfile.ts",
-    "test": "NODE_ENV=test node --import tsx --test --test-concurrency=1 --test-force-exit test/health.test.ts test/version.test.ts test/jurisdictions.test.ts test/meetings.test.ts test/members.test.ts test/votes.test.ts test/validation.test.ts test/anomalies.test.ts test/anomaly-detection.test.ts test/ingestion-queue.test.ts test/delivery.test.ts test/subscriptions.test.ts test/notifications.test.ts test/notification-service.test.ts test/digest-scheduler.test.ts test/alert-flow.integration.test.ts test/anomaly-flag-types.test.ts test/http-cache.test.ts test/openfec-client.test.ts test/operator-password.test.ts test/operator-auth.test.ts test/sms.test.ts test/subscriptions-unified.test.ts test/admin-channels.test.ts test/records-extraction.test.ts test/records-requests.test.ts",
-    "test:storage": "NODE_ENV=test node --import tsx --test --test-force-exit test/storage.integration.test.ts",
+    "test": "NODE_ENV=test node --import tsx --test --test-concurrency=1 test/health.test.ts test/version.test.ts test/jurisdictions.test.ts test/meetings.test.ts test/members.test.ts test/votes.test.ts test/validation.test.ts test/anomalies.test.ts test/anomaly-detection.test.ts test/ingestion-queue.test.ts test/delivery.test.ts test/subscriptions.test.ts test/notifications.test.ts test/notification-service.test.ts test/digest-scheduler.test.ts test/alert-flow.integration.test.ts test/anomaly-flag-types.test.ts test/http-cache.test.ts test/openfec-client.test.ts test/operator-password.test.ts test/operator-auth.test.ts test/sms.test.ts test/subscriptions-unified.test.ts test/admin-channels.test.ts test/records-extraction.test.ts test/records-requests.test.ts test/adapters/contract.test.ts test/adapters/gallatin-civicplus.test.ts test/agenda-extraction.test.ts test/source-scheduler.test.ts test/ingestion-handlers.test.ts test/ops-events.test.ts",
+    "test:storage": "NODE_ENV=test node --import tsx --test test/storage.integration.test.ts",
     "migrate": "knex migrate:latest --knexfile knexfile.ts",
     "migrate:rollback": "knex migrate:rollback --all --knexfile knexfile.ts",
-    "seed": "knex seed:run --knexfile knexfile.ts"
+    "seed": "knex seed:run --knexfile knexfile.ts",
+    "sweep": "tsx src/scripts/sweep.ts"
   },
   "engines": {
     "node": ">=22"
@@ -33,12 +34,14 @@
   },
   "dependencies": {
     "@types/pg": "^8.20.0",
+    "cheerio": "^1.2.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "helmet": "^8.1.0",
     "knex": "^3.2.10",
     "minio": "^8.0.7",
     "node-cron": "^4.2.1",
+    "pdfjs-dist": "^4.10.38",
     "pg": "^8.20.0",
     "resend": "^6.12.2",
     "tsx": "^4.21.0"

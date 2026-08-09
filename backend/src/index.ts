@@ -5,12 +5,14 @@ import { EmailDeliveryService } from "./services/email-delivery";
 import { DigestScheduler } from "./services/digest-scheduler";
 import { registerDigestStatus } from "./routes/health";
 import { operatorAuthService } from "./middleware/requireOperator";
+import { buildIngestionStack, startIngestion } from "./services/ingestion";
 
 const PORT = process.env.PORT || 3001;
 
 const emailService = new EmailDeliveryService(db);
 const notificationService = new NotificationService(db, (ids) => emailService.sendImmediateAlerts(ids));
 const digestScheduler = new DigestScheduler(db, emailService);
+const ingestion = buildIngestionStack(db);
 
 registerDigestStatus(() => digestScheduler.getStatus());
 
@@ -24,11 +26,20 @@ operatorAuthService()
 const server = app.listen(PORT, () => {
   console.log(`CommissionWatch backend listening on port ${PORT}`);
   digestScheduler.start();
+
+  // The scheduler registers its sources and arms its cron jobs. It deliberately
+  // does NOT sweep here: the first execution of any source is its first cron
+  // tick, so a crash-looping container cannot turn into a crawl of a county web
+  // server. A failure to arm is logged and not fatal — a site that serves the
+  // records it already has beats a site that will not start.
+  startIngestion(db, ingestion).catch((err) => console.error("Ingestion start failed", err));
 });
 
 function shutdown() {
   console.log("Shutting down gracefully...");
   digestScheduler.stop();
+  ingestion.scheduler.stop();
+  ingestion.worker.stop();
   server.close(() => {
     db.destroy().then(() => process.exit(0));
   });
@@ -37,4 +48,4 @@ function shutdown() {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
-export { notificationService, emailService, digestScheduler };
+export { notificationService, emailService, digestScheduler, ingestion };

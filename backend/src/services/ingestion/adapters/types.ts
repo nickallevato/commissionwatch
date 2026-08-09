@@ -54,6 +54,26 @@ export type DocumentKind =
   | 'attachment'
   | 'other';
 
+/**
+ * The same list at runtime, so a `document_type` read back out of
+ * `ingestion_jobs.target` can be checked rather than asserted.
+ */
+export const DOCUMENT_KINDS: readonly DocumentKind[] = Object.freeze([
+  'agenda',
+  'minutes',
+  'packet',
+  'resolution',
+  'ordinance',
+  'attachment',
+  'other',
+]);
+
+/** Narrows an unvalidated value to a {@link DocumentKind}, or returns null. */
+export function asDocumentKind(value: unknown): DocumentKind | null {
+  const found = DOCUMENT_KINDS.filter((kind) => kind === value);
+  return found[0] ?? null;
+}
+
 /** Mirrors the `jurisdiction_type` enum. */
 export type JurisdictionType = 'city' | 'county';
 

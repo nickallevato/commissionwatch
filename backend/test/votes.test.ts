@@ -1,7 +1,8 @@
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
+import db from "../src/config/database";
 
 const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
 // Bozeman's April 28 meeting — the completed meeting seeded with three votes
@@ -137,4 +138,16 @@ describe("GET /api/meetings/:id/votes", () => {
       .get(`/api/meetings/${NON_EXISTENT_ID}/votes`)
       .expect(404);
   });
+});
+
+// Closes the knex pool `../src/app` opens on import.
+//
+// Suites that leaked a pool are why the test script carried
+// `--test-force-exit`. That flag calls `process.exit()`, which drops whatever a
+// child had not yet flushed to the reporter — so the largest suite in this repo
+// silently reported 29, 40 or 44 of its 68 tests depending on timing, always
+// green, with nothing to say the rest had gone unreported. Closing the pools is
+// what let the flag come off.
+after(async () => {
+  await db.destroy();
 });

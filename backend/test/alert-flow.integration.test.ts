@@ -278,3 +278,16 @@ describe("Full flow via HTTP: detect-anomalies endpoint triggers notifications",
     }
   });
 });
+
+// Closes the knex pool.
+//
+// Without this the process kept an idle connection open forever and the run
+// never ended, which is why `--test-force-exit` was on the test script. That
+// flag hid a worse problem than it solved: it calls `process.exit()`, which
+// drops whatever the child had not yet flushed to the reporter, so the largest
+// suite in the repo reported a random subset of its tests — 29, 40 or 44 of 68
+// — always green, with nothing to say some had gone unreported. Closing the
+// pool properly is what let the flag come off.
+after(async () => {
+  await db.destroy();
+});

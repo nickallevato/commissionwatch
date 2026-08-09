@@ -1,0 +1,543 @@
+import { createHash } from "node:crypto";
+import type { Knex } from "knex";
+import type { AdapterRegistry } from "./adapters/registry";
+import { errorMessage, IngestionQueue } from "./queue";
+import type { IngestionWorker } from "./worker";
+
+/**
+ * The thing that has never existed: something that actually calls the ingestion
+ * pipeline.
+ *
+ * The queue, the worker, the adapter, `ingestion_sources`, `ingestion_runs`,
+ * `ingestion_jobs` and `artifacts` were all built and all tested, and nothing
+ * anywhere invoked any of them. `index.ts` started the digest scheduler and
+ * stopped. The product's entire life has been spent at zero public records.
+ *
+ * Four properties are load-bearing here and each one is a rule, not a
+ * preference:
+ *
+ * 1. **Cadence lives in the database.** `ingestion_sources.cron_expression` and
+ *    `.enabled` decide when and whether a source sweeps. Changing a schedule is
+ *    an UPDATE, never a deploy.
+ * 2. **One sweep per source at a time**, enforced by a Postgres advisory lock
+ *    keyed on the source id. A tick that cannot take the lock logs and returns.
+ *    It does not queue a second sweep — that is what turns a slow source into an
+ *    unbounded backlog.
+ * 3. **Every tick writes its run row before doing any work**, and closes it
+ *    `succeeded`, `partial` or `failed`. A sweep that produced work *and* errors
+ *    is `partial`; the enum models that and it must not collapse to a boolean,
+ *    because "34 of 37 parsed" reported as "failed" trains an operator to ignore
+ *    the status.
+ * 4. **Nothing sweeps on process start.** First execution is the first cron
+ *    tick. A crash-looping container must never become a crawl of a county web
+ *    server.
+ */
+
+// ---------------------------------------------------------------------------
+// Enablement
+// ---------------------------------------------------------------------------
+
+/**
+ * `SCHEDULER_ENABLED` when set, otherwise on everywhere except tests.
+ *
+ * The default matters more than the flag: a test suite that quietly schedules
+ * real sweeps is a test suite that eventually hits a county web server from CI.
+ */
+export function schedulerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.SCHEDULER_ENABLED;
+  if (raw !== undefined && raw !== "") {
+    return /^(1|true|yes|on)$/i.test(raw.trim());
+  }
+  return env.NODE_ENV !== "test";
+}
+
+// ---------------------------------------------------------------------------
+// Advisory locking
+// ---------------------------------------------------------------------------
+
+/**
+ * Namespace for every CommissionWatch source lock, so we cannot collide with
+ * another advisory lock in the same database. Arbitrary, fixed, and signed —
+ * `pg_try_advisory_xact_lock(int4, int4)` takes signed 32-bit keys.
+ */
+export const SOURCE_LOCK_NAMESPACE = 0x636d_7773 | 0; // 'cmws'
+
+/** A stable signed int32 from a source's uuid. */
+export function sourceLockKey(sourceId: string): number {
+  const digest = createHash("sha256").update(sourceId).digest();
+  return digest.readInt32BE(0);
+}
+
+// ---------------------------------------------------------------------------
+// Outcomes
+// ---------------------------------------------------------------------------
+
+export type RunStatus = "succeeded" | "partial" | "failed";
+
+export type SweepOutcome =
+  | { kind: "skipped"; reason: "locked" | "disabled" | "unknown-source"; sourceId: string }
+  | {
+      kind: "ran";
+      sourceId: string;
+      runId: string;
+      status: RunStatus;
+      counts: Record<string, number>;
+      error: string | null;
+    };
+
+export interface SchedulerLogger {
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
+const consoleLogger: SchedulerLogger = {
+  info: (message) => console.log(message),
+  warn: (message) => console.warn(message),
+  error: (message) => console.error(message),
+};
+
+/** Just enough of node-cron's task to start, stop and inspect one. */
+interface CronTask {
+  stop(): void | Promise<void>;
+  destroy(): void | Promise<void>;
+  getNextRun(): Date | null;
+}
+
+interface CronModule {
+  schedule(
+    expression: string,
+    fn: () => void,
+    options?: { timezone?: string; name?: string; noOverlap?: boolean },
+  ): CronTask;
+  validate(expression: string): boolean;
+}
+
+export interface SourceRow {
+  id: string;
+  adapterKey: string;
+  cronExpression: string;
+  enabled: boolean;
+  expectedIntervalHours: number | null;
+}
+
+export interface SourceSchedulerOptions {
+  queue: IngestionQueue;
+  worker: IngestionWorker;
+  registry: AdapterRegistry;
+  logger?: SchedulerLogger;
+  /** Overrides the `SCHEDULER_ENABLED` / `NODE_ENV` decision. */
+  enabled?: boolean;
+  /** How far back a sweep's `discover` looks. Default 365 days. */
+  lookbackDays?: number;
+  /** Ceiling on one sweep's draining loop. Default 15 minutes. */
+  sweepTimeoutMs?: number;
+  /** Injected for tests; defaults to `node-cron`. */
+  cron?: CronModule;
+  /** Injected for tests; defaults to `() => new Date()`. */
+  now?: () => Date;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Narrows a dynamically imported module to the two functions we call.
+ *
+ * A type predicate rather than a cast: `node-cron` arrives as `unknown` from a
+ * dynamic import, and the question "does this object have the shape I am about
+ * to use" deserves a runtime answer, not an assertion that it does.
+ */
+function isCronModule(value: unknown): value is CronModule {
+  return (
+    isRecord(value) &&
+    typeof value.schedule === "function" &&
+    typeof value.validate === "function"
+  );
+}
+
+/** Reads an `ingestion_sources` row, validating everything it uses. */
+export function parseSourceRow(raw: unknown): SourceRow {
+  if (!isRecord(raw)) throw new TypeError("ingestion_sources: expected a row object");
+  const { id, adapter_key, cron_expression, enabled, expected_interval_hours } = raw;
+  if (typeof id !== "string") throw new TypeError("ingestion_sources.id: expected string");
+  if (typeof adapter_key !== "string") {
+    throw new TypeError("ingestion_sources.adapter_key: expected string");
+  }
+  if (typeof cron_expression !== "string") {
+    throw new TypeError("ingestion_sources.cron_expression: expected string");
+  }
+  if (typeof enabled !== "boolean") {
+    throw new TypeError("ingestion_sources.enabled: expected boolean");
+  }
+  const interval =
+    expected_interval_hours === null || expected_interval_hours === undefined
+      ? null
+      : Number(expected_interval_hours);
+  if (interval !== null && !Number.isFinite(interval)) {
+    throw new TypeError("ingestion_sources.expected_interval_hours: expected a number or null");
+  }
+  return {
+    id,
+    adapterKey: adapter_key,
+    cronExpression: cron_expression,
+    enabled,
+    expectedIntervalHours: interval,
+  };
+}
+
+const SUCCESS_KEYS = ["discovered", "fetched", "parsed", "analyzed"] as const;
+const FAILURE_KEYS = ["failed", "blocked"] as const;
+
+/**
+ * Reads a run's tallies into a terminal status.
+ *
+ * Exported and pure because this is the decision the spec is most emphatic
+ * about, and a decision worth an explicit test is a decision worth its own
+ * function.
+ */
+export function classifyRun(counts: Record<string, number>, threw: boolean): RunStatus {
+  const work = SUCCESS_KEYS.reduce((total, key) => total + (counts[key] ?? 0), 0);
+  const errors = FAILURE_KEYS.reduce((total, key) => total + (counts[key] ?? 0), 0);
+  if (threw) return "failed";
+  if (work === 0) return "failed";
+  return errors > 0 ? "partial" : "succeeded";
+}
+
+export class SourceScheduler {
+  private readonly logger: SchedulerLogger;
+  private readonly enabled: boolean;
+  private readonly lookbackDays: number;
+  private readonly sweepTimeoutMs: number;
+  private readonly now: () => Date;
+  private readonly tasks = new Map<string, CronTask>();
+  private readonly inFlight = new Set<string>();
+  private cron: CronModule | null;
+  private started = false;
+  private lastOutcomeBySource = new Map<string, SweepOutcome>();
+
+  constructor(
+    private readonly db: Knex,
+    private readonly options: SourceSchedulerOptions,
+  ) {
+    this.logger = options.logger ?? consoleLogger;
+    this.enabled = options.enabled ?? schedulerEnabled();
+    this.lookbackDays = options.lookbackDays ?? 365;
+    this.sweepTimeoutMs = options.sweepTimeoutMs ?? 15 * 60 * 1000;
+    this.now = options.now ?? ((): Date => new Date());
+    this.cron = options.cron ?? null;
+  }
+
+  get running(): boolean {
+    return this.started;
+  }
+
+  /** Sources currently scheduled, and when each next fires. */
+  getStatus(): {
+    enabled: boolean;
+    running: boolean;
+    sources: Array<{ sourceId: string; nextRun: Date | null; lastOutcome: SweepOutcome | null }>;
+  } {
+    const sources = [...this.tasks.entries()].map(([sourceId, task]) => ({
+      sourceId,
+      nextRun: task.getNextRun(),
+      lastOutcome: this.lastOutcomeBySource.get(sourceId) ?? null,
+    }));
+    return { enabled: this.enabled, running: this.started, sources };
+  }
+
+  /**
+   * Schedules every enabled source. **Sweeps nothing.**
+   *
+   * The first execution of any source is its first cron tick. This is the
+   * boot-safety rule, and it is why `start()` is not allowed to look convenient
+   * by "catching up" a source that looks overdue.
+   */
+  async start(): Promise<void> {
+    if (this.started) return;
+    if (!this.enabled) {
+      this.logger.info("SourceScheduler: disabled (SCHEDULER_ENABLED / NODE_ENV), scheduling nothing");
+      return;
+    }
+
+    const cron = await this.loadCron();
+    if (cron === null) {
+      this.logger.error("SourceScheduler: node-cron unavailable, no source will sweep");
+      return;
+    }
+
+    const sources = await this.loadSources();
+    for (const source of sources) {
+      if (!this.options.registry.has(source.adapterKey)) {
+        this.logger.warn(
+          `SourceScheduler: source ${source.id} names adapter '${source.adapterKey}', which is not registered — not scheduled`,
+        );
+        continue;
+      }
+      if (!cron.validate(source.cronExpression)) {
+        this.logger.error(
+          `SourceScheduler: source ${source.id} has an invalid cron expression '${source.cronExpression}' — not scheduled`,
+        );
+        continue;
+      }
+      const task = cron.schedule(
+        source.cronExpression,
+        () => {
+          this.sweepSource(source.id).catch((error: unknown) => {
+            // A sweep must never take the process down. The run row already
+            // carries the truth; this is the last line of defence.
+            this.logger.error(
+              `SourceScheduler: sweep of ${source.id} threw outside its run — ${errorMessage(error)}`,
+            );
+          });
+        },
+        { timezone: "UTC", name: `source:${source.id}`, noOverlap: true },
+      );
+      this.tasks.set(source.id, task);
+      this.logger.info(
+        `SourceScheduler: ${source.adapterKey} (${source.id}) scheduled '${source.cronExpression}' UTC`,
+      );
+    }
+
+    this.started = true;
+    this.logger.info(
+      `SourceScheduler: started with ${this.tasks.size} source(s); first sweep is on the first tick, not now`,
+    );
+  }
+
+  stop(): void {
+    for (const task of this.tasks.values()) {
+      void task.stop();
+      void task.destroy();
+    }
+    this.tasks.clear();
+    this.started = false;
+  }
+
+  private async loadCron(): Promise<CronModule | null> {
+    if (this.cron !== null) return this.cron;
+    try {
+      const imported: unknown = await import("node-cron");
+      const candidate = isRecord(imported) && isRecord(imported.default) ? imported.default : imported;
+      if (!isCronModule(candidate)) return null;
+      this.cron = candidate;
+      return candidate;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Enabled sources with their cadence. */
+  async loadSources(): Promise<SourceRow[]> {
+    const rows: unknown = await this.db("ingestion_sources")
+      .where({ enabled: true })
+      .select("id", "adapter_key", "cron_expression", "enabled", "expected_interval_hours");
+    return (Array.isArray(rows) ? rows : []).map(parseSourceRow);
+  }
+
+  /**
+   * One sweep of one source, end to end.
+   *
+   * Also the entry point a console "sweep now" button will use, which is why it
+   * is public and why it takes no cron context.
+   */
+  async sweepSource(sourceId: string): Promise<SweepOutcome> {
+    if (this.inFlight.has(sourceId)) {
+      // In-process guard. The advisory lock below is the real one — it also
+      // covers a second container — but refusing here avoids opening a
+      // transaction to be told what we already know.
+      this.logger.warn(`SourceScheduler: sweep of ${sourceId} already in flight in this process`);
+      return this.remember({ kind: "skipped", reason: "locked", sourceId });
+    }
+    this.inFlight.add(sourceId);
+    try {
+      return await this.sweepLocked(sourceId);
+    } finally {
+      this.inFlight.delete(sourceId);
+    }
+  }
+
+  private async sweepLocked(sourceId: string): Promise<SweepOutcome> {
+    // The transaction exists to pin one connection for the advisory lock's
+    // lifetime, and for nothing else: the sweep's own writes go through `this.db`
+    // so that a crash mid-sweep leaves the records it already ingested rather
+    // than rolling back a night's work. `pg_try_advisory_xact_lock` releases on
+    // commit or on connection loss, so a killed process never leaves a source
+    // wedged.
+    return this.db.transaction(async (trx) => {
+      const locked: unknown = await trx.raw(
+        "SELECT pg_try_advisory_xact_lock(?, ?) AS locked",
+        [SOURCE_LOCK_NAMESPACE, sourceLockKey(sourceId)],
+      );
+      const row = isRecord(locked) && Array.isArray(locked.rows) ? locked.rows[0] : undefined;
+      if (!isRecord(row) || row.locked !== true) {
+        this.logger.warn(
+          `SourceScheduler: another sweep holds the lock for source ${sourceId}; this tick does nothing`,
+        );
+        return this.remember({ kind: "skipped", reason: "locked", sourceId });
+      }
+      return this.runSweep(sourceId);
+    });
+  }
+
+  private async runSweep(sourceId: string): Promise<SweepOutcome> {
+    const source: unknown = await this.db("ingestion_sources").where({ id: sourceId }).first();
+    if (!isRecord(source)) {
+      this.logger.error(`SourceScheduler: no ingestion_sources row ${sourceId}`);
+      return this.remember({ kind: "skipped", reason: "unknown-source", sourceId });
+    }
+    const parsed = parseSourceRow(source);
+    if (!parsed.enabled) {
+      this.logger.info(`SourceScheduler: source ${sourceId} is disabled; nothing swept`);
+      return this.remember({ kind: "skipped", reason: "disabled", sourceId });
+    }
+
+    // The run row is written BEFORE any work, so a sweep that dies on its first
+    // request is still visible as a sweep that happened and failed — not as a
+    // quiet night.
+    const inserted: unknown = await this.db("ingestion_runs")
+      .insert({ source_id: sourceId, status: "running", counts: "{}" })
+      .returning("id");
+    const runRow = Array.isArray(inserted) ? inserted[0] : undefined;
+    if (!isRecord(runRow) || typeof runRow.id !== "string") {
+      throw new Error("ingestion_runs: insert returned no id");
+    }
+    const runId = runRow.id;
+
+    let threw: string | null = null;
+    try {
+      const since = new Date(this.now().getTime() - this.lookbackDays * 24 * 60 * 60 * 1000);
+      await this.options.queue.enqueue("discover", { since: since.toISOString() }, runId);
+      await this.drain(runId);
+    } catch (error) {
+      threw = errorMessage(error);
+      this.logger.error(`SourceScheduler: sweep ${runId} of ${sourceId} failed — ${threw}`);
+    }
+
+    const counts = await this.readCounts(runId);
+    const jobErrors = await this.readJobErrors(runId);
+    const status = classifyRun(counts, threw !== null);
+    const errorText = [threw, ...jobErrors].filter((value): value is string => value !== null && value !== "");
+
+    await this.db("ingestion_runs")
+      .where({ id: runId })
+      .update({
+        status,
+        finished_at: this.db.fn.now(),
+        // Nothing is swallowed: every error the sweep produced is in the row.
+        error: errorText.length > 0 ? errorText.join("\n") : null,
+        updated_at: this.db.fn.now(),
+      });
+
+    await this.updateSourceHealth(sourceId, status);
+
+    this.logger.info(
+      `SourceScheduler: sweep ${runId} of ${sourceId} finished ${status} — ${JSON.stringify(counts)}`,
+    );
+    return this.remember({
+      kind: "ran",
+      sourceId,
+      runId,
+      status,
+      counts,
+      error: errorText.length > 0 ? errorText.join("\n") : null,
+    });
+  }
+
+  /** Turns the worker until this run has no claimable work left, or time runs out. */
+  private async drain(runId: string): Promise<void> {
+    const deadline = Date.now() + this.sweepTimeoutMs;
+    for (;;) {
+      const outstanding = await this.countOutstanding(runId);
+      if (outstanding === 0) return;
+      if (Date.now() > deadline) {
+        throw new Error(
+          `sweep timed out after ${this.sweepTimeoutMs}ms with ${outstanding} job(s) outstanding`,
+        );
+      }
+      const tick = await this.options.worker.runOnce();
+      if (tick.claimed === 0) {
+        // Everything left is waiting on a retry backoff. Nothing more this
+        // sweep can usefully do; the jobs stay queued for the next one.
+        return;
+      }
+    }
+  }
+
+  private async countOutstanding(runId: string): Promise<number> {
+    const row: unknown = await this.db("ingestion_jobs")
+      .where({ run_id: runId })
+      .whereIn("status", ["pending", "running"])
+      .count({ total: "*" })
+      .first();
+    if (!isRecord(row)) return 0;
+    const total = Number(row.total);
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  private async readCounts(runId: string): Promise<Record<string, number>> {
+    const row: unknown = await this.db("ingestion_runs").where({ id: runId }).first("counts");
+    if (!isRecord(row) || !isRecord(row.counts)) return {};
+    const counts: Record<string, number> = {};
+    for (const [key, value] of Object.entries(row.counts)) {
+      if (typeof value === "number") counts[key] = value;
+    }
+    return counts;
+  }
+
+  /** The `last_error` of every job in this run that did not finish clean. */
+  private async readJobErrors(runId: string): Promise<string[]> {
+    const rows: unknown = await this.db("ingestion_jobs")
+      .where({ run_id: runId })
+      .whereIn("status", ["failed", "blocked"])
+      .whereNotNull("last_error")
+      .select("stage", "last_error");
+    return (Array.isArray(rows) ? rows : []).flatMap((row) => {
+      if (!isRecord(row) || typeof row.last_error !== "string") return [];
+      return [`${String(row.stage)}: ${row.last_error}`];
+    });
+  }
+
+  /**
+   * Records what the sweep did to the source's standing.
+   *
+   * `partial` counts as a success for `last_success_at`: work reached the
+   * database, and treating it as silence would make the silence watch cry wolf.
+   * It does not reset `consecutive_failures` to zero, because a source failing
+   * partially every night is a source with a problem.
+   */
+  private async updateSourceHealth(sourceId: string, status: RunStatus): Promise<void> {
+    if (status === "succeeded") {
+      await this.db("ingestion_sources").where({ id: sourceId }).update({
+        last_success_at: this.db.fn.now(),
+        consecutive_failures: 0,
+        health_status: "healthy",
+        updated_at: this.db.fn.now(),
+      });
+      return;
+    }
+    if (status === "partial") {
+      await this.db("ingestion_sources")
+        .where({ id: sourceId })
+        .update({
+          last_success_at: this.db.fn.now(),
+          health_status: "degraded",
+          updated_at: this.db.fn.now(),
+        });
+      return;
+    }
+    await this.db("ingestion_sources")
+      .where({ id: sourceId })
+      .update({
+        consecutive_failures: this.db.raw("consecutive_failures + 1"),
+        health_status: "degraded",
+        updated_at: this.db.fn.now(),
+      });
+  }
+
+  private remember(outcome: SweepOutcome): SweepOutcome {
+    this.lastOutcomeBySource.set(outcome.sourceId, outcome);
+    return outcome;
+  }
+}

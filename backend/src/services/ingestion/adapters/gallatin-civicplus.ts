@@ -114,11 +114,18 @@ export class OffSourceUrlError extends Error {
  * Exactly the slice of `fetch` this transport uses. Narrower than `typeof fetch` so a test
  * double is an ordinary function rather than something cast into shape.
  */
+/**
+ * `RequestRedirect` verbatim. Spelled out rather than imported from the DOM lib,
+ * because the backend's tsconfig deliberately carries no `DOM` lib — a server
+ * that can name `document` is a server that can accidentally use it.
+ */
+export type RedirectMode = 'follow' | 'error' | 'manual';
+
 export interface FetchLikeInit {
   method: string;
   headers: Record<string, string>;
   body?: string;
-  redirect: RequestRedirect;
+  redirect: RedirectMode;
   signal: AbortSignal;
 }
 

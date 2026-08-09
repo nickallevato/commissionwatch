@@ -46,8 +46,12 @@ improved by it, and several items are meaningless without it.
 
 - A `SourceScheduler` alongside the existing `DigestScheduler`, started from `index.ts`, using
   `node-cron` — already a dependency, no new package.
-- Cadence is **per source, stored in the database**, not in code: add `cron_expression` and
-  `enabled` to `ingestion_sources`. An operator changing a schedule must not require a deploy.
+- Cadence is **per source, stored in the database**, not in code: add `cron_expression` to
+  `ingestion_sources`. An operator changing a schedule must not require a deploy.
+  *(Corrected 2026-08-09 during implementation: this originally also said to add `enabled`.
+  `enabled` has existed since migration 016 — `boolean not null default true`, and half of
+  `idx_ingestion_sources_enabled_health`. Only `cron_expression` and `expected_interval_hours`
+  are new.)*
 - Add `expected_interval_hours` to `ingestion_sources`. This is what makes the silence watch on
   screen 02 possible: a source that has not succeeded within its expected interval is
   **Suspect**, and silence is treated as failure until proven otherwise.
@@ -72,6 +76,24 @@ defaults to off in `NODE_ENV=test` so the suite never schedules anything.
 - The test suite schedules nothing.
 
 **Operational note.** The moment this works, the site has data worth losing. P3 ships with it.
+
+**Amendments recorded during implementation, 2026-08-09.** Plan:
+`docs/superpowers/plans/2026-08-09-ingestion-scheduling.md`.
+
+1. **`meetings` needed an identity before a nightly sweep was safe.** A cron that re-reads the same
+   index every night duplicates every meeting on night two, and `meetings` had no natural key —
+   `(commission_id, date)` is not unique, because a body can meet twice in a day. Migration 029
+   adds `meetings.external_id` with a partial unique index on `(commission_id, external_id)`, and
+   `UNIQUE (meeting_id, url)` on `meeting_documents`. The spec did not anticipate this.
+2. **The adapter layer moved into the backend.** `backend/Dockerfile`'s build context is
+   `./backend`, so a production image cannot contain a file from `agents/`, and the scheduler runs
+   in the backend. The adapters, their contract suite and the Gallatin fixtures moved to
+   `backend/`, and the suite is registered in `backend/package.json` — it had never run in CI.
+3. **The agents parser could not be reused.** `extractors.ts` requires an item number at the start
+   of a line; `pdfjs-dist` returns a page as one space-joined line, so it extracts zero items from
+   a real agenda. The backend has a y-coordinate-aware line reconstructor instead.
+4. **Gallatin serves Word documents behind `ViewFile/Agenda` paths**, verified 2026-08-09. Parse
+   records an unreadable content type as a skip, not a failure.
 
 ---
 

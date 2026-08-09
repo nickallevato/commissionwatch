@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { runAdapterContract } from './contract.test';
+import { describe, it } from 'node:test';
+import { expect } from '../helpers/expect';
+import { runAdapterContract } from './contract';
 import {
   GALLATIN_ADAPTER_KEY,
   GALLATIN_AGENDA_CENTER_URL,
@@ -33,16 +34,16 @@ import {
   type HttpRequest,
   type HttpResponse,
   type HttpTransport,
-} from './gallatin-civicplus';
-import type { DocumentRef } from './types';
+} from '../../src/services/ingestion/adapters/gallatin-civicplus';
+import type { DocumentRef } from '../../src/services/ingestion/adapters/types';
 
 /**
- * Everything here runs off `tests/fixtures/gallatin/`, which is a verbatim capture of
+ * Everything here runs off `backend/test/fixtures/gallatin/`, which is a verbatim capture of
  * gallatinmt.gov taken on 2026-08-04 (see PROVENANCE.md there). No test touches the
  * network: the adapter is constructed with a transport that serves those bytes.
  */
 
-const FIXTURE_DIR = join(__dirname, '..', '..', 'tests', 'fixtures', 'gallatin');
+const FIXTURE_DIR = join(__dirname, '..', 'fixtures', 'gallatin');
 
 function fixture(name: string): Uint8Array {
   return new Uint8Array(readFileSync(join(FIXTURE_DIR, name)));

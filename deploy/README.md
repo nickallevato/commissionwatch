@@ -15,6 +15,8 @@ Deploys onto the shared bmux platform host over **SSM Run Command**. Not SSH.
 | `docker-compose.shared.yml` | The production stack on the shared host. |
 | `Caddyfile` | Reference copy of the site block. The live one lives in `your-org/platform-aws`. |
 | `docker-compose.yml` | Local development, not production. |
+| `backup.sh` | Nightly `pg_dump` + MinIO mirror, retention, off-instance copy, ops event. |
+| `restore-drill.sh` | Restores a backup into a scratch database and compares row counts. |
 
 ## Deploy
 
@@ -208,6 +210,97 @@ Request `commissionwatch.bmux.sh` → `commissionwatch-web:3000` on the `edge` n
 `your-org/platform-aws`. To go public, delete the two `@blocked` lines from that block. **Do not**
 touch the security group — its 443 allowlist is shared with seven other products, so opening it
 exposes all of them at once.
+
+## Backups and the restore drill
+
+Ingestion landed on 2026-08-09 and the database stopped being reproducible from a seed file the
+moment it did. Some of the bytes now held were fetched at a point in time from sources that rewrite
+their own pages, so what is being protected here is the evidence, not the schema.
+
+### Nightly backup
+
+```bash
+cd /home/ec2-user/commissionwatch
+./deploy/backup.sh
+```
+
+Writes `backups/daily/commissionwatch-<UTC stamp>.tar.gz`, containing:
+
+| Member | What it is |
+|---|---|
+| `database.dump` | `pg_dump -Fc` of the application database |
+| `objects.tar` | every object in the MinIO bucket, taken with `mc mirror` |
+| `rowcounts.csv` | row counts per table at dump time — what the drill checks against |
+| `manifest.txt` | stamp, host, database, byte sizes, object count, server version |
+
+Retention is 7 daily and 4 weekly; Sunday's archive is hard-linked into `backups/weekly/`, so a
+weekly copy costs no extra bytes until the daily one is pruned. Success and failure emit
+`ops.backup_succeeded` / `ops.backup_failed` through the application's own `DeliveryDispatcher`, so
+they arrive over channels the operator already configured. A failure to *notify* is itself printed
+to stderr — a silent notifier is the exact failure this is supposed to prevent.
+
+Install it as a cron job on the host:
+
+```
+17 4 * * *  cd /home/ec2-user/commissionwatch && ./deploy/backup.sh >> backups/backup.log 2>&1
+```
+
+### Off-instance
+
+**`BACKUP_S3_URI` is unset by default, and while it is unset the archive never leaves the
+instance.** That is a copy, not a backup: it survives a bad migration and nothing else. Set it and
+the script also runs `aws s3 cp` under the host's existing instance role — no new credential, and
+the only outstanding decision is the bucket, which costs money and is therefore the operator's to
+make:
+
+```
+BACKUP_S3_URI=s3://your-org-backups/commissionwatch
+```
+
+The instance role needs `s3:PutObject` on that prefix. Nothing else changes.
+
+### The restore drill — run it, do not read it
+
+```bash
+./deploy/restore-drill.sh                      # newest daily archive
+./deploy/restore-drill.sh --archive path.tar.gz
+./deploy/restore-drill.sh --keep               # leave the scratch database behind
+```
+
+It creates `commissionwatch_restore_drill` on the running instance, `pg_restore`s into it, and
+compares every table against `rowcounts.csv`. A table that had rows and came back empty is `LOST`,
+a short table is `SHORT`, and either exits non-zero. `pg_restore`'s own exit status is deliberately
+**not** the pass condition: it complains about ownership on a perfectly good dump and stays quiet
+about an empty one. The row counts decide.
+
+**Executed 2026-08-09, against the first archive taken after the first real Gallatin sweep.**
+28 tables compared, 137 rows restored, no LOST or SHORT rows, and the object archive carried 11
+objects — matching `meetings` 7, `agenda_items` 40, `meeting_documents` 11, `artifacts` 11,
+`ingestion_jobs` 23, `commissions` 12, `jurisdictions` 1, `ingestion_runs` 1, `ingestion_sources` 1,
+`knex_migrations` 29. The drill passed.
+
+Re-run it after any schema change, any Postgres upgrade, and any change to `backup.sh`. A drill's
+result expires; the script exists so the evidence can be refreshed rather than remembered.
+
+### The `POSTGRES_PASSWORD` trap
+
+`POSTGRES_PASSWORD` is read by the postgres image **only when it initialises an empty data volume**.
+Changing the secret afterwards does not change the database — the role keeps the password its volume
+was born with. This has already cost this project a deploy.
+
+The drill sidesteps it entirely by restoring into a scratch database on the already-running
+instance, using the credentials that instance actually answers to.
+
+A real restore into a **fresh volume** does not get to sidestep it:
+
+1. The new volume initialises with whatever `POSTGRES_PASSWORD` is set at that moment — not with the
+   password the old volume had.
+2. So either set `POSTGRES_PASSWORD` in `/commissionwatch/env` to the value you want *before*
+   creating the volume and let `DATABASE_URL` match it, or bring the volume up and then
+   `ALTER ROLE postgres WITH PASSWORD '<the value DATABASE_URL uses>'` on the running instance.
+3. Restore with `pg_restore --no-owner --no-acl`, because the dump's ownership refers to roles the
+   fresh volume has not necessarily got.
+4. Restore the objects by untarring `objects.tar` and `mc mirror`ing it back into the bucket.
 
 ## Traps
 

@@ -219,3 +219,14 @@ describe("Idempotency", () => {
     assert.equal(flagRes.body.id, manualId, "Manual flag should survive re-detection");
   });
 });
+
+// Closes the knex pool so the run can end on its own.
+//
+// These six suites each held an idle connection open forever, which is why the
+// test script carried `--test-force-exit`. That flag calls `process.exit()`,
+// dropping whatever a child had not yet flushed to the reporter — so the
+// largest suite in the repo silently reported a random subset of its tests.
+// Closing the pool is what let the flag come off.
+after(async () => {
+  await db.destroy();
+});
