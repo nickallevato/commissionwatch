@@ -14,7 +14,7 @@ Working from `docs/superpowers/specs/2026-08-09-archive-salvage-design.md`.
 | A1 · Operator authentication | **Landed.** Migrations 022–023, scrypt passwords, server-side sessions in an httpOnly cookie, `/api/admin/*` closed by default, CORS split. |
 | A3 · Embedding client | **Withdrawn.** Nothing consumes embeddings; see the spec. |
 | B-e · Subscriptions and delivery | **Landed.** Migrations 024–025. A subscription is a destination, a filter and a cadence. SMS added with consent and a per-day cap. |
-| B-d · Records requests | In progress. |
+| B-d · Records requests | **Landed.** Migrations 026–027. A hand-obtained document takes the identical path as a scraped one, and records-derived flags are held, never published. |
 
 **The dispatcher still sends no email.** That is deliberate and load-bearing.
 `alert_subscriptions` is retained read-only for one release and the legacy
@@ -101,7 +101,7 @@ Delete the two `@blocked` lines from the `commissionwatch.bmux.sh` block in `you
 Ordered by how much each blocks the product being real.
 
 1. **Nothing ingests.** The queue, worker and Gallatin adapter exist; no scheduler runs them. Zero records on the live site.
-2. **W3 findings engine and review queue.** The core product. Generated narrative, mechanical claim-to-citation binding, operator approval before anything naming a person publishes. Not started. Spec exists in the production design.
+2. **W3 findings engine and review queue.** The core product. `anomaly_flags.review_state` now exists (B-d) and is the column the queue generalises: records-derived flags are written `held` and the public API filters them out. Generated narrative, mechanical claim-to-citation binding, operator approval before anything naming a person publishes. Not started. Spec exists in the production design.
 3. **Bozeman adapter.** Route identified and validated: `bozeman.granicus.com/ViewPublisher.php?view_id=1` carries **520 City Commission meetings spanning 2013–2026**, 507 with agendas, 434 with minutes. `bozemanmt.gov` is a blanket Akamai deny and must not be retried. Operator decision 2026-08-04: crawl Granicus politely and publish the public-records-request route alongside. See `docs/exploration/bozeman-access-spike.md`.
 4. **MT CERS campaign finance** (`cers-ext.mt.gov/CampaignTracker`). Not started.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.

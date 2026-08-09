@@ -44,7 +44,11 @@ router.get("/", async (req: Request<unknown, unknown, unknown, AnomaliesQuery>, 
     const limit = Math.min(Math.max(parseInt(rawLimit || "50", 10) || 50, 1), 200);
     const offset = Math.max(parseInt(rawOffset || "0", 10) || 0, 0);
 
-    const query = db("anomaly_flags");
+    // The publication gate. A records-derived flag sits beside an extraction
+    // that names people, and this is a public route — so `held` never appears
+    // here. B-a generalises this into the review queue; until then, held means
+    // held, and the operator surface is the only place these are readable.
+    const query = db("anomaly_flags").where({ review_state: "published" });
 
     if (meeting_id) query.where({ meeting_id });
     if (flag_type) query.where({ flag_type });
@@ -97,7 +101,9 @@ router.get("/:id", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid anomaly flag ID format");
 
-    const flag = await db("anomaly_flags").where({ id }).first();
+    // 404 rather than 403 for a held flag: a public caller has no business
+    // learning that one exists.
+    const flag = await db("anomaly_flags").where({ id, review_state: "published" }).first();
     if (!flag) {
       res.status(404).json({ error: "Anomaly flag not found", statusCode: 404 });
       return;
@@ -179,7 +185,7 @@ router.get("/meeting/:id", async (req, res, next) => {
     }
 
     const data = await db("anomaly_flags")
-      .where({ meeting_id: id })
+      .where({ meeting_id: id, review_state: "published" })
       .orderBy("created_at", "desc");
 
     res.json({ data, total: data.length });

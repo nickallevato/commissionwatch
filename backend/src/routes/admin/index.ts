@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import sessionRouter from './session';
 import channelsRouter from './channels';
+import recordsRouter from './records';
 import { requireOperator } from '../../middleware/requireOperator';
 
 const router = Router();
@@ -14,6 +15,7 @@ router.use('/session', sessionRouter);
 router.use(requireOperator);
 
 router.use('/channels', channelsRouter);
+router.use('/records', recordsRouter);
 
 // A guarded catch-all. Without it an unknown admin path 404s before the guard
 // runs, which confirms to an unauthenticated caller which routes exist.

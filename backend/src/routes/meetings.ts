@@ -171,7 +171,9 @@ router.get("/:id/anomalies", async (req, res, next) => {
       return;
     }
 
-    const anomalies = await db("anomaly_flags").where({ meeting_id: id }).orderBy("created_at");
+    const anomalies = await db("anomaly_flags")
+      .where({ meeting_id: id, review_state: "published" })
+      .orderBy("created_at");
     res.json({ data: anomalies, total: anomalies.length });
   } catch (err) {
     next(err);

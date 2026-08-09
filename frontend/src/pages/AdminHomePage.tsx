@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
 /**
@@ -14,21 +14,24 @@ import { useAuth } from "../contexts/AuthContext";
 const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
-interface PendingSurface {
+interface ConsoleSurface {
+  readonly to: string;
   readonly title: string;
   readonly detail: string;
 }
 
-const PENDING: readonly PendingSurface[] = [
+const SURFACES: readonly ConsoleSurface[] = [
   {
-    title: "Delivery channels and subscriptions",
+    to: "/admin/channels",
+    title: "Delivery channels",
     detail:
-      "Operator destinations and reader subscriptions on one substrate — a destination, a filter and a cadence.",
+      "Where findings go. Stored credentials are encrypted and never read back — a change is a replacement.",
   },
   {
+    to: "/admin/records",
     title: "Records requests",
     detail:
-      "Public-records request tracking, and hand-obtained documents entering the same pipeline as scraped ones.",
+      "Public-records requests, and documents obtained by hand entering the same pipeline as scraped ones.",
   },
 ];
 
@@ -86,13 +89,16 @@ export function AdminHomePage() {
         </dl>
       )}
 
-      <h2 className="mt-12 font-display text-xl font-semibold text-ink">
-        Not built yet
-      </h2>
+      <h2 className="mt-12 font-display text-xl font-semibold text-ink">Surfaces</h2>
       <ul className="mt-4 divide-y divide-rule border-y border-rule">
-        {PENDING.map((surface) => (
-          <li key={surface.title} className="py-4">
-            <p className="text-sm font-semibold text-ink">{surface.title}</p>
+        {SURFACES.map((surface) => (
+          <li key={surface.to} className="py-4">
+            <Link
+              to={surface.to}
+              className={`text-sm font-semibold text-ink underline decoration-rule underline-offset-4 hover:decoration-accent ${focusRing}`}
+            >
+              {surface.title}
+            </Link>
             <p className="mt-1 max-w-prose text-sm leading-relaxed text-muted">
               {surface.detail}
             </p>

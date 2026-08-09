@@ -13,6 +13,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminHomePage } from "./pages/AdminHomePage";
 import { AdminChannelsPage } from "./pages/AdminChannelsPage";
+import { AdminRecordsPage } from "./pages/AdminRecordsPage";
 import { SubscribePage } from "./pages/SubscribePage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -67,6 +68,14 @@ export function App() {
             element={
               <ProtectedRoute>
                 <AdminChannelsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/records"
+            element={
+              <ProtectedRoute>
+                <AdminRecordsPage />
               </ProtectedRoute>
             }
           />
