@@ -57,6 +57,8 @@ const FIELDS: ReadonlyArray<{ key: keyof ExtractedEntities; label: string }> = [
   { key: "dates", label: "Dates" },
 ];
 
+type LoadResult = { ok: true; requests: RecordsRequest[] } | { ok: false };
+
 export function AdminRecordsPage() {
   const [requests, setRequests] = useState<RecordsRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,27 +74,49 @@ export function AdminRecordsPage() {
   const [extraction, setExtraction] = useState<Extraction | null>(null);
   const [history, setHistory] = useState<Extraction[]>([]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // Fetching and applying are separated so the effect below can await the
+  // request and touch state only in the continuation. An effect body that calls
+  // setState synchronously causes a cascading render, and — worse here — a fast
+  // unmount would set state on a component that is already gone.
+  const fetchRequests = useCallback(async (): Promise<LoadResult> => {
     try {
       const res = await fetch("/api/admin/records/requests", { credentials: "same-origin" });
-      if (!res.ok) {
-        setError("Records requests could not be loaded.");
-        return;
-      }
+      if (!res.ok) return { ok: false };
       const body = (await res.json()) as { data: RecordsRequest[] };
-      setRequests(body.data);
-      setError("");
+      return { ok: true, requests: body.data };
     } catch {
-      setError("Records requests could not be loaded.");
-    } finally {
-      setLoading(false);
+      return { ok: false };
     }
   }, []);
 
+  const applyResult = useCallback((result: LoadResult) => {
+    if (result.ok) {
+      setRequests(result.requests);
+      setError("");
+    } else {
+      setError("Records requests could not be loaded.");
+    }
+    setLoading(false);
+  }, []);
+
+  /** Reload after a write. Showing the spinner here is a response to a click. */
+  const load = useCallback(async () => {
+    setLoading(true);
+    applyResult(await fetchRequests());
+  }, [applyResult, fetchRequests]);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    // `loading` already starts true, so nothing needs setting on the way in.
+    let ignore = false;
+    void (async () => {
+      const result = await fetchRequests();
+      if (ignore) return;
+      applyResult(result);
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [applyResult, fetchRequests]);
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault();

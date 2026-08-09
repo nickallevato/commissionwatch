@@ -31,6 +31,8 @@ type Status =
   | { kind: "loading" }
   | { kind: "error"; message: string };
 
+type LoadResult = { ok: true; channels: Channel[] } | { ok: false };
+
 export function AdminChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
@@ -40,25 +42,48 @@ export function AdminChannelsPage() {
   const [secret, setSecret] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const load = useCallback(async () => {
-    setStatus({ kind: "loading" });
+  // Fetching and applying are separated so the effect below can await the
+  // request and touch state only in the continuation. An effect body that calls
+  // setState synchronously causes a cascading render, and — worse here — a fast
+  // unmount would set state on a component that is already gone.
+  const fetchChannels = useCallback(async (): Promise<LoadResult> => {
     try {
       const res = await fetch("/api/admin/channels", { credentials: "same-origin" });
-      if (!res.ok) {
-        setStatus({ kind: "error", message: "Channels could not be loaded." });
-        return;
-      }
+      if (!res.ok) return { ok: false };
       const body = (await res.json()) as { data: Channel[] };
-      setChannels(body.data);
-      setStatus({ kind: "idle" });
+      return { ok: true, channels: body.data };
     } catch {
+      return { ok: false };
+    }
+  }, []);
+
+  const applyResult = useCallback((result: LoadResult) => {
+    if (result.ok) {
+      setChannels(result.channels);
+      setStatus({ kind: "idle" });
+    } else {
       setStatus({ kind: "error", message: "Channels could not be loaded." });
     }
   }, []);
 
+  /** Reload after a write. Showing the spinner here is a response to a click. */
+  const load = useCallback(async () => {
+    setStatus({ kind: "loading" });
+    applyResult(await fetchChannels());
+  }, [applyResult, fetchChannels]);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    // `status` already starts as loading, so nothing needs setting on the way in.
+    let ignore = false;
+    void (async () => {
+      const result = await fetchChannels();
+      if (ignore) return;
+      applyResult(result);
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [applyResult, fetchChannels]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
