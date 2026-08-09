@@ -1,7 +1,29 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-06, after moving the deploy from SSH to SSM.
+> Last updated: 2026-08-09, after landing Tier A of the archive salvage.
 > Read this before starting work. It records what is true, not what was planned.
+
+## Archive salvage — what has landed
+
+Working from `docs/superpowers/specs/2026-08-09-archive-salvage-design.md`.
+
+| Item | State |
+|---|---|
+| A4 · `vote_donor_conflict` anomaly type | **Landed.** Migration 020. The enum carries seven values. |
+| A2 · OpenFEC client | **Landed.** Migrations 021, plus `HttpCache` and `OpenFecClient`. No orchestration framework came with it. Needs `OPENFEC_API_KEY` to make a live call; every test is fixture-based. |
+| A1 · Operator authentication | **Landed.** Migrations 022–023, scrypt passwords, server-side sessions in an httpOnly cookie, `/api/admin/*` closed by default, CORS split. |
+| A3 · Embedding client | **Withdrawn.** Nothing consumes embeddings; see the spec. |
+| B-e, B-d | In progress. |
+
+**There is no operator account until one is seeded.** The backend creates the first
+operator at boot from `OPERATOR_SEED_EMAIL` / `OPERATOR_SEED_PASSWORD` /
+`OPERATOR_SEED_NAME`, once, and only while `operators` is empty. Those reach the container
+from `/commissionwatch/env` in Parameter Store like every other secret. Clear them after the
+first boot: leaving them set does nothing except keep a password in the environment. Without
+them the admin console exists and cannot be entered, which is the correct default.
+
+`ADMIN_ORIGINS` gates credentialed requests to `/api/admin`. The public read-only API stays
+open to any origin — that is deliberate, and open data is the point.
 
 ## Live state
 
@@ -75,7 +97,9 @@ Ordered by how much each blocks the product being real.
 7. **Launch readiness**: corrections and dispute policy, public data export and licensing, backups with a tested restore, accessibility and shareability. Specced only.
 8. **No database backups.** Nothing is backed up today. Once ingestion runs, this becomes urgent.
 9. **No monitoring.** Nothing alerts if the site goes down or ingestion silently stops.
-10. **No admin authentication.** Required before the review queue can exist.
+10. ~~**No admin authentication.**~~ Closed 2026-08-09 by A1. One operator class, `scrypt` from
+    `node:crypto`, revocable server-side sessions in an httpOnly cookie, no public registration.
+    The review queue is no longer blocked on it.
 
 ## Known defects and debt
 

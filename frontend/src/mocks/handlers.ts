@@ -36,6 +36,19 @@ function list<T>(data: T[]) {
 }
 
 export const handlers = [
+  /**
+   * The session probe `AuthProvider` fires on mount. Signed out is the default
+   * for every test that is not specifically about the operator console, and it
+   * is what the real API answers with no cookie. Tests that need a signed-in
+   * operator override this with `server.use`.
+   */
+  http.get("/api/admin/session", () =>
+    HttpResponse.json(
+      { error: "Authentication required", statusCode: 401 },
+      { status: 401 },
+    ),
+  ),
+
   http.get("/api/meetings", ({ request }) => {
     const url = new URL(request.url);
     const jurisdictionId = url.searchParams.get("jurisdiction_id");
