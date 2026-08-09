@@ -57,8 +57,23 @@ export interface AgendaItemDraft {
 /** `I.`, `IV)`, `XII.` — a marker made only of roman numeral letters. */
 const ROMAN = /^[IVXLCDM]+$/;
 
-/** `1.`, `12)`, `A.`, `IV.` — a marker at the start of a line. */
-const MARKED_LINE = /^(?:Item\s+)?([0-9]{1,3}|[A-Za-z]|[IVXLCDM]{1,7})\s*[-.):]\s+(\S.*)$/;
+/**
+ * A marker at the start of a line, in two families.
+ *
+ * The first is **dotted**: `G.1`, `H.12`, `1.2`. Bozeman's City Commission agenda numbers
+ * every substantive item that way — `G.1 Formal Cancellation of the August 11, 2026,
+ * Regular City Commission Meeting (Maas)` — and under the single-token pattern alone not
+ * one of them matched, so the whole agenda came out as its lettered section headings and
+ * nothing else. A dotted marker may be followed by a space alone, because that is how the
+ * source prints it.
+ *
+ * The second is the original single token: `1.`, `12)`, `A.`, `IV.`. Its separator stays
+ * **required**. Making it optional would turn "I will move to approve the contract" into
+ * an agenda item numbered I, which is exactly the kind of invented record this extractor
+ * must not produce.
+ */
+const MARKED_LINE =
+  /^(?:Item\s+)?(?:((?:[0-9]{1,3}|[A-Za-z])\.[0-9]{1,3})[.):]?\s+|([0-9]{1,3}|[A-Za-z]|[IVXLCDM]{1,7})\s*[-.):]\s+)(\S.*)$/;
 
 /** `-`, `•`, `*`, `o` used as a bullet under an item. */
 const BULLET = /^[•·▪◦*•▪–—-]\s+(\S.*)$/;
@@ -119,7 +134,39 @@ export interface AgendaExtraction {
   sawAgendaHeading: boolean;
 }
 
-export function extractAgendaItems(lines: string[]): AgendaExtraction {
+/** A line that is a marker and nothing else: `A.`, `IV.`, `G.1`, `12)`. */
+const ORPHAN_MARKER = /^((?:[0-9]{1,3}|[A-Za-z])\.[0-9]{1,3}|[0-9]{1,3}|[A-Za-z]|[IVXLCDM]{1,7})\s*[-.):]?$/;
+
+/**
+ * Rejoins a marker that the source put in its own element.
+ *
+ * Bozeman's agenda is a CSS grid: `<span style="width: 5%">A.&nbsp;</span>` carrying the
+ * marker, then `<span style="width: 95%"><p>Call to Order …</p></span>` carrying the text.
+ * The paragraph is a block, so line reconstruction correctly breaks between them — and
+ * then the marker sits alone on a line that means nothing and the item behind it is lost
+ * entirely. Six of the 2026-08-04 agenda's fifteen top-level items disappeared that way.
+ *
+ * Only a line that is *nothing but* a marker is merged, and only into the next line.
+ */
+export function mergeOrphanMarkers(lines: string[]): string[] {
+  const merged: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/\s+/g, " ").trim();
+    if (line === "") continue;
+    const orphan = ORPHAN_MARKER.exec(line);
+    const next = lines[index + 1]?.replace(/\s+/g, " ").trim() ?? "";
+    if (orphan && next !== "" && !ORPHAN_MARKER.test(next)) {
+      merged.push(`${orphan[1]}. ${next}`);
+      index += 1;
+      continue;
+    }
+    merged.push(line);
+  }
+  return merged;
+}
+
+export function extractAgendaItems(rawLines: string[]): AgendaExtraction {
+  const lines = mergeOrphanMarkers(rawLines);
   const items: AgendaItemDraft[] = [];
   const descriptions: string[][] = [];
   let category: string | null = null;
@@ -142,8 +189,9 @@ export function extractAgendaItems(lines: string[]): AgendaExtraction {
 
     const marked = MARKED_LINE.exec(line);
     if (marked) {
-      const marker = marked[1];
-      const text = marked[2];
+      // Group 1 is the dotted marker, group 2 the single token; exactly one matches.
+      const marker = marked[1] ?? marked[2];
+      const text = marked[3];
       if (readsAsHeading(marker, text)) {
         category = clamp(`${marker}. ${text}`, VARCHAR_255);
         continue;

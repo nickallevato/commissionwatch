@@ -3,7 +3,8 @@ import type { AdapterRegistry } from "./adapters/registry";
 import { asDocumentKind } from "./adapters/types";
 import type { DocumentRef, MeetingRef, SourceAdapter } from "./adapters/types";
 import { extractAgendaItems } from "./agenda-items";
-import { extractPdfText, UnsupportedDocumentError } from "./pdf-text";
+import { extractDocumentText } from "./document-text";
+import { UnsupportedDocumentError } from "./pdf-text";
 import type { ArtifactRef, HandlerRegistry, StageResult } from "./worker";
 
 /**
@@ -415,7 +416,9 @@ export function createIngestionHandlers(
 
       let text;
       try {
-        text = await extractPdfText(ctx.content, ctx.artifact.contentType);
+        // PDF or HTML, decided on the bytes: Gallatin's agendas are PDFs and
+        // Bozeman's are HTML, and both are agendas.
+        text = await extractDocumentText(ctx.content, ctx.artifact.contentType);
       } catch (error) {
         if (error instanceof UnsupportedDocumentError) {
           // Gallatin serves Word documents behind ViewFile/Agenda paths. The
