@@ -1,10 +1,27 @@
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
+import db from "../src/config/database";
 
 const COMPLETED_MEETING_ID = "f6a7b8c9-d0e1-2345-fabc-456789012345";
 const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * This file creates anomaly flags on a seeded meeting — some directly, some by
+ * calling the detector — and used never to remove them. That was invisible
+ * while the file was not registered in the `test` script, and became a failure
+ * in `notification-service.test.ts` the moment it was: NotificationService
+ * resolves flags by (meeting_id, flag_type), so a leftover high-severity
+ * `emergency_session` on this meeting makes a later medium-severity assertion
+ * see an immediate send that its own fixtures did not cause.
+ *
+ * The seed inserts no anomaly_flags at all, so removing every flag on this
+ * meeting restores exactly the post-seed state.
+ */
+after(async () => {
+  await db("anomaly_flags").where({ meeting_id: COMPLETED_MEETING_ID }).del();
+});
 
 describe("GET /api/anomalies", () => {
   it("lists anomaly flags", async () => {
