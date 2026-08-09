@@ -16,8 +16,8 @@ import { Link } from "react-router-dom";
  * to a 404 is exactly the failure this page exists to prevent.
  */
 
-const REVISED = "August 4, 2026";
-const VERSION = "1.0";
+const REVISED = "August 9, 2026";
+const VERSION = "1.1";
 const CORRECTIONS_EMAIL = "corrections@commissionwatch.bmux.sh";
 const REPO_URL = "https://github.com/nickallevato/commissionwatch";
 
@@ -334,6 +334,61 @@ export function MethodologyPage() {
               jurisdictions, crawled on a schedule, with gaps where the crawl
               has not reached.
             </p>
+
+            <h3
+              id="robots"
+              className="mt-8 scroll-mt-8 font-display text-lg tracking-headline"
+            >
+              How this site treats robots.txt
+            </h3>
+            <Prose>
+              This site respects <code className="font-mono text-sm">robots.txt</code>{" "}
+              by default. There is one exception, and it is disclosed here rather
+              than left to be discovered.
+            </Prose>
+            <Prose>
+              Bozeman&rsquo;s agendas and minutes are published through a vendor,
+              Granicus, at{" "}
+              <a
+                className="underline underline-offset-2"
+                href="https://bozeman.granicus.com/ViewPublisher.php?view_id=1"
+                target="_blank"
+                rel="noreferrer"
+              >
+                bozeman.granicus.com
+              </a>
+              . That vendor&rsquo;s{" "}
+              <code className="font-mono text-sm">robots.txt</code> reads{" "}
+              <code className="font-mono text-sm">Disallow: /</code> for every
+              client except four named search engines.{" "}
+              <strong className="font-semibold text-ink">
+                CommissionWatch fetches those records anyway.
+              </strong>{" "}
+              The reasoning: a blanket vendor robots file is written to manage
+              search-engine crawlers, and a city&rsquo;s legal obligation to
+              publish its records does not transfer to its hosting
+              vendor&rsquo;s convention.
+            </Prose>
+            <Prose>
+              The conditions that fetching runs under are not informal. One
+              request every ten seconds — the crawl delay that same file
+              publishes — never more than one at a time; a user agent that names
+              this project and carries an address a human can reply to, never a
+              browser string and never a disguise; and no document fetched twice
+              once it is unchanged. No CAPTCHA is solved, no browser fingerprint
+              or TLS signature is manipulated, and no proxy is rotated. Where a
+              source would require any of those, this project stops and files a
+              public-records request instead, which is exactly what it does for{" "}
+              <code className="font-mono text-sm">bozemanmt.gov</code> — a host
+              that refuses every client, including this one, and is never
+              fetched.
+            </Prose>
+            <Prose>
+              If a records custodian asks this project to stop, it stops. And if
+              this disclosure is ever removed from this page, the exception ends
+              with it: a transparency project does not get to carry a published
+              policy it knowingly breaks.
+            </Prose>
           </section>
 
           {/* -------------------------------------------------- 3. Pipeline */}

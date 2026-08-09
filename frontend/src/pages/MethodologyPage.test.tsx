@@ -93,6 +93,42 @@ describe("MethodologyPage", () => {
     }
   });
 
+  /**
+   * The vendor-robots exception is only permitted while it is disclosed here.
+   * These are the tests that make removing the disclosure fail rather than
+   * quietly leave the crawler running against a policy the site no longer
+   * publishes.
+   */
+  describe("the robots.txt disclosure", () => {
+    it("states that the exception exists and where it applies", () => {
+      renderWithProviders(<MethodologyPage />);
+      expect(
+        screen.getByRole("heading", { name: "How this site treats robots.txt" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/CommissionWatch fetches those records anyway/),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/bozeman\.granicus\.com/)).toBeInTheDocument();
+    });
+
+    it("states the conditions the fetching runs under", () => {
+      renderWithProviders(<MethodologyPage />);
+      expect(
+        screen.getByText(/One\s+request every ten seconds/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/No CAPTCHA is solved, no browser fingerprint/),
+      ).toBeInTheDocument();
+    });
+
+    it("states that the exception ends if the disclosure does", () => {
+      renderWithProviders(<MethodologyPage />);
+      expect(
+        screen.getByText(/the exception ends\s+with it/),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("anchors every in-page link to a heading that exists", () => {
     const { container } = renderWithProviders(<MethodologyPage />);
     const anchors = [...container.querySelectorAll('a[href^="#"]')].map(
