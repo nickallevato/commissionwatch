@@ -167,26 +167,46 @@ works, rather than both at once.
 - An expired row is not served, and is deleted on the next sweep.
 - The client is exercised against recorded fixtures; no test hits the live API.
 
-### A3 · Embedding client
+### A3 · Embedding client — WITHDRAWN 2026-08-09
 
-**Archive source:** `backend/src/services/embedding-client.ts`.
+**Originally specified as a port.** Withdrawn before implementation after two findings, one
+external and one internal. Recorded rather than deleted, because the reasoning is what makes
+the eventual decision cheap.
 
-**The gap it fills.** `origin/main` ships `backend/src/services/embeddings.ts`, which chunks
-text and writes `document_embeddings` rows — but contains no HTTP client and no model
-constant. It cannot produce a vector. The pgvector extension is enabled (migration 007) and
-the embeddings table exists (008), so the schema has been waiting on a client since.
+**Finding 1 — the operator has no OpenAI account, and OpenRouter cannot substitute.** The
+archive's client is OpenAI-specific: `text-embedding-3-small`, `OPENAI_API_KEY`, posting to
+`api.openai.com/v1/embeddings`. OpenRouter was probed as an alternative on 2026-08-09:
 
-The archive's `embedding-client.ts` is that missing half, exporting `generateEmbeddings` and
-`EMBEDDING_MODEL`. It has no orchestration dependency.
+```
+GET  /api/v1/models     → 200; 400 models, zero with "embed" in id or name
+POST /api/v1/embeddings → 401 {"error":{"message":"No cookie auth credentials found"}}
+```
 
-**What changes.** Model selection moves to configuration rather than a hardcoded constant,
-and a missing API key is a startup-time failure with a named variable rather than a runtime
-throw on the first document. Batch size is bounded and retries are capped with backoff.
+That 401 is a *cookie* auth error — the request reached a web route, not an API endpoint.
+**OpenRouter proxies chat completions and does not offer embeddings.**
 
-**Acceptance:**
-- `npm run typecheck` passes with `embeddings.ts` calling into the client.
-- A document ingested end to end produces non-zero rows in `document_embeddings`.
-- With no API key configured the process refuses to start and names the variable.
+**Finding 2 — the decisive one — nothing consumes embeddings.** Verified on `origin/main`:
+
+- `backend/src/services/embeddings.ts` is imported by **zero** files.
+- The only reference to `document_embeddings` outside migrations is that file's own `insert`.
+- `backend/.env.example` contains no embedding-related key.
+
+The subsystem is unreachable code on the deployed lineage. Porting a client for it would add a
+vendor dependency, a paid account and a Parameter Store secret in exchange for **no
+user-visible capability**. The right amount of work here is none.
+
+**Consequence for the schema.** Migration 008 hardcodes `vector(1536)`, which is
+`text-embedding-3-small`'s dimension. pgvector columns cannot be dimension-agnostic — a
+provider must be chosen before the column can be. Changing it is free at zero rows and
+expensive once a corpus is embedded, so **the dimension decision belongs to whichever feature
+first needs semantic search**, taken together with the provider choice rather than ahead of it.
+
+**When this returns**, the options not requiring an OpenAI account are: Voyage AI (Anthropic's
+recommended embedding partner, 1024 dimensions), Cohere embed v3 (1024), Gemini embedding
+(768 or 3072), or a self-hosted model such as `bge-base` (768) — viable here because the stack
+already runs Docker, and it removes both the per-call cost and the vendor.
+
+**Tier A is therefore three items: A4, A2, A1.**
 
 ### A4 · `vote_donor_conflict` anomaly type
 
@@ -355,9 +375,9 @@ Each gets its own spec when it is scheduled. None is queued by this document.
 ## Sequencing
 
 **Tier A** — A4 first: a one-line enum change that everything touching money-to-vote
-correlation depends on. Then A3, which unblocks a schema waiting since migration 007. Then A2,
-standalone, landing the hardest-to-verify piece (rate limiting) while it is cheap to test.
-A1 last of the four — largest, spans backend and frontend, and nothing else in Tier A needs it.
+correlation depends on. Then A2, standalone, landing the hardest-to-verify piece (rate
+limiting) while it is cheap to test. A1 last — largest, spans backend and frontend, and nothing
+else in Tier A needs it. A3 is withdrawn; see its section.
 
 **Then B-e, then B-d.** Both depend on A1: B-d's upload route is operator-only, and B-e's
 operator channel management lives in the admin console. B-e precedes B-d because it is mostly
@@ -365,8 +385,8 @@ wiring an existing, tested delivery layer to an interface, whereas B-d adds extr
 and new flag types. Shipping B-e first also makes B-d's output deliverable the day it exists.
 
 ```
-A4 ──▶ A3 ──▶ A2 ──▶ A1 ──┬──▶ B-e (subscriptions + delivery)
-                          └──▶ B-d (FOIA / records requests)
+A4 ──▶ A2 ──▶ A1 ──┬──▶ B-e (subscriptions + delivery)
+                   └──▶ B-d (FOIA / records requests)
 ```
 
 Held: B-a (review queue) until records exist. B-c (budget tracking) until the first AI feature.
