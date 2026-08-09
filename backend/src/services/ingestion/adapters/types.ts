@@ -242,6 +242,21 @@ export function isIanaTimeZone(value: string): boolean {
   }
 }
 
+/**
+ * Lowercase kebab-case, the shape {@link BodyDescriptor.key} is contracted to.
+ *
+ * Lives here rather than in an adapter because every adapter needs the same
+ * answer: two adapters slugifying "Urban Parks & Forestry Board" differently
+ * would put the same body under two keys.
+ */
+export function slugifyBodyName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/&/g, ' ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 /** True when `value` is an absolute http(s) URL. */
 export function isAbsoluteHttpUrl(value: string): boolean {
   let url: URL;

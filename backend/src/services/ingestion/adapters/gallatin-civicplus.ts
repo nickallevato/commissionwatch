@@ -3,6 +3,7 @@ import type { AnyNode } from 'domhandler';
 import {
   isAbsoluteHttpUrl,
   sha256Hex,
+  slugifyBodyName,
   type BodyDescriptor,
   type DocumentKind,
   type DocumentRef,
@@ -12,6 +13,51 @@ import {
   type SourceAdapter,
   type SourceDescriptor,
 } from './types';
+import {
+  COMMISSIONWATCH_USER_AGENT,
+  createMemoryDocumentCache,
+  createPoliteTransport,
+  isAllowedByRobots,
+  parseRobotsTxt,
+  type CachedDocument,
+  type DocumentCache,
+  type HttpRequest,
+  type HttpTransport,
+  type RobotsRule,
+  HttpStatusError,
+  OffSourceUrlError,
+  RobotsDisallowedError,
+} from './http';
+
+/**
+ * The transport, robots parser and document cache moved to `./http` when the
+ * Bozeman adapter needed them too. They are re-exported here because they were
+ * this module's public surface first and its contract suite imports them from
+ * here — a move is not a reason to rewrite a passing test.
+ */
+export {
+  COMMISSIONWATCH_USER_AGENT,
+  createMemoryDocumentCache,
+  createPoliteTransport,
+  HttpStatusError,
+  isAllowedByRobots,
+  OffSourceUrlError,
+  parseRobotsTxt,
+  RobotsDisallowedError,
+} from './http';
+export type {
+  CachedDocument,
+  DocumentCache,
+  FetchLike,
+  FetchLikeInit,
+  HttpRequest,
+  HttpResponse,
+  HttpTransport,
+  PoliteTransportOptions,
+  RedirectMode,
+  RobotsRule,
+} from './http';
+
 
 /**
  * Gallatin County, MT — CivicPlus AgendaCenter.
@@ -49,293 +95,13 @@ export const GALLATIN_MIN_DELAY_MS = 2000;
 
 /**
  * Honest and contactable: names the project and links a page an operator being crawled
- * can read. No browser string, no spoofing.
+ * can read. No browser string, no spoofing. Shared with every other adapter, because
+ * two identities would mean one of them is not the project's.
  */
-export const GALLATIN_USER_AGENT =
-  'CommissionWatch/0.1 (civic transparency project; +https://commissionwatch.bmux.sh)';
+export const GALLATIN_USER_AGENT = COMMISSIONWATCH_USER_AGENT;
 
 /** `meeting_documents.title` and `.url` are knex's default varchar(255). */
 const VARCHAR_255 = 255;
-
-const DEFAULT_TIMEOUT_MS = 30_000;
-
-// ---------------------------------------------------------------------------
-// Transport
-// ---------------------------------------------------------------------------
-
-export interface HttpRequest {
-  url: string;
-  method: 'GET' | 'POST';
-  /** Form-encoded body, for the one endpoint that takes a POST. */
-  body?: string;
-  /** Extra request headers. The transport supplies the user agent. */
-  headers?: Record<string, string>;
-}
-
-export interface HttpResponse {
-  status: number;
-  /** Header names lowercased. */
-  headers: Record<string, string>;
-  bytes: Uint8Array;
-  /** The URL after redirects. */
-  finalUrl: string;
-}
-
-export type HttpTransport = (request: HttpRequest) => Promise<HttpResponse>;
-
-export class HttpStatusError extends Error {
-  constructor(
-    readonly url: string,
-    readonly status: number,
-  ) {
-    super(`HTTP ${status} fetching ${url}`);
-    this.name = 'HttpStatusError';
-  }
-}
-
-export class RobotsDisallowedError extends Error {
-  constructor(readonly url: string) {
-    super(`robots.txt disallows ${url}`);
-    this.name = 'RobotsDisallowedError';
-  }
-}
-
-export class OffSourceUrlError extends Error {
-  constructor(
-    readonly url: string,
-    readonly allowedOrigins: string[],
-  ) {
-    super(`${url} is outside the declared surface (${allowedOrigins.join(', ')})`);
-    this.name = 'OffSourceUrlError';
-  }
-}
-
-/**
- * Exactly the slice of `fetch` this transport uses. Narrower than `typeof fetch` so a test
- * double is an ordinary function rather than something cast into shape.
- */
-/**
- * `RequestRedirect` verbatim. Spelled out rather than imported from the DOM lib,
- * because the backend's tsconfig deliberately carries no `DOM` lib — a server
- * that can name `document` is a server that can accidentally use it.
- */
-export type RedirectMode = 'follow' | 'error' | 'manual';
-
-export interface FetchLikeInit {
-  method: string;
-  headers: Record<string, string>;
-  body?: string;
-  redirect: RedirectMode;
-  signal: AbortSignal;
-}
-
-export type FetchLike = (input: string, init: FetchLikeInit) => Promise<Response>;
-
-export interface PoliteTransportOptions {
-  userAgent?: string;
-  /** Floor on the gap between two requests. */
-  minDelayMs?: number;
-  timeoutMs?: number;
-  /** Injected for tests; defaults to global `fetch`. */
-  fetchImpl?: FetchLike;
-  /** Injected for tests; defaults to `Date.now`. */
-  now?: () => number;
-  /** Injected for tests; defaults to a real timer. */
-  sleep?: (ms: number) => Promise<void>;
-}
-
-function realSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * The politeness lives here rather than in the adapter so that a fixture-backed transport
- * runs at test speed without the adapter having a "skip the delay" switch that could ever
- * be flipped in production. One request in flight at a time, `minDelayMs` between them.
- */
-export function createPoliteTransport(options: PoliteTransportOptions = {}): HttpTransport {
-  const userAgent = options.userAgent ?? GALLATIN_USER_AGENT;
-  const minDelayMs = options.minDelayMs ?? GALLATIN_MIN_DELAY_MS;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const now = options.now ?? (() => Date.now());
-  const sleep = options.sleep ?? realSleep;
-  const doFetch: FetchLike = options.fetchImpl ?? fetch;
-
-  let lastRequestAt = Number.NEGATIVE_INFINITY;
-  // Serializes requests: maxConcurrency is 1, and it is 1 because the queue is a chain.
-  let queue: Promise<unknown> = Promise.resolve();
-
-  async function perform(request: HttpRequest): Promise<HttpResponse> {
-    const waitMs = lastRequestAt === Number.NEGATIVE_INFINITY ? 0 : lastRequestAt + minDelayMs - now();
-    if (waitMs > 0) {
-      await sleep(waitMs);
-    }
-    lastRequestAt = now();
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const headers: Record<string, string> = {
-        'User-Agent': userAgent,
-        ...(request.headers ?? {}),
-      };
-      if (request.method === 'POST' && request.body !== undefined) {
-        headers['Content-Type'] = 'application/x-www-form-urlencoded';
-      }
-
-      const init: FetchLikeInit = {
-        method: request.method,
-        headers,
-        redirect: 'follow',
-        signal: controller.signal,
-      };
-      if (request.method === 'POST' && request.body !== undefined) {
-        init.body = request.body;
-      }
-      const response = await doFetch(request.url, init);
-
-      const flat: Record<string, string> = {};
-      response.headers.forEach((value, name) => {
-        flat[name.toLowerCase()] = value;
-      });
-
-      // 304 carries no body; asking for one is not an error, it is just empty.
-      const bytes =
-        response.status === 304
-          ? new Uint8Array(0)
-          : new Uint8Array(await response.arrayBuffer());
-
-      return {
-        status: response.status,
-        headers: flat,
-        bytes,
-        finalUrl: response.url === '' ? request.url : response.url,
-      };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  return (request: HttpRequest): Promise<HttpResponse> => {
-    const result = queue.then(() => perform(request));
-    // The chain itself must never reject, or one failed request poisons every later one.
-    queue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  };
-}
-
-// ---------------------------------------------------------------------------
-// robots.txt
-// ---------------------------------------------------------------------------
-
-export interface RobotsRule {
-  allow: boolean;
-  path: string;
-}
-
-/**
- * The `User-agent: *` group of a robots.txt, plus any group naming us. Deliberately
- * small: prefix rules with `*` and `$`, longest match wins, `Allow` wins a tie — which is
- * what the REP says and all Gallatin's file needs.
- */
-export function parseRobotsTxt(text: string, userAgentToken: string): RobotsRule[] {
-  const token = userAgentToken.toLowerCase();
-  const groups = new Map<string, RobotsRule[]>();
-  let currentAgents: string[] = [];
-  let expectingAgents = true;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.replace(/#.*$/, '').trim();
-    if (line === '') continue;
-    const separator = line.indexOf(':');
-    if (separator === -1) continue;
-    const field = line.slice(0, separator).trim().toLowerCase();
-    const value = line.slice(separator + 1).trim();
-
-    if (field === 'user-agent') {
-      if (!expectingAgents) {
-        currentAgents = [];
-        expectingAgents = true;
-      }
-      currentAgents.push(value.toLowerCase());
-      continue;
-    }
-
-    if (field !== 'allow' && field !== 'disallow') continue;
-    expectingAgents = false;
-    if (value === '') continue;
-    for (const agent of currentAgents) {
-      const rules = groups.get(agent) ?? [];
-      rules.push({ allow: field === 'allow', path: value });
-      groups.set(agent, rules);
-    }
-  }
-
-  // A group naming us beats the wildcard group; that is the REP's precedence.
-  for (const [agent, rules] of groups) {
-    if (agent !== '*' && token.includes(agent)) {
-      return rules;
-    }
-  }
-  return groups.get('*') ?? [];
-}
-
-function robotsPatternToRegExp(pattern: string): RegExp {
-  let source = '';
-  for (const character of pattern) {
-    if (character === '*') {
-      source += '.*';
-    } else if (character === '$') {
-      source += '$';
-    } else {
-      source += character.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-    }
-  }
-  return new RegExp(`^${source}`);
-}
-
-/** True when `pathname` (with query) is fetchable under `rules`. */
-export function isAllowedByRobots(rules: RobotsRule[], pathname: string): boolean {
-  let best: { length: number; allow: boolean } | null = null;
-  for (const rule of rules) {
-    if (!robotsPatternToRegExp(rule.path).test(pathname)) continue;
-    const length = rule.path.length;
-    if (best === null || length > best.length || (length === best.length && rule.allow)) {
-      best = { length, allow: rule.allow };
-    }
-  }
-  return best === null ? true : best.allow;
-}
-
-// ---------------------------------------------------------------------------
-// Document cache
-// ---------------------------------------------------------------------------
-
-export interface CachedDocument {
-  bytes: Uint8Array;
-  contentType: string | null;
-  sourceUrl: string;
-  etag?: string;
-  lastModified?: string;
-}
-
-export interface DocumentCache {
-  get(url: string): CachedDocument | undefined;
-  set(url: string, entry: CachedDocument): void;
-}
-
-export function createMemoryDocumentCache(): DocumentCache {
-  const entries = new Map<string, CachedDocument>();
-  return {
-    get: (url) => entries.get(url),
-    set: (url, entry) => {
-      entries.set(url, entry);
-    },
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Bodies
@@ -369,15 +135,11 @@ export const GALLATIN_BODIES: readonly GallatinBody[] = Object.freeze([
   { catId: 4, name: 'Weed Board' },
 ]);
 
-/** Lowercase kebab-case, the shape `BodyDescriptor.key` is contracted to. */
-export function slugifyBodyName(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/&/g, ' ')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug;
-}
+/**
+ * Re-exported from `./types`, where it moved when the Bozeman adapter needed the
+ * same slugs. Two adapters with two slugifiers would file one body under two keys.
+ */
+export { slugifyBodyName } from './types';
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -700,7 +462,9 @@ interface ResolvedBody extends GallatinBody {
 export function createGallatinCivicPlusAdapter(
   options: GallatinAdapterOptions = {},
 ): SourceAdapter {
-  const transport = options.transport ?? createPoliteTransport();
+  const transport =
+    options.transport ??
+    createPoliteTransport({ userAgent: GALLATIN_USER_AGENT, minDelayMs: GALLATIN_MIN_DELAY_MS });
   const documentCache = options.documentCache ?? createMemoryDocumentCache();
   const now = options.now ?? (() => new Date());
   const respectRobotsTxt = options.respectRobotsTxt ?? true;

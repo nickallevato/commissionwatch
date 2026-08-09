@@ -1,0 +1,13 @@
+User-agent: Googlebot
+Disallow: /JSON.php
+Crawl-delay: 10
+User-agent: Slurp
+Disallow: /JSON.php
+Crawl-delay: 10
+User-agent: msnbot
+Disallow: /JSON.php
+Crawl-delay: 10
+User-agent: search-one-scgov
+Disallow: /JSON.php
+User-agent: *
+Disallow: /

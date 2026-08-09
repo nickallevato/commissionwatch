@@ -1,5 +1,6 @@
 import type { Knex } from "knex";
 import { createAdapterRegistry, type AdapterRegistry } from "./adapters/registry";
+import { createBozemanGranicusAdapter } from "./adapters/bozeman-granicus";
 import { createGallatinCivicPlusAdapter } from "./adapters/gallatin-civicplus";
 import { createArtifactStore, createIngestionHandlers, type ArtifactWriter } from "./handlers";
 import { IngestionQueue } from "./queue";
@@ -16,9 +17,19 @@ import { downloadDocument, uploadDocument } from "../storage";
  * start, and a test can construct exactly the same stack with a fake adapter.
  */
 
-/** Every adapter this build knows how to run. */
+/**
+ * Every adapter this build knows how to run.
+ *
+ * Registering one does not sweep anything: `registerSources` creates every
+ * `ingestion_sources` row **disabled**, so a new jurisdiction reaching
+ * production is a row an operator can see and switch on, never a crawl that
+ * started because a container did.
+ */
 export function createDefaultRegistry(): AdapterRegistry {
-  return createAdapterRegistry([createGallatinCivicPlusAdapter()]);
+  return createAdapterRegistry([
+    createBozemanGranicusAdapter(),
+    createGallatinCivicPlusAdapter(),
+  ]);
 }
 
 /** MinIO, behind the narrow port the fetch handler actually needs. */
