@@ -2,6 +2,7 @@ import type { Knex } from "knex";
 import type { AdapterRegistry } from "./adapters/registry";
 import { asDocumentKind } from "./adapters/types";
 import type { DocumentRef, MeetingRef, SourceAdapter } from "./adapters/types";
+import { snapshotFromDrafts } from "../agenda-diff";
 import { extractAgendaItems, type FieldConfidenceMap } from "./agenda-items";
 import { extractDocumentText } from "./document-text";
 import { UnsupportedDocumentError } from "./pdf-text";
@@ -255,6 +256,99 @@ export async function upsertMeetingDocument(
     .merge({ title: ref.title, document_type: ref.kind, updated_at: db.fn.now() });
 }
 
+// ---------------------------------------------------------------------------
+// Version history
+// ---------------------------------------------------------------------------
+
+export interface RecordVersionResult {
+  /** `false` when this artifact was already a version of this document. */
+  created: boolean;
+  versionNo: number;
+}
+
+/**
+ * Records that `artifactId` is a version of `meetingDocumentId`.
+ *
+ * Called on **every** successful fetch, with no prior "have I seen this
+ * before?" question — that question is the bug this design avoids, because a
+ * hand-written seen-set and the content address can disagree and then only one
+ * of them is the record. Instead the constraints decide:
+ *
+ * - unchanged bytes resolve to the same `artifacts` row and collide on
+ *   `unique (meeting_document_id, artifact_id)`, creating nothing
+ * - changed bytes are a new artifact and create exactly one version
+ *
+ * The parent document row is locked for the duration so two concurrent fetches
+ * of the same document cannot both read the same `MAX(version_no)` and race for
+ * the same number. The worker runs one job at a time today; the lock is what
+ * makes that an implementation detail rather than a load-bearing assumption.
+ *
+ * `first_seen_at` is the artifact's own `fetched_at`, not `now()`: the version
+ * appeared when we first held the bytes, and a later backfill or replay must
+ * not restate that moment.
+ */
+export async function recordDocumentVersion(
+  db: Knex,
+  meetingDocumentId: string,
+  artifactId: string,
+  firstSeenAt: Date | string,
+): Promise<RecordVersionResult> {
+  return db.transaction(async (trx) => {
+    await trx("meeting_documents").where({ id: meetingDocumentId }).forUpdate().first("id");
+
+    const existing: unknown = await trx("document_versions")
+      .where({ meeting_document_id: meetingDocumentId, artifact_id: artifactId })
+      .first("version_no");
+    if (isRecord(existing)) {
+      return { created: false, versionNo: Number(existing.version_no) };
+    }
+
+    const highest: unknown = await trx("document_versions")
+      .where({ meeting_document_id: meetingDocumentId })
+      .max("version_no as max")
+      .first();
+    const previous = isRecord(highest) ? Number(highest.max ?? 0) : 0;
+    const versionNo = (Number.isFinite(previous) ? previous : 0) + 1;
+
+    // The same bytes may already have been extracted under another document.
+    // The snapshot is a property of the artifact, so it is carried across
+    // rather than left NULL and re-derived — a re-parse is not available here.
+    const sibling: unknown = await trx("document_versions")
+      .where({ artifact_id: artifactId })
+      .whereNotNull("item_snapshot")
+      .first("item_snapshot");
+    const snapshot = isRecord(sibling) ? sibling.item_snapshot : null;
+
+    await trx("document_versions").insert({
+      meeting_document_id: meetingDocumentId,
+      artifact_id: artifactId,
+      version_no: versionNo,
+      first_seen_at: firstSeenAt,
+      item_snapshot: snapshot === null || snapshot === undefined ? null : JSON.stringify(snapshot),
+      created_at: trx.fn.now(),
+      updated_at: trx.fn.now(),
+    });
+    return { created: true, versionNo };
+  });
+}
+
+/**
+ * Attaches the extracted items to every version row carrying this artifact.
+ *
+ * Keyed on the artifact rather than on the document because the extraction is a
+ * property of the bytes: the same agenda filed under two documents yields the
+ * same items, and deriving it twice would let the two answers drift.
+ */
+export async function recordVersionSnapshot(
+  db: Knex,
+  artifactId: string,
+  items: ReadonlyArray<{ item_number: number; title: string }>,
+): Promise<number> {
+  return db("document_versions")
+    .where({ artifact_id: artifactId })
+    .update({ item_snapshot: JSON.stringify(items), updated_at: db.fn.now() });
+}
+
 /**
  * Replaces a meeting's agenda items with `drafts`. Idempotent on ordinal.
  *
@@ -397,7 +491,56 @@ export function createIngestionHandlers(
         .onConflict("sha256")
         .ignore()
         .returning("id");
-      const isNew = Array.isArray(rows) && rows.length > 0;
+      const insertedRow = Array.isArray(rows) ? rows[0] : undefined;
+      const isNew = isRecord(insertedRow);
+
+      // The artifact id is needed either way now, because a version row is
+      // written on every successful fetch — including one that changed nothing.
+      // Letting the collision short-circuit before this point is what kept
+      // `meeting_documents` and `artifacts` unjoined for thirty-four migrations.
+      let artifactId: string;
+      if (isNew) {
+        artifactId = requireString(insertedRow.id, "artifacts.id");
+      } else {
+        const existing: unknown = await db("artifacts")
+          .where({ sha256: fetched.sha256 })
+          .first("id");
+        if (!isRecord(existing)) {
+          throw new Error(`artifact ${fetched.sha256} neither inserted nor found`);
+        }
+        artifactId = requireString(existing.id, "artifacts.id");
+      }
+
+      const counts: Record<string, number> = isNew
+        ? { artifacts_stored: 1, bytes_fetched: fetched.byteSize }
+        : { artifacts_unchanged: 1 };
+
+      // Version history is a consequence of the fetch path. The document is
+      // located by the URL this job was told to fetch, which is the same key
+      // `upsertMeetingDocument` wrote under.
+      const meetingId = ctx.target.meetingId;
+      if (meetingId !== undefined) {
+        const document: unknown = await db("meeting_documents")
+          .where({ meeting_id: meetingId, url: ctx.target.url })
+          .first("id");
+        if (isRecord(document)) {
+          const version = await recordDocumentVersion(
+            db,
+            requireString(document.id, "meeting_documents.id"),
+            artifactId,
+            fetched.fetchedAt,
+          );
+          if (version.created) counts.document_versions_created = 1;
+        } else {
+          // A fetch with no document row behind it. Counted rather than
+          // guessed at: inventing the document would attach a version to a
+          // record nobody published.
+          counts.document_versions_unattached = 1;
+          logger.warn(
+            `fetch: no meeting_documents row for ${ctx.target.url} on meeting ${meetingId}`,
+          );
+        }
+      }
 
       if (isNew) {
         await ctx.enqueue("parse", {
@@ -405,9 +548,8 @@ export function createIngestionHandlers(
           meetingId: ctx.target.meetingId,
           documentType: ctx.target.documentType,
         });
-        return { counts: { artifacts_stored: 1, bytes_fetched: fetched.byteSize } };
       }
-      return { counts: { artifacts_unchanged: 1 } };
+      return { counts };
     },
 
     async parse(ctx): Promise<StageResult> {
@@ -442,11 +584,22 @@ export function createIngestionHandlers(
 
       const extraction = extractAgendaItems(text.lines);
       const written = await upsertAgendaItems(db, meetingId, extraction.items);
+
+      // `agenda_items` cannot answer for a superseded version — it is merged on
+      // `(meeting_id, item_number)`, so this parse has just overwritten the
+      // previous one's rows. The snapshot is what remains diffable.
+      const snapshotted = await recordVersionSnapshot(
+        db,
+        ctx.artifact.id,
+        snapshotFromDrafts(extraction.items),
+      );
+
       return {
         counts: {
           agenda_items_written: written,
           documents_parsed: 1,
           pages_read: text.pageCount,
+          document_versions_snapshotted: snapshotted,
         },
       };
     },

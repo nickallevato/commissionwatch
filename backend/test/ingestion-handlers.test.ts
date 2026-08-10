@@ -133,13 +133,20 @@ const silentLogger = {
 let sourceId: string;
 let jurisdictionId: string;
 
+/**
+ * Order matters since migration 034. `document_versions.artifact_id` has no
+ * `ON DELETE CASCADE` — a version row losing its evidence silently would leave
+ * a citation pointing at nothing — so the citing rows come out first. Dropping
+ * the jurisdiction cascades commissions, meetings, documents and their
+ * versions; only then is the artifact unreferenced.
+ */
 async function removeFixtures(): Promise<void> {
-  const shas = [sha256Hex(AGENDA_PDF), sha256Hex(WORD_BYTES)];
-  await db("artifacts").whereIn("sha256", shas).del();
   const rows = await db("jurisdictions").where({ name: JURISDICTION_NAME }).select("id");
   for (const row of rows) {
     await db("jurisdictions").where({ id: row.id }).del();
   }
+  const shas = [sha256Hex(AGENDA_PDF), sha256Hex(WORD_BYTES)];
+  await db("artifacts").whereIn("sha256", shas).del();
 }
 
 interface Harness {
@@ -193,13 +200,16 @@ after(async () => {
 
 beforeEach(async () => {
   await db("ingestion_runs").where({ source_id: sourceId }).del();
-  await db("artifacts")
-    .whereIn("sha256", [sha256Hex(AGENDA_PDF), sha256Hex(WORD_BYTES)])
-    .del();
+  // Meetings before artifacts: deleting a meeting cascades to its documents and
+  // their `document_versions`, which is what releases the artifact. See
+  // `removeFixtures`.
   const commissions = await db("commissions").where({ jurisdiction_id: jurisdictionId }).select("id");
   for (const commission of commissions) {
     await db("meetings").where({ commission_id: commission.id }).del();
   }
+  await db("artifacts")
+    .whereIn("sha256", [sha256Hex(AGENDA_PDF), sha256Hex(WORD_BYTES)])
+    .del();
 });
 
 describe("registerSource", () => {
