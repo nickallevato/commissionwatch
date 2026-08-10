@@ -350,6 +350,37 @@ export async function recordVersionSnapshot(
 }
 
 /**
+ * Holds the text this parse extracted, so it can be searched.
+ *
+ * P6. The extraction has run since P1 and its output was thrown away the moment
+ * agenda items were read out of it — which left the *body* of every document
+ * unsearchable, and the body is where most terms appear. One row per artifact,
+ * replaced on re-parse rather than accumulated: an artifact is content
+ * addressed, so a second extraction of the same bytes is a better reading of the
+ * same document, not a second document.
+ *
+ * It writes what was extracted and nothing else. No summary, no normalisation
+ * beyond the line joining the extractor already did — the searchable text and
+ * the text a reader would find in the stored bytes have to be the same thing.
+ */
+export async function recordArtifactText(
+  db: Knex,
+  artifactId: string,
+  text: string,
+): Promise<number> {
+  await db("artifact_texts")
+    .insert({
+      artifact_id: artifactId,
+      text,
+      char_count: text.length,
+      extracted_at: db.fn.now(),
+    })
+    .onConflict("artifact_id")
+    .merge(["text", "char_count", "extracted_at", "updated_at"]);
+  return text.length;
+}
+
+/**
  * Replaces a meeting's agenda items with `drafts`. Idempotent on ordinal.
  *
  * `field_confidence` is written alongside the values it describes, in the same
@@ -582,6 +613,11 @@ export function createIngestionHandlers(
         throw error;
       }
 
+      // Held before the items are extracted, because the two answer different
+      // questions and the second one failing must not lose the first. A
+      // document whose items cannot be read is still searchable by its text.
+      const charsIndexed = await recordArtifactText(db, ctx.artifact.id, text.lines.join("\n"));
+
       const extraction = extractAgendaItems(text.lines);
       const written = await upsertAgendaItems(db, meetingId, extraction.items);
 
@@ -600,6 +636,7 @@ export function createIngestionHandlers(
           documents_parsed: 1,
           pages_read: text.pageCount,
           document_versions_snapshotted: snapshotted,
+          artifact_text_chars: charsIndexed,
         },
       };
     },
