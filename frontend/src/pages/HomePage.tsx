@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useAgendaItems, useMeetings } from "@/hooks/useMeetings";
 import { useMeetingVotes } from "@/hooks/useVotes";
 import { useAnomalies } from "@/hooks/useAnomalies";
-import { flagTypeLabels } from "@/components/AnomalyCard";
+import { flagTypeLabels } from "@/components/flag-labels";
 import type {
   AnomalyFlag,
   AnomalySeverity,
@@ -12,7 +12,7 @@ import type {
 } from "@/types";
 
 /* ---------------------------------------------------------------------------
-   Placeholder finding
+   The lead column, with no finding in it
    ------------------------------------------------------------------------- */
 
 /**
@@ -26,13 +26,23 @@ interface FrontPageFinding {
 }
 
 /**
- * TODO(W3): findings do not exist in the data model yet. W3 owns the findings
- * table, the `/findings` endpoint and the `useFindings` hook. When that lands,
- * delete this constant and read the latest published finding from the hook.
- * Deliberately neutral copy — never ship a fabricated finding about a real
- * person or a real vote.
+ * No finding has been published, and this says so.
+ *
+ * This used to be called `PLACEHOLDER_FINDING`, which invited exactly the wrong
+ * repair: filling a placeholder in. There is nothing to fill in. Findings do
+ * not exist in the data model — there is no `findings` table, no `/findings`
+ * endpoint and no hook — so any headline here would be a claim this site
+ * cannot source, and the subject of a front-page claim on this site is a real,
+ * living, named official. That is the one thing the project must never do by
+ * accident.
+ *
+ * So this is the honest empty state and it is meant to be rendered, not
+ * replaced with prose. W3 owns the findings table, the endpoint and the hook;
+ * when they land, this constant is deleted and the lead column reads the latest
+ * *published* finding from the hook. Until then it says, in as many words, that
+ * there is no finding, and points the reader at the record instead.
  */
-const PLACEHOLDER_FINDING: FrontPageFinding = {
+const NO_FINDING_YET: FrontPageFinding = {
   kicker: "Latest finding",
   headline: "No finding has been published yet",
   dek:
@@ -72,13 +82,6 @@ function formatDay(iso: string): string {
   const name = MONTHS[month - 1];
   if (!year || !name || !day) return iso;
   return `${name} ${day}, ${year}`;
-}
-
-/** Today as `YYYY-MM-DD` in the reader's own timezone. */
-function todayIso(): string {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
 function jurisdictionOf(meeting: Meeting | undefined): string | null {
@@ -230,16 +233,23 @@ export function HomePage() {
       <div className="lg:grid lg:grid-cols-3 lg:gap-0">
         {/* ---------------- Main column ---------------- */}
         <main className="lg:col-span-2 lg:pr-10">
-          <p className="kicker">{PLACEHOLDER_FINDING.kicker}</p>
-          <h1 className="headline mt-2">{PLACEHOLDER_FINDING.headline}</h1>
+          <p className="kicker">{NO_FINDING_YET.kicker}</p>
+          <h1 className="headline mt-2">{NO_FINDING_YET.headline}</h1>
           <p className="mt-4 max-w-prose text-base text-ink-soft">
-            {PLACEHOLDER_FINDING.dek}
+            {NO_FINDING_YET.dek}
           </p>
+          {/* This byline used to read "Generated {today} · N meetings
+            reviewed". Both halves were false. Nothing was generated — there is
+            no finding above it — and `allMeetings` is what the meetings
+            endpoint returned, which is a count of meetings *in the record*, not
+            a count of meetings anybody reviewed. A site that exists to catch
+            unsourced claims does not get to publish two of them under its own
+            masthead. It now says what the number is. */}
           <p className="mt-4 text-xs text-muted">
-            Generated <span className="figure">{formatDay(todayIso())}</span>
-            {" · "}
             <span className="figure">{allMeetings.length}</span>{" "}
-            {allMeetings.length === 1 ? "meeting reviewed" : "meetings reviewed"}
+            {allMeetings.length === 1
+              ? "meeting in the published record"
+              : "meetings in the published record"}
           </p>
 
           <hr className="mt-8 border-t border-rule" />

@@ -12,7 +12,7 @@ import { within } from "@testing-library/react";
 import { renderWithProviders, screen, waitFor } from "../lib/test-utils";
 import { HomePage } from "./HomePage";
 import { server } from "../mocks/server";
-import { flagTypeLabels } from "../components/AnomalyCard";
+import { flagTypeLabels } from "../components/flag-labels";
 import type {
   AgendaItem,
   AnomalyFlag,
@@ -302,13 +302,23 @@ describe("HomePage front page", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders a byline with the generated date and the meeting count", async () => {
+    /**
+     * The byline used to read "Generated {today} · N meetings reviewed", and
+     * this test pinned it. Both halves were untrue: nothing is generated —
+     * there is no finding above the byline — and the number is what the
+     * meetings endpoint returned, not a count of anything anybody reviewed.
+     *
+     * So the assertion now holds the opposite line. `Generated` and `reviewed`
+     * are asserted *absent*, because the failure this test exists to catch is
+     * somebody restoring a claim the data cannot support.
+     */
+    it("counts the meetings in the record, and claims nothing about review", async () => {
       await renderFrontPage();
 
-      const byline = screen.getByText(/meetings reviewed/);
-      expect(byline.textContent).toMatch(
-        /^Generated [A-Z][a-z]+ \d{1,2}, \d{4} · 5 meetings reviewed$/,
-      );
+      const byline = screen.getByText(/meetings in the published record/);
+      expect(byline.textContent).toMatch(/^5 meetings in the published record$/);
+      expect(screen.queryByText(/meetings reviewed/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Generated /)).not.toBeInTheDocument();
     });
   });
 
