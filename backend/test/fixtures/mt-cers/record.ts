@@ -40,6 +40,61 @@ import type { TapeExchange } from '../../helpers/cers-tape';
 
 const OUT_DIR = __dirname;
 
+/**
+ * Fields CERS returns on every contribution row that must never land on disk.
+ *
+ * They describe the donor as a person — a street address, an occupation, an
+ * employer — rather than the contribution as a public act. The operator's
+ * instruction is that we do not ingest PII, and a fixture committed to a public
+ * repository is the most durable form of ingesting it: it outlives the database
+ * it was swept into. The adapter does not read these fields (see `CersLineItem`)
+ * and migration 043 removed the columns, so scrubbing costs the tests nothing.
+ */
+const PII_FIELDS = ['entityAddress', 'occupationDescr', 'employerDescr'] as const;
+
+/**
+ * Replaces donor PII in a `financeRepDetailList` body with synthetic values.
+ *
+ * **This runs on the way to disk, not on the way to the adapter.** The adapter
+ * under recording sees exactly what CERS sent, so the tape still proves the
+ * adapter handles the real protocol; only the bytes that get committed are
+ * changed.
+ *
+ * Structure, field names, key order, types and populated-ness are all
+ * preserved — an empty string stays an empty string, so a row that filed no
+ * occupation still exercises the "no occupation" path. A body that is not the
+ * expected array of objects is returned untouched rather than reshaped, because
+ * a recorder that silently rewrites an unexpected response is a recorder that
+ * hides a protocol change.
+ */
+function scrubLineItemPii(bytes: Uint8Array): Uint8Array {
+  const text = new TextDecoder('utf-8').decode(bytes);
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return bytes;
+  }
+  if (!Array.isArray(payload)) return bytes;
+
+  let index = 0;
+  for (const row of payload) {
+    if (typeof row !== 'object' || row === null || Array.isArray(row)) continue;
+    const record = row as Record<string, unknown>;
+    const seq = 100 + index * 10;
+    for (const field of PII_FIELDS) {
+      const value = record[field];
+      if (typeof value !== 'string' || value === '') continue;
+      record[field] =
+        field === 'entityAddress'
+          ? `${seq} Example Ave, Fixtureville, MT 00000`
+          : `Example ${field === 'occupationDescr' ? 'Occupation' : 'Employer'} ${seq}`;
+    }
+    index += 1;
+  }
+  return new TextEncoder().encode(JSON.stringify(payload));
+}
+
 function recordingTransport(inner: HttpTransport, log: TapeExchange[]): HttpTransport {
   let position: CersSessionPosition = EMPTY_SESSION;
   const seen = new Set<string>();
@@ -54,7 +109,13 @@ function recordingTransport(inner: HttpTransport, log: TapeExchange[]): HttpTran
     const contentType = response.headers['content-type'] ?? null;
     const extension = contentType?.includes('json') === true ? 'json' : 'html';
     const file = fixtureFileName(request, key, extension);
-    writeFileSync(join(OUT_DIR, file), Buffer.from(response.bytes));
+    // Scrubbed on the way to disk only — see `scrubLineItemPii`. `byteSize` is
+    // the size of the file that was written, not of the live response, so the
+    // tape describes what a replay will actually serve.
+    const stored = request.url.includes('financeRepDetailList')
+      ? scrubLineItemPii(response.bytes)
+      : response.bytes;
+    writeFileSync(join(OUT_DIR, file), Buffer.from(stored));
 
     if (!seen.has(key)) {
       seen.add(key);
@@ -67,7 +128,7 @@ function recordingTransport(inner: HttpTransport, log: TapeExchange[]): HttpTran
         contentType,
         location: response.headers.location ?? null,
         setCookies: response.setCookies ?? [],
-        byteSize: response.bytes.length,
+        byteSize: stored.length,
         file,
       });
     }

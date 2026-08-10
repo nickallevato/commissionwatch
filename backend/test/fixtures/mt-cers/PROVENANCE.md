@@ -1,5 +1,43 @@
 # MT CERS fixtures — provenance
 
+> ## The contribution rows were scrubbed on 2026-08-10. Do not "restore" them.
+>
+> **The four `post-financeRepDetailList-*.json` files no longer hold the donor
+> `entityAddress`, `occupationDescr` and `employerDescr` values CERS served.** 52 values were
+> replaced with clearly synthetic ones — 22 addresses, 15 occupations and 15 employers — across
+> those four files, by operator directive: *we must not ingest PII.* A fixture committed to a
+> repository is the most durable form of ingesting it, because it outlives the database it was
+> swept into.
+>
+> **This is not corruption and the fixture is not stale.** If you find `123 Example Ave,
+> Fixtureville, MT 00000` or `Example Employer 110` and conclude the recording went wrong, it did
+> not — that is the scrub, and re-recording to "fix" it would put real people's home addresses back
+> into a public repository. `record.ts` now scrubs on the way to disk (`scrubLineItemPii`), so a
+> re-record produces synthetic values too; the adapter under recording still sees the live bytes,
+> so the tape continues to prove the adapter handles the real protocol.
+>
+> Everything else is untouched and verified so: row counts, key order, field names, types and
+> populated-ness are identical to the recording, and an empty value stayed empty so the "no
+> occupation filed" path still gets exercised. **Donor names, dates and amounts are as filed** —
+> they are the disclosure, `vote_donor_conflict` cannot correlate anything without them, and the
+> tests assert on them.
+>
+> The columns these values were loaded into are gone: migration **043** dropped
+> `cf_transactions.entity_address`, `.occupation`, `.employer` and `cf_filers.residence_city`, and
+> the adapter's `CersLineItem` no longer parses the fields at all. `test/finance-pii-guard.test.ts`
+> fails if either the columns or unscrubbed fixture values come back.
+>
+> The `byteSize` figures in `exchanges.json` and in the exchange table below were updated to the
+> scrubbed file sizes, so the tape describes what a replay actually serves. The four affected files
+> are marked ⚑ in that table.
+>
+> **What was *not* scrubbed, and is a live question for the operator:** the roster response
+> `get-listCandidateResults-9a8c8f9ec18c.json` still carries candidates' `personDTO` — home
+> addresses, personal email addresses, and home and mobile telephone numbers — as noted further
+> down. That is candidate rather than donor data and was outside this directive's scope. Nothing
+> reads it into the database any more (`residence_city` was its only consumer and is dropped), but
+> it is still bytes in a public repository.
+
 **Fetched:** 2026-08-10, recorded at `2026-08-10T05:33:51.497Z` UTC
 **Host:** `https://cers-ext.mt.gov/CampaignTracker`
 **Publisher:** Montana Commissioner of Political Practices — Campaign Electronic Reporting System
@@ -71,23 +109,30 @@ produced the same filename and one silently overwrote the other. The digest is n
 | 200 | GET | `/public/publicReportList` | 39,961 | `get-publicReportList-d4821923a9ab.html` |
 | 200 | GET | `/public/publicReportList/listFinanceReports` | 5,669 | `get-listFinanceReports-349392e3ab28.json` |
 | 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22048` `reportId=80259` | 93,209 | `post-retrieveReport-e792869162a2.html` |
-| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=individual` | 9,519 | `post-financeRepDetailList-adb3ca5d26b2.json` |
-| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | 4,390 | `post-financeRepDetailList-d2b436e41223.json` |
+| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=individual` | ⚑ 9,734 | `post-financeRepDetailList-adb3ca5d26b2.json` |
+| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | ⚑ 4,382 | `post-financeRepDetailList-d2b436e41223.json` |
 | 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22048` `reportId=79145` | 93,201 | `post-retrieveReport-5cfd9a2e8b6d.html` |
-| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=individual` | 6,387 | `post-financeRepDetailList-3b8dd35e8113.json` |
-| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | 3,353 | `post-financeRepDetailList-bd28ba599286.json` |
+| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=individual` | ⚑ 6,489 | `post-financeRepDetailList-3b8dd35e8113.json` |
+| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | ⚑ 3,337 | `post-financeRepDetailList-bd28ba599286.json` |
 | 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22095` `reportId=80406` | 93,160 | `post-retrieveReport-0469d2716aaf.html` |
 | 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=individual` | 2 | `post-financeRepDetailList-50b793686b2c.json` |
 | 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | 2 | `post-financeRepDetailList-f7b2e5c34d8a.json` |
 
 ## Four things a reader should know about this data
 
-**It contains personal information that is part of a public filing but is not automatically
-publishable.** The roster's `personDTO` carries candidates' home addresses, personal email
-addresses and home and mobile telephone numbers. Every contribution row carries the donor's street
-address, occupation and employer. Storing it is right — provenance is the product — and
-republishing a home telephone number is a separate decision that belongs to an operator, not to a
-default projection. Nothing in the campaign-finance schema publishes any of it.
+**It contained personal information that is part of a public filing, and the donor half of it has
+been removed.** The original recording carried, on every contribution row, the donor's street
+address, occupation and employer; and in the roster's `personDTO`, candidates' home addresses,
+personal email addresses and home and mobile telephone numbers.
+
+The first draft of this note argued that storing it was right — *provenance is the product* — and
+that republishing was the separate decision. That argument was wrong by half. It conflated **what
+we may publish** with **what we may hold**, and only the first was ever in question. Being entitled
+to read a donor's home address off a public filing is not the same as being right to keep a copy of
+it, and a copy in a git repository is the least revocable copy there is. The operator's ruling is
+that we do not: the donor fields are scrubbed (see the notice at the top of this file) and
+migration 043 dropped the columns that received them. The roster's `personDTO` is still here and is
+still an open question — nothing reads it any more, but nothing has removed it either.
 
 **The roster bytes are not byte-stable between sweeps.** Two recordings twenty minutes apart both
 returned exactly 200,080 bytes with different SHA-256 digests, so the content address will not
