@@ -52,8 +52,13 @@ export class NotificationService {
 
     if (subscriptions.length === 0) return;
 
+    // Published only. This re-query resolves by (meeting_id, flag_type) rather
+    // than by id, so without the filter a *held* finding of the same type on
+    // the same meeting would be notified about — a generated claim about a
+    // named person, emailed while the site is still withholding it, which is
+    // the exact failure the review queue exists to prevent.
     const flagRows = await this.db("anomaly_flags")
-      .where({ meeting_id: meetingId })
+      .where({ meeting_id: meetingId, review_state: "published" })
       .whereIn("flag_type", flags.map((f) => f.flag_type))
       .select("id", "severity", "flag_type");
 

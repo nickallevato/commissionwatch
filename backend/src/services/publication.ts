@@ -53,3 +53,67 @@ export async function findPublishedMeeting(
   const row: unknown = await db("meetings").where({ id }).whereNotNull("published_at").first();
   return typeof row === "object" && row !== null ? (row as Record<string, unknown>) : undefined;
 }
+
+/* ---------------------------------------------------------------------------
+   Findings — B-a's half of the same wall.
+   --------------------------------------------------------------------------- */
+
+/**
+ * Constrains an `anomaly_flags` query to findings a reader may see.
+ *
+ * Two conditions, and both are load-bearing:
+ *
+ *  - **`review_state = 'published'`.** Until B-a there was no code path that
+ *    ever set this, so `held` meant held forever. Approval by a named operator
+ *    is now the only thing that changes it, which is what makes "nothing naming
+ *    a person auto-publishes" a mechanism rather than an aspiration. A
+ *    *rejected* finding is left `held`, so rejection needs no separate rule
+ *    here — it simply never becomes publishable.
+ *
+ *  - **A meeting-derived finding needs a published meeting.** This closes a
+ *    hole that predates the queue: `GET /api/anomalies` filtered on
+ *    `review_state` alone, so an auto-published flag on a meeting an operator
+ *    had not published leaked both the meeting's existence and a sentence of
+ *    its content — through the one public route that does not take a meeting id
+ *    and therefore cannot be reached only by guessing one. A flag with no
+ *    meeting is a records-derived flag about an artifact; it has no meeting to
+ *    be published, and requiring one would make it permanently invisible rather
+ *    than merely unapproved.
+ *
+ * `table` names the flags table for a joined query, the same reason
+ * `whereMeetingPublished` takes a column.
+ */
+export function whereFindingPublic<T extends Knex.QueryBuilder>(
+  db: Knex,
+  query: T,
+  table = "anomaly_flags",
+): T {
+  query.where(`${table}.review_state`, "published").where((builder) => {
+    builder
+      .whereNull(`${table}.meeting_id`)
+      .orWhereExists(
+        db("meetings")
+          .whereRaw(`meetings.id = ${table}.meeting_id`)
+          .whereNotNull("meetings.published_at"),
+      );
+  });
+  return query;
+}
+
+/**
+ * A publicly visible finding by id, or `undefined`.
+ *
+ * `undefined` covers "no such flag", "not approved" and "its meeting is not
+ * published", and every caller turns all three into the same 404 — for the
+ * reason `findPublishedMeeting` gives. Distinguishing them would let anyone
+ * enumerate what has been detected and withheld, which on this table is a
+ * generated claim about a named person awaiting a human decision.
+ */
+export async function findPublicFinding(
+  db: Knex,
+  id: string,
+): Promise<Record<string, unknown> | undefined> {
+  const query = db("anomaly_flags").where("anomaly_flags.id", id).select("anomaly_flags.*");
+  const row: unknown = await whereFindingPublic(db, query).first();
+  return typeof row === "object" && row !== null ? (row as Record<string, unknown>) : undefined;
+}

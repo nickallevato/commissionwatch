@@ -2,7 +2,11 @@ import { Router, Request } from "express";
 import db from "../config/database";
 import { loadDocumentTimelines } from "../services/agenda-diff";
 import { detectAnomalies } from "../services/anomaly-detection";
-import { findPublishedMeeting, whereMeetingPublished } from "../services/publication";
+import {
+  findPublishedMeeting,
+  whereFindingPublic,
+  whereMeetingPublished,
+} from "../services/publication";
 
 const router = Router();
 
@@ -176,9 +180,10 @@ router.get("/:id/anomalies", async (req, res, next) => {
       return;
     }
 
-    const anomalies = await db("anomaly_flags")
-      .where({ meeting_id: id, review_state: "published" })
-      .orderBy("created_at");
+    const anomalies = await whereFindingPublic(db, db("anomaly_flags"))
+      .where("anomaly_flags.meeting_id", id)
+      .select("anomaly_flags.*")
+      .orderBy("anomaly_flags.created_at");
     res.json({ data: anomalies, total: anomalies.length });
   } catch (err) {
     next(err);

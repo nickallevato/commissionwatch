@@ -8,6 +8,7 @@ import {
   type ExtractedEntities,
 } from './extraction';
 import { detectRecordsFlags } from './detectors';
+import { ensureApprovalRequests } from '../review/queue';
 
 /**
  * Public-records requests, and the documents they produce.
@@ -300,6 +301,11 @@ export class RecordsService {
         .returning<Array<{ id: string }>>('id');
       flagIds.push(row.id);
     }
+
+    // B-a. Every flag written above is `held`, so each one is a queue entry —
+    // created here rather than when someone next opens the console, so the
+    // review window is measured from when the finding was raised.
+    if (flagIds.length > 0) await ensureApprovalRequests(this.db);
 
     return {
       artifact,

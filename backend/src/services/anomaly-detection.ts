@@ -6,6 +6,8 @@ import {
   scheduledInstant,
 } from "./agenda-diff";
 import { anomalyEvents } from "./notification";
+import { loadPolicy, resolveReviewState } from "./review/policy";
+import { ensureApprovalRequests } from "./review/queue";
 
 /**
  * Bumped for P5. `last_minute_agenda_change` no longer means what it meant in
@@ -39,12 +41,18 @@ export interface AnomalyFlag {
  * This is what the detection endpoints serialize, so every column the API
  * contract declares required must be present here.
  */
-export interface AnomalyFlagRow extends Omit<AnomalyFlag, "metadata"> {
+export interface AnomalyFlagRow extends Omit<AnomalyFlag, "metadata" | "review_state"> {
   id: string;
   agenda_item_id: string | null;
   /** `null` on the wire, `undefined` on an unpersisted draft — hence the Omit. */
   metadata: Record<string, unknown> | null;
   source: string;
+  /**
+   * Required on a persisted row: the column is NOT NULL and the insert resolves
+   * it through the threshold. Optional on a draft, where it means "the rule had
+   * no opinion" rather than "published".
+   */
+  review_state: "published" | "held";
   created_at: string;
 }
 
@@ -103,6 +111,11 @@ export async function detectAnomalies(db: Knex, meetingId: string): Promise<Anom
   // none of which exist on the in-memory objects the rules produced.
   let inserted: AnomalyFlagRow[] = [];
 
+  // B-b's replacement, applied at the moment a finding is written. A rule that
+  // already said `held` — a changed agenda item naming someone on the roster —
+  // stays held whatever the threshold says; the threshold can only add holds.
+  const policy = await loadPolicy(db);
+
   await db.transaction(async (trx) => {
     await trx("anomaly_flags")
       .where({ meeting_id: meetingId, source: "auto" })
@@ -112,9 +125,13 @@ export async function detectAnomalies(db: Knex, meetingId: string): Promise<Anom
       // `metadata` is jsonb and is serialised here rather than in each rule, so
       // no rule can forget and hand Knex an object it will stringify as
       // `[object Object]`.
-      const rows = flags.map(({ metadata, ...flag }) => ({
+      const rows = flags.map(({ metadata, review_state, ...flag }) => ({
         ...flag,
         source: "auto",
+        review_state: resolveReviewState(
+          { severity: flag.severity, alwaysHold: review_state === "held" },
+          policy,
+        ),
         ...(metadata === undefined ? {} : { metadata: JSON.stringify(metadata) }),
       }));
       inserted = await trx("anomaly_flags").insert(rows).returning("*");
@@ -123,8 +140,20 @@ export async function detectAnomalies(db: Knex, meetingId: string): Promise<Anom
 
   await completeDetectionRun(db, runId, inserted.length);
 
-  if (inserted.length > 0) {
-    anomalyEvents.emit("anomaly.detected", inserted);
+  // Every held finding gets a queue entry here rather than waiting for someone
+  // to open the console, so "how long has this been waiting?" is measured from
+  // when it was raised.
+  if (inserted.some((flag) => flag.review_state === "held")) {
+    await ensureApprovalRequests(db, policy);
+  }
+
+  // **Only published findings are announced.** `IMMEDIATE_SEVERITIES` in the
+  // notification service is exactly `critical` and `high` — the severities the
+  // default threshold holds — so emitting the whole batch would withhold a
+  // finding from the site and email it in the same breath.
+  const announceable = inserted.filter((flag) => flag.review_state === "published");
+  if (announceable.length > 0) {
+    anomalyEvents.emit("anomaly.detected", announceable);
   }
 
   return inserted;

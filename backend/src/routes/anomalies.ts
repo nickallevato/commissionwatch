@@ -1,6 +1,11 @@
 import { Router, Request } from "express";
 import db from "../config/database";
-import { findPublishedMeeting } from "../services/publication";
+import {
+  findPublicFinding,
+  findPublishedMeeting,
+  whereFindingPublic,
+} from "../services/publication";
+import { loadPolicy, resolveReviewState } from "../services/review/policy";
 import { detectAnomalies, detectAnomaliesBatch } from "../services/anomaly-detection";
 
 const router = Router();
@@ -45,22 +50,23 @@ router.get("/", async (req: Request<unknown, unknown, unknown, AnomaliesQuery>, 
     const limit = Math.min(Math.max(parseInt(rawLimit || "50", 10) || 50, 1), 200);
     const offset = Math.max(parseInt(rawOffset || "0", 10) || 0, 0);
 
-    // The publication gate. A records-derived flag sits beside an extraction
-    // that names people, and this is a public route — so `held` never appears
-    // here. B-a generalises this into the review queue; until then, held means
-    // held, and the operator surface is the only place these are readable.
-    const query = db("anomaly_flags").where({ review_state: "published" });
+    // The publication gate, now B-a's. `whereFindingPublic` is the single
+    // rule: approved, and — for a meeting-derived finding — on a meeting an
+    // operator published. This route is the one public path that does not take
+    // a meeting id, so it is the one a withheld record could leak through
+    // without anybody guessing anything.
+    const query = whereFindingPublic(db, db("anomaly_flags"));
 
-    if (meeting_id) query.where({ meeting_id });
-    if (flag_type) query.where({ flag_type });
-    if (severity) query.where({ severity });
+    if (meeting_id) query.where("anomaly_flags.meeting_id", meeting_id);
+    if (flag_type) query.where("anomaly_flags.flag_type", flag_type);
+    if (severity) query.where("anomaly_flags.severity", severity);
 
     const countResult = await query.clone().count("* as total").first();
     const total = Number(countResult?.total ?? 0);
 
     const data = await query
-      .select("*")
-      .orderBy("created_at", "desc")
+      .select("anomaly_flags.*")
+      .orderBy("anomaly_flags.created_at", "desc")
       .limit(limit)
       .offset(offset);
 
@@ -104,7 +110,7 @@ router.get("/:id", async (req, res, next) => {
 
     // 404 rather than 403 for a held flag: a public caller has no business
     // learning that one exists.
-    const flag = await db("anomaly_flags").where({ id, review_state: "published" }).first();
+    const flag = await findPublicFinding(db, id);
     if (!flag) {
       res.status(404).json({ error: "Anomaly flag not found", statusCode: 404 });
       return;
@@ -140,6 +146,12 @@ router.post("/", async (req: Request<unknown, unknown, CreateAnomalyBody>, res, 
     const meeting = await findPublishedMeeting(db, meeting_id);
     if (!meeting) throw badRequest("Meeting not found");
 
+    // The threshold applies here too. This route is public and unauthenticated,
+    // and before B-a a hand-written flag at any severity published the instant
+    // it was posted. A finding entered by hand is still a finding.
+    const policy = await loadPolicy(db);
+    const review_state = resolveReviewState({ severity, alwaysHold: false }, policy);
+
     const [created] = await db("anomaly_flags")
       .insert({
         meeting_id,
@@ -147,6 +159,7 @@ router.post("/", async (req: Request<unknown, unknown, CreateAnomalyBody>, res, 
         description,
         severity,
         source: "manual",
+        review_state,
         metadata: metadata ? JSON.stringify(metadata) : null,
       })
       .returning("*");
@@ -185,9 +198,10 @@ router.get("/meeting/:id", async (req, res, next) => {
       return;
     }
 
-    const data = await db("anomaly_flags")
-      .where({ meeting_id: id, review_state: "published" })
-      .orderBy("created_at", "desc");
+    const data = await whereFindingPublic(db, db("anomaly_flags"))
+      .where("anomaly_flags.meeting_id", id)
+      .select("anomaly_flags.*")
+      .orderBy("anomaly_flags.created_at", "desc");
 
     res.json({ data, total: data.length });
   } catch (err) {

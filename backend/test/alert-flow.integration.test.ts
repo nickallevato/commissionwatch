@@ -253,21 +253,54 @@ describe("Full flow via HTTP: detect-anomalies endpoint triggers notifications",
 
     assert.ok(Array.isArray(res.body.data));
 
-    if (res.body.count > 0) {
-      const flagTypes = res.body.data.map((f: { flag_type: string }) => f.flag_type);
+    interface DetectedFlag {
+      id: string;
+      flag_type: string;
+      review_state: "published" | "held";
+    }
+    const detected: DetectedFlag[] = res.body.data;
+    const published = detected.filter((flag) => flag.review_state === "published");
+    const held = detected.filter((flag) => flag.review_state === "held");
 
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
+    /**
+     * **B-a split this assertion in two, and the second half is the point.**
+     *
+     * The detector no longer publishes everything it finds: a finding at or
+     * above the review threshold is written `held` and waits for an operator.
+     * `IMMEDIATE_SEVERITIES` in the notification service is exactly `critical`
+     * and `high` — the severities the default threshold holds — so before the
+     * queue landed, the pipeline would have withheld a generated claim from the
+     * site and emailed it in the same breath. Nothing is notified about until it
+     * is public.
+     */
+    if (held.length > 0) {
+      const heldNotifications = await db("notifications")
+        .where({ subscription_id: subscriptionId })
+        .whereIn(
+          "anomaly_flag_id",
+          held.map((flag) => flag.id),
+        );
+      assert.equal(
+        heldNotifications.length,
+        0,
+        "a held finding must never be notified about — it is not public",
+      );
+    }
+
+    if (published.length > 0) {
       const notifications = await db("notifications")
         .where({ subscription_id: subscriptionId })
-        .whereIn("anomaly_flag_id",
-          db("anomaly_flags")
-            .select("id")
-            .where({ meeting_id: COMPLETED_MEETING_ID })
-            .whereIn("flag_type", flagTypes),
+        .whereIn(
+          "anomaly_flag_id",
+          published.map((flag) => flag.id),
         );
 
-      assert.ok(notifications.length > 0, "Notifications should be created for detected anomalies");
+      assert.ok(
+        notifications.length > 0,
+        "Notifications should be created for published anomalies",
+      );
 
       for (const notif of notifications) {
         assert.ok(

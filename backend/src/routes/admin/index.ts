@@ -3,6 +3,7 @@ import sessionRouter from './session';
 import channelsRouter from './channels';
 import recordsRouter from './records';
 import pressroomRouter from './pressroom';
+import reviewRouter from './review';
 import { requireOperator } from '../../middleware/requireOperator';
 
 const router = Router();
@@ -19,6 +20,9 @@ router.use('/channels', channelsRouter);
 router.use('/records', recordsRouter);
 // P2's Pressroom console: sources, runs, meetings, corrections, publication.
 router.use('/pressroom', pressroomRouter);
+// B-a's review queue. The only route in this product that makes a generated
+// claim about a named person public lives behind this line.
+router.use('/review', reviewRouter);
 
 // A guarded catch-all. Without it an unknown admin path 404s before the guard
 // runs, which confirms to an unauthenticated caller which routes exist.

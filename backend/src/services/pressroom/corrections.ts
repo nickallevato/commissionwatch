@@ -147,18 +147,29 @@ function toCorrectionRow(raw: unknown): CorrectionRow {
   };
 }
 
-/** Appends the log row. Never updates one; migration 031 would refuse anyway. */
+export interface AppendCorrectionInput {
+  targetTable: string;
+  targetId: string;
+  field: string;
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string;
+  actor: CorrectionActor;
+}
+
+/**
+ * Appends the log row. Never updates one; migration 031 would refuse anyway.
+ *
+ * Exported as `appendCorrectionRow` so B-a's review decisions land in this same
+ * table rather than a second one — two logs can disagree about what happened,
+ * and the one that disagreed would be believed at random. The review service
+ * uses this writer and **not** `recordCorrection`, which also writes
+ * `updated_at`: `anomaly_flags` has no such column, so sharing the update as
+ * well as the log would be sharing a bug.
+ */
 async function appendCorrection(
   executor: Knex | Knex.Transaction,
-  input: {
-    targetTable: string;
-    targetId: string;
-    field: string;
-    oldValue: string | null;
-    newValue: string | null;
-    reason: string;
-    actor: CorrectionActor;
-  },
+  input: AppendCorrectionInput,
 ): Promise<CorrectionRow> {
   const inserted: unknown = await executor("record_corrections")
     .insert({
@@ -242,6 +253,8 @@ export async function recordCorrection(
     return correction;
   });
 }
+
+export { appendCorrection as appendCorrectionRow };
 
 /** One target's correction history, newest first. */
 export async function listCorrections(
