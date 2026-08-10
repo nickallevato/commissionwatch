@@ -1,7 +1,8 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after landing **B3 — the public corrections log and the dispute
-> route**, which was the last build gate on making this site publicly reachable. Earlier the same
+> Last updated: 2026-08-10, after landing the **bulk data export, the fork path and the public
+> meeting calendar** (see below) — the launch-readiness item that was not B3. Before that: **B3 —
+> the public corrections log and the dispute route**, which was the last build gate on making this site publicly reachable. Earlier the same
 > day: the **findings review queue** (B-a and B-b's
 > replacement) — the change that made publishing a finding possible at all. Earlier still:
 > the **public status page** and a sweep of the known defects; and before those: P7 (the public-records request generator), P5 (the agenda diff
@@ -517,6 +518,147 @@ Counts after B3: backend **867 tests / 221 suites**, frontend **330 / 36**, both
 lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
 `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## Open data, the fork path and the meeting calendar have landed
+
+Working from `docs/superpowers/specs/2026-08-04-launch-readiness-design.md` § 2 for the export
+and the licence. **No migration** — none of this needed a schema change, which is itself the
+finding: the publication wall, the content addresses and `jurisdictions.timezone` were all
+already there.
+
+### The bulk export — `/api/data`
+
+**Ten datasets, JSON and CSV, public and unauthenticated.** `jurisdictions`, `commissions`,
+`meetings`, `agenda_items`, `meeting_documents`, `members`, `votes`, `findings`,
+`artifact_references`, `artifacts`. `GET /api/data` is the manifest and computes its own row
+counts, column lists and schema version — there is no maintained list anywhere.
+
+**This is the largest public surface the product has, and it is a new shape of risk.** Every other
+public path takes a meeting id, so a reader who cannot guess one cannot reach a withheld record;
+P6's search takes a *word*, which is why it needed its own wall test. The export takes **nothing**.
+It hands over whole tables, so one missed predicate empties the review queue into a file that looks
+entirely correct. Every query routes through `services/publication.ts` —
+`whereMeetingPublished` and `whereFindingPublic` — and `data-export.test.ts` walks all ten datasets
+in **both formats and both directions**, withheld then published.
+
+Three specific leaks were closed by construction rather than by care:
+
+- **A published flag on an unpublished meeting.** The fixture sets `review_state = 'published'` on
+  the withheld meeting's flag deliberately, because filtering on `review_state` alone would export
+  it along with a sentence of the withheld meeting's content.
+- **`artifacts` is not a table of harmless hashes.** `source_url` on a withheld meeting's document
+  carries that meeting's URL, and a Granicus URL carries its title in the query string. The
+  artifacts dataset is filtered through the publication wall for that reason, and the test asserts
+  the withheld content address never appears.
+- **`storage_key` is never exported.** It addresses bytes this project does not redistribute.
+
+**Provenance travels with the row.** `meetings`, `agenda_items`, `meeting_documents` and `votes`
+each carry `source_artifact_sha256`; `artifact_references` carries the full document-to-artifact
+mapping with the post-redirect `source_url`. **Where the schema records no artifact — `members`,
+`jurisdictions`, `commissions` — the column is absent rather than null**, and `/data` says so in
+words: an empty provenance column reads as a lost source, and no column reads as "there never was
+one", which is the true statement.
+
+**Nothing is buffered.** Keyset batches of 500, written to the response as they are read. Knex's
+`.stream()` needs `pg-query-stream`, which is not a dependency here. **One trap this introduced:**
+`ORDER BY id` resolves against the select list and is fine, while `WHERE id > ?` resolves against
+the tables and is ambiguous on a joined query — and the loop always asks one batch more than it
+needs, so the failure appears only on the *second* batch. `artifact_references` hit it. Datasets
+name their keyset column now.
+
+### The licence, stated per layer
+
+Unchanged from the spec and now stated in code as well as prose: the **compiled dataset is
+CC BY 4.0**, the **code is MIT** per the repository `LICENSE`, and **no licence is asserted over
+the government documents** — they are not ours, and their bytes are not redistributed. The manifest
+carries all three, and an `X-License` / `X-Attribution` header travels with every file because a
+`curl -O` of a CSV keeps no envelope.
+
+### `/data`, and what it stops promising
+
+The page at `/data-license` has been extended and now also answers at **`/data`**, which is the
+address the spec names and the one the JSON-LD points at. `/data-license` still resolves; it has
+been the published address of that page.
+
+**The dataset table is a query**, read from the manifest, so columns and row counts cannot drift
+from what the API serves. It carries `Dataset` JSON-LD whose `distribution` entries are generated
+from that same manifest — a hand-written `contentUrl` is a 404 a search engine publishes on this
+project's behalf.
+
+Three paragraphs of promise came off. The page said the bulk export "is not published yet" while
+describing nightly zips and dated snapshots. The export exists; **the dated archive does not**, and
+the page now says plainly that there is no snapshot and no way to ask what this site said in March.
+Three withheld entries were added because the export made them real: an unpublished meeting, the
+storage key, and the text of an ingestion failure.
+
+### The calendar and the iCal feeds
+
+`/calendar` groups upcoming and recent published meetings by jurisdiction;
+`GET /api/calendar/{jurisdiction_id}.ics` is a subscribable feed. Published meetings only — a
+subscribed calendar keeps fetching long after anyone last looked at the site, so a leak here sits
+in a stranger's phone until they unsubscribe.
+
+**The timezone trap, handled explicitly, because both halves of it are live here.** `meetings` has
+no `scheduled_at`: a `DATE` and a **nullable** `TIME`, naive, with the zone on
+`jurisdictions.timezone`. Composing the instant in the server's zone publishes a 7pm Bozeman
+meeting at one in the afternoon, so the wall time is converted through the jurisdiction's zone with
+`Intl` and emitted as **UTC** — which also means no `VTIMEZONE` block to get wrong, and no `TZID`
+referring to a definition the file does not contain. An unrecognised zone returns null and the
+event is **omitted**, never silently placed in UTC.
+
+**A meeting with no published time is an all-day event** — `DTSTART;VALUE=DATE` with an exclusive
+`DTEND` on the following day — never midnight. Most rows have no time; `00:00` is what a naive cast
+produces, not what the record says.
+
+**A timed event carries no `DTEND` and no `DURATION`.** RFC 5545 §3.6.1 defines that as ending at
+its start, and clients render it as a moment. The record does not state when a meeting adjourned,
+and `DURATION:PT2H` would be the meeting page's deleted *"Adjourned: Not recorded"* row all over
+again — in a file people subscribe to. This is a deliberate decision, not an omission.
+
+UIDs are keyed on the meeting id alone, so a rescheduled meeting updates the subscriber's entry
+rather than appearing twice. **No new runtime dependency:** an `.ics` file is text, folded at 75
+*octets* (not characters — a multi-byte character must not be split across a fold) and escaped by
+hand.
+
+### The fork path
+
+`README.md` was rewritten — it predated almost everything here — plus `CONTRIBUTING.md`,
+`docs/ADAPTERS.md` and `scripts/dev-setup.sh`, **which was executed end to end twice** before any
+of it was written, on Node v22.22.2 and Docker Compose v5.1.4.
+
+`docs/ADAPTERS.md` leads with **what is not config**, because that is what the pitch misleads
+about: hardcoded body lists, jurisdictions created by the registration path, an
+`ingestion_sources.config` that is written once and is lossy for both adapters, and the
+`adapterRegistry` export in `registry.ts` that is a decoy — permanently empty, referenced nowhere,
+while the live list is `createDefaultRegistry()`. Then the contract, the suite's real assertions,
+the fixture and `PROVENANCE.md` discipline, the conduct rules with the vendor-`robots.txt`
+exception and its disclosure condition, the hard line on evasion, and the two worked examples with
+what each live sweep *disproved*.
+
+**Three defects found by actually running the thing**, each of which would have stopped a forker
+in the first hour:
+
+1. **`vite.config.ts` proxied `/api` to port 8000.** No part of this project has ever listened on
+   8000. Every `/api` call from `npm run dev` was a proxy error, which surfaces as an empty
+   response rather than a 404 — so it reads as a broken backend rather than a misdirected proxy.
+   The README had been asserting `:3001` for months.
+2. **`backend/.env.example` carried `commwatch:commwatch-secret` as `DATABASE_URL`.** Those are the
+   MinIO credentials and have never been the Postgres ones, so anyone who exported that file got an
+   authentication failure against a database that was running fine. The file now also opens by
+   saying that **nothing in the Node process reads it** — there is no `dotenv` dependency and no
+   `env_file` in compose — because the larger waste of time was believing it was load-bearing.
+3. **`commissionwatch_test` only exists if the data volume was initialised after
+   `scripts/init-databases.sql` landed.** A carried-over volume leaves `npm test` failing on a
+   missing database while everything else works. `dev-setup.sh` creates it idempotently.
+
+The caveats it cannot fix are written down rather than left to be discovered: the compose stack
+binds fixed host ports with no variable, the `pgdata` volume survives a branch change and produces
+the "migration directory is corrupt" failure, and **no ingestion source is enabled** — which is
+correct, because enabling one means this machine starts fetching a real county's web server.
+
+Counts after this work: backend **926 tests / 229 suites**, frontend **399 / 40**, both green.
+Backend lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+`deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
@@ -695,8 +837,12 @@ Ordered by how much each blocks the product being real.
 7. **Launch readiness**: ~~corrections and dispute policy~~ — **closed 2026-08-10 by B3**, see
    above. `/corrections` publishes the policy and the log, `/corrections/dispute` is the route, and
    disputes reach the operator queue. **This was the gate on making the site public**; the rest of
-   this item is not. Still outstanding: public data export and licensing, backups with a tested
-   restore (see item 8 — `BACKUP_S3_URI` and the cron), accessibility and shareability.
+   this item is not. ~~public data export and licensing~~ — **closed 2026-08-10**: ten datasets in
+   JSON and CSV at `/api/data`, CC BY 4.0 for the compilation and MIT for the code, described on
+   `/data` with `Dataset` JSON-LD. Still outstanding: backups with a tested restore (see item 8 —
+   `BACKUP_S3_URI` and the cron), accessibility, and shareability. Also outstanding from the same
+   spec and deliberately not built: the **dated export archive**, so "what did this site say in
+   March" is still unanswerable, and that is stated on `/data` rather than implied.
 8. ~~**No database backups.**~~ Closed 2026-08-09 by P3. `deploy/backup.sh` takes a nightly
    `pg_dump -Fc` plus a MinIO mirror with 7 daily / 4 weekly retention and emits
    `ops.backup_succeeded` / `ops.backup_failed` through the delivery dispatcher.
