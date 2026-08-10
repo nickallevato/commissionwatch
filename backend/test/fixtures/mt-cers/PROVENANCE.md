@@ -28,15 +28,56 @@
 > fails if either the columns or unscrubbed fixture values come back.
 >
 > The `byteSize` figures in `exchanges.json` and in the exchange table below were updated to the
-> scrubbed file sizes, so the tape describes what a replay actually serves. The four affected files
-> are marked ⚑ in that table.
+> scrubbed file sizes, so the tape describes what a replay actually serves. Every scrubbed file is
+> marked ⚑ in that table — four from this pass, nine more from the one below.
 >
-> **What was *not* scrubbed, and is a live question for the operator:** the roster response
-> `get-listCandidateResults-9a8c8f9ec18c.json` still carries candidates' `personDTO` — home
-> addresses, personal email addresses, and home and mobile telephone numbers — as noted further
-> down. That is candidate rather than donor data and was outside this directive's scope. Nothing
-> reads it into the database any more (`residence_city` was its only consumer and is dropped), but
-> it is still bytes in a public repository.
+> ## The candidate and treasurer contact details were scrubbed on 2026-08-10 too. Do not "restore" them.
+>
+> The first pass left the roster's `personDTO` alone as out of scope and flagged it here. It is
+> now gone, along with three more places the same data turned out to be sitting. **1,190 JSON
+> values and 16 rendered HTML values were replaced with synthetic ones**, across seven files:
+>
+> | Kind | JSON values | Where |
+> |---|---|---|
+> | Address components and renderings | 770 | `addrLn1`, `city`, `zip5`, `zip4`, `cityStateZip`, `addrCityStateZip`, `entityAddress`, `entityCity`, `candidateAddress` |
+> | Email addresses | 129 | `email`, `emailAddress`, and one typed into a candidacy's `comments` |
+> | Telephone numbers | 290 | `phoneNum`, `phoneNumFormatted` — home, work and mobile |
+> | Free-text expenditure purpose | 1 | an email address inside a `purposeDescr` |
+>
+> Behind those 1,190 values are 42 distinct street lines, 7 cities, 10 ZIPs, 35 email addresses
+> and 53 telephone numbers. The affected files are the roster
+> `get-listCandidateResults-9a8c8f9ec18c.json`, **both** `get-listFinanceReports-*.json` (which
+> embed the same `personDTO` inside `candidateDTO` — a fact the first pass did not notice),
+> `post-financeRepDetailList-bd28ba599286.json`, both `get-publicReportList-*.html` and all three
+> `post-retrieveReport-*.html`.
+>
+> **The HTML reports carried more than the candidate's own details.** The rendered C-5 prints the
+> candidate's mailing address, email address and telephone number, *and the campaign treasurer's
+> home address*. The treasurer is a private individual who is not the subject of this project at
+> all. The campaign bank's branch address was scrubbed alongside it, though a bank branch is not a
+> person: "no address-shaped string survives in this fixture set" is an invariant a guard can
+> hold, and "no address except the ones we judged institutional" is an invariant that decays into
+> an argument.
+>
+> **Nothing was dropped; everything was replaced.** No key was removed and no field changed type.
+> A null stayed null, an empty string stayed empty, and a populated field stayed populated — the
+> one address record with no `addrLn1`, no `city` and no `zip5` still has all three as `null`, so
+> the parser's "not filed" paths run exactly as often as before. Key order is unchanged. The
+> substitution is one-to-one and stable across files, so a candidate who appears in the roster and
+> again inside a report still carries the same synthetic address in both, and a test that
+> correlates them still correlates something.
+>
+> **Names, dates and amounts are untouched**, on the same reasoning as the donor scrub: a
+> candidate's name is the disclosure. So are `resCountyDescr`, party, office and election year.
+>
+> The synthetic vocabulary, so it is recognisable on sight: `NNN Example Ave`,
+> `Fixtureville`, `MT 00000`, `personN@example.invalid`, and `(406) 555-01NN` — the 555-01xx block
+> reserved for fiction. The one remaining thing in these files that *looks* like a telephone number
+> is `(999) 999-9999`, a jQuery input-mask template on every CERS page. It is markup, not a number.
+>
+> `record.ts` now scrubs **every** recorded response rather than only the schedule endpoint, and by
+> shape rather than only by field name (`scrubResponsePii`), so a re-record produces synthetic
+> contact details wherever they appear. The adapter under recording still sees the live bytes.
 
 **Fetched:** 2026-08-10, recorded at `2026-08-10T05:33:51.497Z` UTC
 **Host:** `https://cers-ext.mt.gov/CampaignTracker`
@@ -101,38 +142,44 @@ produced the same filename and one silently overwrote the other. The digest is n
 | 302 | GET | `/public/search/candidateSearch` | 0 | `get-candidateSearch-34cdcb6f59a6.html` |
 | 200 | GET | `/public/search;jsessionid=…` | 159,217 | `get-search-d884ef730aa2.html` |
 | 200 | POST | `/public/searchResults/searchCandidates` | 115,053 | `post-searchCandidates-513914c6b3ea.html` |
-| 200 | GET | `/public/searchResults/listCandidateResults` | 200,080 | `get-listCandidateResults-9a8c8f9ec18c.json` |
+| 200 | GET | `/public/searchResults/listCandidateResults` | ⚑ 201,761 | `get-listCandidateResults-9a8c8f9ec18c.json` |
 | 302 | POST | `/public/publicReportList/retrieveCampaignReports` `candidateId=22048` | 0 | `post-retrieveCampaignReports-948c6adc0a39.html` |
-| 200 | GET | `/public/publicReportList` | 39,968 | `get-publicReportList-75505b65343e.html` |
-| 200 | GET | `/public/publicReportList/listFinanceReports` | 27,592 | `get-listFinanceReports-4877e49806ad.json` |
+| 200 | GET | `/public/publicReportList` | ⚑ 39,967 | `get-publicReportList-75505b65343e.html` |
+| 200 | GET | `/public/publicReportList/listFinanceReports` | ⚑ 27,628 | `get-listFinanceReports-4877e49806ad.json` |
 | 302 | POST | `/public/publicReportList/retrieveCampaignReports` `candidateId=22095` | 0 | `post-retrieveCampaignReports-0fcb60b8cce7.html` |
-| 200 | GET | `/public/publicReportList` | 39,961 | `get-publicReportList-d4821923a9ab.html` |
-| 200 | GET | `/public/publicReportList/listFinanceReports` | 5,669 | `get-listFinanceReports-349392e3ab28.json` |
-| 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22048` `reportId=80259` | 93,209 | `post-retrieveReport-e792869162a2.html` |
+| 200 | GET | `/public/publicReportList` | ⚑ 39,965 | `get-publicReportList-d4821923a9ab.html` |
+| 200 | GET | `/public/publicReportList/listFinanceReports` | ⚑ 5,696 | `get-listFinanceReports-349392e3ab28.json` |
+| 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22048` `reportId=80259` | ⚑ 93,214 | `post-retrieveReport-e792869162a2.html` |
 | 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=individual` | ⚑ 9,734 | `post-financeRepDetailList-adb3ca5d26b2.json` |
 | 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | ⚑ 4,382 | `post-financeRepDetailList-d2b436e41223.json` |
-| 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22048` `reportId=79145` | 93,201 | `post-retrieveReport-5cfd9a2e8b6d.html` |
+| 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22048` `reportId=79145` | ⚑ 93,206 | `post-retrieveReport-5cfd9a2e8b6d.html` |
 | 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=individual` | ⚑ 6,489 | `post-financeRepDetailList-3b8dd35e8113.json` |
-| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | ⚑ 3,337 | `post-financeRepDetailList-bd28ba599286.json` |
-| 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22095` `reportId=80406` | 93,160 | `post-retrieveReport-0469d2716aaf.html` |
+| 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | ⚑ 3,338 | `post-financeRepDetailList-bd28ba599286.json` |
+| 200 | POST | `/public/viewFinanceReport/retrieveReport` `candidateId=22095` `reportId=80406` | ⚑ 93,165 | `post-retrieveReport-0469d2716aaf.html` |
 | 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=individual` | 2 | `post-financeRepDetailList-50b793686b2c.json` |
 | 200 | POST | `/public/viewFinanceReport/financeRepDetailList` `listName=expendOther` | 2 | `post-financeRepDetailList-f7b2e5c34d8a.json` |
 
 ## Four things a reader should know about this data
 
-**It contained personal information that is part of a public filing, and the donor half of it has
-been removed.** The original recording carried, on every contribution row, the donor's street
-address, occupation and employer; and in the roster's `personDTO`, candidates' home addresses,
-personal email addresses and home and mobile telephone numbers.
+**It contained personal information that is part of a public filing, and all of it has been
+removed.** The original recording carried, on every contribution row, the donor's street address,
+occupation and employer; in the roster's and the report list's `personDTO`, candidates' mailing and
+home addresses, personal email addresses and home, work and mobile telephone numbers; and in the
+rendered C-5 HTML, the candidate's contact details and the campaign treasurer's home address.
 
 The first draft of this note argued that storing it was right — *provenance is the product* — and
 that republishing was the separate decision. That argument was wrong by half. It conflated **what
 we may publish** with **what we may hold**, and only the first was ever in question. Being entitled
 to read a donor's home address off a public filing is not the same as being right to keep a copy of
 it, and a copy in a git repository is the least revocable copy there is. The operator's ruling is
-that we do not: the donor fields are scrubbed (see the notice at the top of this file) and
-migration 043 dropped the columns that received them. The roster's `personDTO` is still here and is
-still an open question — nothing reads it any more, but nothing has removed it either.
+that we do not: the donor fields are scrubbed (see the notices at the top of this file) and
+migration 043 dropped the columns that received them. The candidate and treasurer contact details
+went in the second pass, and a candidate being a public figure did not save them — a candidate's
+home telephone number is not public-interest data and this project has no use for it.
+
+**These bytes are still in this repository's git history.** Scrubbing the working tree does not
+unpublish what was committed on 2026-08-10. Purging history is the operator's decision and was
+deliberately not taken here; no commit has been rewritten, rebased or force-pushed.
 
 **The roster bytes are not byte-stable between sweeps.** Two recordings twenty minutes apart both
 returned exactly 200,080 bytes with different SHA-256 digests, so the content address will not

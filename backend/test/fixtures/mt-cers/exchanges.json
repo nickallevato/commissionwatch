@@ -50,7 +50,7 @@
       "contentType": "application/json;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 200080,
+      "byteSize": 201761,
       "file": "get-listCandidateResults-9a8c8f9ec18c.json"
     },
     {
@@ -74,7 +74,7 @@
       "contentType": "text/html;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 39968,
+      "byteSize": 39967,
       "file": "get-publicReportList-75505b65343e.html"
     },
     {
@@ -86,7 +86,7 @@
       "contentType": "application/json;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 27592,
+      "byteSize": 27628,
       "file": "get-listFinanceReports-4877e49806ad.json"
     },
     {
@@ -110,7 +110,7 @@
       "contentType": "text/html;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 39961,
+      "byteSize": 39965,
       "file": "get-publicReportList-d4821923a9ab.html"
     },
     {
@@ -122,7 +122,7 @@
       "contentType": "application/json;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 5669,
+      "byteSize": 5696,
       "file": "get-listFinanceReports-349392e3ab28.json"
     },
     {
@@ -134,7 +134,7 @@
       "contentType": "text/html;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 93209,
+      "byteSize": 93214,
       "file": "post-retrieveReport-e792869162a2.html"
     },
     {
@@ -170,7 +170,7 @@
       "contentType": "text/html;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 93201,
+      "byteSize": 93206,
       "file": "post-retrieveReport-5cfd9a2e8b6d.html"
     },
     {
@@ -194,7 +194,7 @@
       "contentType": "application/json;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 3337,
+      "byteSize": 3338,
       "file": "post-financeRepDetailList-bd28ba599286.json"
     },
     {
@@ -206,7 +206,7 @@
       "contentType": "text/html;charset=UTF-8",
       "location": null,
       "setCookies": [],
-      "byteSize": 93160,
+      "byteSize": 93165,
       "file": "post-retrieveReport-0469d2716aaf.html"
     },
     {
