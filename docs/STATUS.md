@@ -1,6 +1,7 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after landing P5 (the agenda diff timeline) and P6 (full-text search).
+> Last updated: 2026-08-10, after landing P7 (the public-records request generator). Earlier the
+> same day: P5 (the agenda diff timeline) and P6 (full-text search).
 > Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
 > 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
@@ -199,6 +200,103 @@ production holding zero rows, that is the ordinary case here rather than the edg
 Counts after P6: backend **721 tests / 177 suites**, frontend **211 / 27**, both green, zero lint
 errors. `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## P7 — the public-records request generator has landed, and it refuses
+
+Working from `docs/superpowers/specs/2026-08-09-phase-2-design.md` § P7 and
+`docs/superpowers/plans/2026-08-10-records-request-generator.md`. Migration 036.
+
+### ⛔ BLOCKING OPERATOR TASK — `jurisdiction_records_law` is empty, deliberately
+
+**Nobody can draft a records request for Bozeman or Gallatin County until a person reads a
+statute.** The table ships with no rows and the generator refuses rather than guessing, so the
+feature is complete and inert. This is the intended state, not a defect.
+
+What has to happen, once, by a human:
+
+1. Read **Mont. Code Ann. § 2-6-1006** at `mca.legmt.gov` — Title 2, Ch. 6, Part 10. Section URLs
+   map the last digit ×10, so §2-6-1006 is `section_0060/0020-0060-0100-0060.html`.
+2. Find the subsection that governs **local governments**. The figures everyone quotes —
+   acknowledge within 5 business days, respond within 90 days, requester has 30 days to answer a
+   clarification — are stated for *"an executive branch agency"* and *"a public agency that is not
+   a local government."* **A city and a county are neither.** A letter citing "5 business days" to
+   Gallatin County would assert an obligation that does not apply to it.
+3. Note that §2-6-1006 and §2-6-1009 are both marked **(Temporary)** in the 2025 edition: they
+   carry effective and termination dates and will be superseded.
+4. `INSERT` one row per jurisdiction with `statute_citation`, `statute_url`, whichever of
+   `acknowledge_days` / `respond_days` the subsection actually establishes (leave them NULL if it
+   does not — the letter then states no period, which is the honest output), the custodian if
+   known, `verified_on` = the date you read it, and `verified_by` = your operator id.
+
+**Do not seed this table from the figures above.** They are in migration 036's comment as the
+example of the failure, right next to a paragraph asking you not to. Seeding them would make the
+feature appear to work while producing letters that are confidently wrong, which is worse than the
+feature not working at all.
+
+`/admin/records` shows the state of every jurisdiction, and warns when a `verified_on` is more than
+a year old.
+
+### What was built
+
+**The generator drafts; it never sends.** It produces letter text and, on the operator surface
+only, a `records_requests` row in `draft`. There is no email path, no dispatcher call and no queue
+write anywhere on the P7 path. Two tests hold that: one reads every file on the path and fails on
+an import from `services/delivery`, `email-delivery`, `services/notification` or `resend`; the
+other counts `deliveries` and `notifications` either side of a generation on both surfaces. The
+application must not transmit legal correspondence on anyone's behalf, and the operator sending it
+themselves is also the only arrangement under which the letter is honestly theirs.
+
+**Gaps are derived, never listed.** Four queries: a `completed` meeting with a past date, no
+`minutes_url` and no `minutes` document; an agenda item whose text names an exhibit, attachment,
+appendix or enclosure where the meeting holds no `attachment`/`packet`/`resolution`/`ordinance`
+document; a source with `enabled = false`; a `fetch` job in `failed` or `blocked` whose target
+carries a URL. Nothing enumerates a jurisdiction, a meeting or a source, so a new commission
+appears without a deploy and a filled gap disappears without anyone pruning a list — the test
+checks the same meeting before and after its minutes arrive.
+
+**Two of the four kinds are operator-only.** A disabled source and an incomplete fetch describe
+*our ingestion*, not the public record; publishing them would present our operational state as
+though it were the county's. The other two pass through `whereMeetingPublished` in public scope,
+and the gap id a caller hands back is re-resolved in the same scope — so an operator-scope id is
+not a way through the wall. Asserted in both directions, withheld then published.
+
+**`letter.ts` is a pure function**: no database handle, no clock, no I/O. That is what lets the
+public and operator surfaces be proved identical by **string equality** rather than by inspection.
+
+**The letter alleges nothing.** Every gap kind is rendered and scanned against a list of
+accusatory terms — failure, delay, refusal, withheld, wrongdoing, and twenty more. A request is
+not an accusation. (The scan is word-bounded: "late" must not match "related", or the test would
+be forbidding English rather than accusation.)
+
+`GET /api/public-records/gaps` and `POST /api/public-records/letter` are public and write nothing.
+`GET /api/admin/records/gaps`, `/law` and `POST /draft-request` are behind `requireOperator`;
+`draft-request` writes the row. Both refuse with **409** — the caller's request is well formed, our
+record is incomplete, and saying so is the point.
+
+### Three corrections to the spec
+
+- **The fee paragraph carries no citation.** The spec asked for "a fee-waiver request where
+  applicable under § 2-6-1006". That section is the fee section, and its fee provisions carry the
+  same local-government split as its deadlines. So the letter *asks* for a waiver — a request needs
+  no legal authority — and asserts no entitlement to one. When a jurisdiction's fee provision is
+  verified it belongs in `jurisdiction_records_law`, not in a string literal.
+- **Mockup screen 06's "statutory guide" figure was invented**, as the spec already recorded.
+  `response_due_at` is now set only when the jurisdiction records a response period; an unknown
+  deadline renders as no deadline, never as a plausible number.
+- **`jurisdiction_id` is the primary key** of `jurisdiction_records_law`, not a plain foreign key.
+  The absence of a row is the refusal condition, so making it the identity means "is there a law
+  row?" cannot find two disagreeing answers.
+
+### One trap this introduced
+
+`listJurisdictionLaw` left-joins the law columns onto `jurisdictions`. Selecting
+`law.jurisdiction_id` alongside `j.id as jurisdiction_id` makes the **second** column win in the
+row object, so every jurisdiction *without* a law row came back with a null id and vanished from
+the console — the exact rows the console exists to show. The law select deliberately omits
+`jurisdiction_id` and the caller supplies it.
+
+Counts after P7: backend **782 tests / 202 suites**, frontend **222 / 28**, both green, zero lint
+errors. `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
@@ -361,7 +459,7 @@ Ordered by how much each blocks the product being real.
 
 1. ~~**Nothing ingests.**~~ Closed 2026-08-09 by P1. The scheduler is wired, a real sweep has run, and the pipeline lands meetings, documents, artifacts and agenda items. Remaining: enable the source on the live host, and move the body list out of the adapter into `ingestion_sources.config`.
 2. **W3 findings engine and review queue.** The core product. `anomaly_flags.review_state` now exists (B-d) and is the column the queue generalises: records-derived flags are written `held` and the public API filters them out. Generated narrative, mechanical claim-to-citation binding, operator approval before anything naming a person publishes. Not started. Spec exists in the production design.
-3. ~~**Bozeman adapter.**~~ Closed 2026-08-09 by P4. `backend/src/services/ingestion/adapters/bozeman-granicus.ts`, registered **disabled**, swept for real (below). `bozemanmt.gov` is still a blanket Akamai deny and is never fetched. Outstanding from the same backlog item: the **public-records-request page**, which is P7 and is not built.
+3. ~~**Bozeman adapter.**~~ Closed 2026-08-09 by P4. `backend/src/services/ingestion/adapters/bozeman-granicus.ts`, registered **disabled**, swept for real (below). `bozemanmt.gov` is still a blanket Akamai deny and is never fetched. ~~Outstanding from the same backlog item: the **public-records-request page**~~ — closed 2026-08-10 by P7, though it can draft nothing until `jurisdiction_records_law` is populated. See above.
 4. **MT CERS campaign finance** (`cers-ext.mt.gov/CampaignTracker`). Not started.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.
 6. ~~**W7 delivery channels.**~~ Built. Channels, routes, encryption, the Discord transport, and — as of B-e — cadence, SMS, and a self-serve subscriber surface on the same substrate. Nothing dispatches product events yet, because nothing ingests.
@@ -427,6 +525,11 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
 
 ## Next steps, in order
 
+0. **Populate `jurisdiction_records_law` for Bozeman and Gallatin County.** Twenty minutes of
+   reading, and it is the difference between a letter that is right and a letter that is
+   confidently wrong. It blocks P7 entirely and nothing else blocks it. Full instructions in the
+   P7 section above. **This one cannot be delegated to an agent** — it is a person reading a
+   statute and putting their name against the date.
 1. **Enable Gallatin on the live host and install the backup cron.** The code for both landed
    2026-08-09; neither is switched on in production. `npm run sweep -- --adapter gallatin-civicplus
    --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
@@ -440,9 +543,10 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    already take a `bodies` option; nothing reads it from the database yet. A city standing up a
    committee should not need a deploy.
 4. **W3 findings engine and review queue**, with admin auth. The core product, and the highest-stakes component.
-5. ~~**Bozeman Granicus adapter**~~, landed 2026-08-09 and registered disabled. The
-   **public-records-request page** that goes with it is still outstanding — it is P7, and the
-   vendor-robots exception is written on the promise that the statutory route is offered alongside.
+5. ~~**Bozeman Granicus adapter**~~, landed 2026-08-09 and registered disabled. ~~The
+   **public-records-request page** that goes with it is still outstanding~~ — landed 2026-08-10 as
+   P7. The exception is now written on a promise that has a page behind it, and
+   `MethodologyPage.test.tsx` asserts the link is there as part of the disclosure suite.
 6. ~~**Status page** reading `ingestion_runs`~~ — closed 2026-08-10 by P2 for the *operator*.
    `/admin/sources` reads the runs and marks a source past its expected interval as Suspect. A
    **public** status page is still outstanding.
