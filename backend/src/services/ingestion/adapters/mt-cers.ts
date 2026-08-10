@@ -166,18 +166,24 @@ export interface DataTablesEnvelope<T> {
  * **`resCountyDescr` is the candidate's county of residence, not the
  * jurisdiction of the office.** CERS has no city or municipality field at all —
  * the 275-entry office select contains no city names — so "is this a Bozeman
- * candidate?" can only be answered from the residence address, and that is a
- * heuristic rather than a key. The spike found Belgrade, West Yellowstone,
- * Three Forks, Manhattan and Gallatin Gateway addresses inside the same result
- * set, and at least one Belgrade address against a `Councilman` candidacy. This
- * adapter therefore stores the city it read and never asserts a jurisdiction
- * CERS did not state.
+ * candidate?" could only be answered from the residence address, which was a
+ * heuristic rather than a key: the spike found candidacies from five different
+ * Gallatin towns inside one result set, including one against a `Councilman`
+ * seat in another town. This adapter never asserts a jurisdiction CERS did not
+ * state, and it no longer reads the address that heuristic was built on.
+ *
+ * **There is deliberately no `candidateAddress` here.** CERS serves one, and
+ * this type used to parse it and put it in `DocumentRef.metadata`, from where
+ * it round-tripped into `ingestion_jobs.target.metadata` — so the sweep was
+ * writing a candidate's residence address into this project's database on every
+ * run. That is exactly what the operator's directive forbids, public record or
+ * not. A county is the jurisdiction a candidacy is filed in and stays; a street
+ * address is where a person sleeps and does not.
  */
 export interface CersCandidate {
   candidateId: number;
   entId: number;
   candidateName: string;
-  candidateAddress: string | null;
   officeCode: string | null;
   officeTitle: string | null;
   candidateTypeCode: string | null;
@@ -322,7 +328,8 @@ export function toCandidate(row: Record<string, unknown>): CersCandidate {
     candidateId: requiredNumber(row.candidateId, 'candidateId'),
     entId: requiredNumber(row.entId, 'entId'),
     candidateName: optionalString(row.candidateName) ?? '',
-    candidateAddress: optionalString(row.candidateAddress),
+    // `row.candidateAddress` is present in the response and is deliberately not
+    // read. Dropping PII at the parser is the only place it stays dropped.
     officeCode: optionalString(row.officeCode),
     officeTitle: optionalString(row.officeTitle),
     candidateTypeCode: optionalString(row.candidateTypeCode),
@@ -821,9 +828,6 @@ export class CersAdapter implements SourceAdapter {
           ? {}
           : { campaignType: candidate.candidateTypeCode }),
         ...(candidate.partyDescr === null ? {} : { party: candidate.partyDescr }),
-        ...(candidate.candidateAddress === null
-          ? {}
-          : { candidateAddress: candidate.candidateAddress }),
         ...(report.formTypeCode === null ? {} : { formType: report.formTypeCode }),
         ...(report.statusDescr === null ? {} : { reportStatus: report.statusDescr }),
         ...(report.fromDateStr === null ? {} : { periodFrom: report.fromDateStr }),
