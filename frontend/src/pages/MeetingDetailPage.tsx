@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  useAgendaDiff,
   useAgendaItems,
   useMeeting,
   useMeetingDocuments,
@@ -11,6 +12,7 @@ import { useMeetingAnomalies } from "@/hooks/useAnomalies";
 import { useMembers } from "@/hooks/useMembers";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RundownViewer } from "@/components/RundownViewer";
+import { AgendaDiffTimeline } from "@/components/AgendaDiffTimeline";
 import { flagTypeLabels } from "@/components/AnomalyCard";
 import { SeverityMark, severityRank } from "@/components/AnomalyBadge";
 import type { AnomalyFlag, Meeting, MeetingDocument, Vote, VoteValue } from "@/types";
@@ -175,6 +177,7 @@ export function MeetingDetailPage() {
   const votesQuery = useMeetingVotes(id);
   const anomaliesQuery = useMeetingAnomalies(id);
   const documentsQuery = useMeetingDocuments(id);
+  const diffQuery = useAgendaDiff(id);
   const membersQuery = useMembers();
 
   const meeting = meetingQuery.data;
@@ -514,6 +517,13 @@ export function MeetingDetailPage() {
           </p>
         )}
       </section>
+
+      {/* Document history ---------------------------------------------- */}
+      <AgendaDiffTimeline
+        timelines={diffQuery.data}
+        isLoading={diffQuery.isLoading}
+        isError={diffQuery.isError}
+      />
     </div>
   );
 }

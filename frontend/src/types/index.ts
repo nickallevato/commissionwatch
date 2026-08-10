@@ -88,6 +88,61 @@ export interface MeetingDocument {
   updated_at: string;
 }
 
+/* -------------------------------------------- P5 · agenda diff timeline */
+
+/**
+ * One agenda item as extracted from one artifact, mirroring
+ * `document_versions.item_snapshot`. Deliberately narrow: the description is
+ * the part most likely to differ for formatting reasons alone.
+ */
+export interface VersionItem {
+  item_number: number;
+  title: string;
+}
+
+export type AgendaChangeKind = "added" | "removed" | "retitled";
+
+export interface AgendaChange {
+  kind: AgendaChangeKind;
+  item_number: number;
+  title: string;
+  /** Present only on `retitled`. */
+  previous_title?: string;
+}
+
+export interface DocumentVersionSummary {
+  id: string;
+  version_no: number;
+  first_seen_at: string;
+  sha256: string;
+  byte_size: number;
+  /**
+   * `null` means the version was never extracted — a Word document, an artifact
+   * backfilled from before version history existed. It is **not** zero items,
+   * and the UI must never render it as one.
+   */
+  item_count: number | null;
+}
+
+export interface AgendaDiffPair {
+  from: DocumentVersionSummary;
+  to: DocumentVersionSummary;
+  /** `null` when either side was never extracted, so no diff can be honest. */
+  changes: AgendaChange[] | null;
+  from_items: VersionItem[] | null;
+  to_items: VersionItem[] | null;
+}
+
+export interface DocumentTimeline {
+  document_id: string;
+  title: string;
+  document_type: string;
+  url: string;
+  versions: DocumentVersionSummary[];
+  /** One entry per consecutive pair. Empty when the document has one version. */
+  diffs: AgendaDiffPair[];
+}
+
 export interface RundownSheet {
   id: string;
   meeting_id: string;

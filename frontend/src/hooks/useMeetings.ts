@@ -3,6 +3,7 @@ import { fetchList, fetchOne } from "@/lib/api";
 import type {
   AgendaItem,
   Commission,
+  DocumentTimeline,
   Jurisdiction,
   Meeting,
   MeetingDocument,
@@ -90,6 +91,24 @@ export function useMeetingDocuments(meetingId: string) {
     queryFn: async () => {
       const res = await fetchList<MeetingDocument>(
         `/meetings/${meetingId}/documents`,
+      );
+      return res.data;
+    },
+    enabled: !!meetingId,
+  });
+}
+
+/**
+ * P5 — every version of every document on a meeting, with the diff between
+ * each consecutive pair. Most meetings return one version per document and no
+ * diffs at all, which is a complete answer.
+ */
+export function useAgendaDiff(meetingId: string) {
+  return useQuery({
+    queryKey: ["meetings", meetingId, "agenda-diff"],
+    queryFn: async () => {
+      const res = await fetchList<DocumentTimeline>(
+        `/meetings/${meetingId}/agenda-diff`,
       );
       return res.data;
     },
