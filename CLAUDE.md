@@ -86,5 +86,12 @@ Backend tests need PostgreSQL: `docker compose up -d db`.
 ## Deliberately dormant
 
 Alert subscriptions, the digest scheduler, and email delivery exist in `backend/src/services/`.
-They must keep compiling and passing tests, but send nothing until the review queue ships —
-emailing generated claims about named officials would bypass the publication gate.
+They must keep compiling and passing tests, and they still send no product events.
+
+The review queue **shipped on 2026-08-10** (`docs/STATUS.md` § B-a), so the gate they were waiting
+on now exists. Turning delivery on is a separate, deliberate change — not a consequence of this
+one. What is already true is the narrower guarantee: only a `published` finding can be notified
+about. `detectAnomalies` emits published flags only, and `NotificationService` filters its own
+re-query, because `IMMEDIATE_SEVERITIES` is exactly the severities the default review threshold
+holds — without both filters the pipeline would withhold a generated claim from the site and
+email it in the same breath.

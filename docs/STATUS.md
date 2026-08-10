@@ -1,7 +1,8 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after landing the **public status page** and a sweep of the known
-> defects. Earlier the same day: P7 (the public-records request generator), P5 (the agenda diff
+> Last updated: 2026-08-10, after landing the **findings review queue** (B-a and B-b's
+> replacement) — the change that made publishing a finding possible at all. Earlier the same day:
+> the **public status page** and a sweep of the known defects; and before those: P7 (the public-records request generator), P5 (the agenda diff
 > timeline) and P6 (full-text search).
 > Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
 > 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
@@ -18,6 +19,8 @@ Working from `docs/superpowers/specs/2026-08-09-archive-salvage-design.md`.
 | A1 · Operator authentication | **Landed.** Migrations 022–023, scrypt passwords, server-side sessions in an httpOnly cookie, `/api/admin/*` closed by default, CORS split. |
 | A3 · Embedding client | **Withdrawn.** Nothing consumes embeddings; see the spec. The want underneath it — *find me everything about this* — is answered by P6's Postgres full-text search instead. |
 | B-e · Subscriptions and delivery | **Landed.** Migrations 024–025. A subscription is a destination, a filter and a cadence. SMS added with consent and a per-day cap. |
+| B-a · Review queue | **Landed 2026-08-10.** Migration 038. `approval_requests`, a single severity threshold in place of `execution_policies`, claim-to-citation binding, and operator approval as the only thing that makes a finding public. See below. |
+| B-b · Execution policies | **Collapsed, as specced.** Replaced by `review_policy` — one row, one threshold. Not ported. |
 | B-d · Records requests | **Landed.** Migrations 026–027. A hand-obtained document takes the identical path as a scraped one, and records-derived flags are held, never published. |
 
 **The dispatcher still sends no email.** That is deliberate and load-bearing.
@@ -28,8 +31,10 @@ back-fill of those rows onto `delivery_channels` incapable of double-sending.
 dispatcher and dropping `alert_subscriptions` is a separate change, and the two
 must happen in the same commit.
 
-Per `CLAUDE.md`, nothing in the delivery layer sends product events yet —
-including SMS. The substrate exists; the review queue is still what opens it.
+Per `CLAUDE.md`, nothing in the delivery layer sends product events yet — including SMS. The
+substrate exists. **The review queue landed 2026-08-10** (B-a, below), so the gate it was waiting
+on is now built; cutting delivery over to published findings is a separate, deliberate change, and
+the notification path is already filtered so a held finding can never be sent.
 
 **There is no operator account until one is seeded.** The backend creates the first
 operator at boot from `OPERATOR_SEED_EMAIL` / `OPERATOR_SEED_PASSWORD` /
@@ -351,6 +356,80 @@ Counts after the status page and the defect sweep: backend **795 tests / 203 sui
 defects. Frontend lint: **0 problems**, down from 10 warnings.
 `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## B-a — the review queue has landed, and a finding can be published
+
+Working from `docs/superpowers/specs/2026-08-09-archive-salvage-design.md` §§ B-a and B-b, and
+`docs/superpowers/plans/2026-08-10-review-queue.md`. Migration 038.
+
+**Until this landed the product could not publish a finding at all.** No code path anywhere set
+`anomaly_flags.review_state` to `published`, so records-derived and person-naming flags were
+written `held` and stayed held forever. The invariant "nothing naming a person auto-publishes"
+was enforced by there being no publish path. Safe, and useless.
+
+`approval_requests` is the archive's table with four changes. The reviewer is an `operators` row,
+not a generic `users` one — there is no `users` table here. `requested_by_agent_id` is **dropped**:
+it referenced `agent_registry`, part of the orchestration framework that was never adopted.
+`meeting_id` is **nullable**, because migration 027 made a flag's meeting nullable and added
+`artifact_id`, and those records-derived flags are precisely the ones that are always held —
+`NOT NULL` would have made them unqueueable. The unique constraint on `anomaly_flag_id` is kept.
+
+**What an expiry means here, and it is not what the archive meant.** A request past `expires_at`
+and still pending is *overdue*, and that is all: the queue badges it, sorts it first, the count
+shows on the console, and the flag stays `held`. There is no `expired` status, no sweeper, and no
+path from elapsed time to `published`. The archive had `expireStaleApprovals()` writing a terminal
+status from a timer, and two objections killed it — a status set by a clock reads in the log
+exactly like a decision a person made, and a status only a background job writes silently means
+"the job ran" rather than "the window passed". Overdue is derived at read time and cannot drift.
+
+**`review_policy` is B-b's replacement: one row, one severity threshold, default `high`.** Not
+`execution_policies` — with one operator every manual stage resolves to the same person. The
+threshold can only *add* holds: a rule that held a finding because it names someone on the roster
+wins at any threshold, which is what keeps the person-naming invariant true regardless of
+configuration. This is a behaviour change and is meant to be: `emergency_session`,
+`closed_door_vote`, `quorum_issue` and an over-30-day `missing_minutes` no longer auto-publish.
+Production holds zero flags, so nothing that was public stopped being public.
+
+**Approval refuses a finding that cites no stored artifact**, with a 409. Citations resolve from
+the flag's own `artifact_id`, from any 64-hex value under a metadata key ending in `sha256` — how
+P5's `last_minute_agenda_change` carries `from_sha256`/`to_sha256` — and from the meeting's stored
+documents through `document_versions`. The third route is what makes a meeting-derived finding
+approvable at all, and it is honest: the meeting record the claim describes was extracted from
+those bytes. A meeting with no stored artifact has nothing behind its findings and they cannot be
+approved. That is the correct refusal, not a gap.
+
+**Rejection leaves the finding `held`.** There is deliberately no `rejected` review state: the
+wall keys on `published`, so one rule covers both the undecided and the refused, and there is no
+second failure mode to keep in step.
+
+**Edit-with-reason is scanned for motive.** It is the one place a human types free text that will
+be published, and the lexicon is deliberately *narrower* than P7's letter scan — a finding may say
+minutes were published ninety days later, because that is the record stated as arithmetic. What is
+forbidden is the assertion that someone meant it, profited by it, or broke a law doing it.
+
+**Every decision appends to `record_corrections`** through the same writer publication and
+correction already use. Migration 038 widens that table's `target_table` CHECK to admit
+`anomaly_flags` and `review_policy`. One log, not two. Its rollback narrows the CHECK again and
+will fail loudly once a decision is logged, because the table forbids DELETE — that is the
+append-only guarantee working.
+
+**Two holes closed on the way.** `GET /api/anomalies` filtered on `review_state` alone, so an
+auto-published flag on a meeting an operator had not published leaked the meeting's existence and
+a sentence of its content — through the one public route that does not take a meeting id and
+therefore cannot be reached only by guessing one. `whereFindingPublic` in `publication.ts` is now
+the single rule and adds the meeting condition. And `IMMEDIATE_SEVERITIES` in the notification
+service is exactly `critical` and `high` — the severities the default threshold holds — so
+without filtering the `anomaly.detected` emit *and* the service's own re-query, the pipeline
+would have withheld a generated claim from the site and emailed it in the same breath.
+
+`/admin/review` puts the evidence above the buttons rather than behind a disclosure, disables
+approval on an unsourced finding and says why, reproduces the API's refusals verbatim, and offers
+no bulk action — approving in a batch is approving without reading, on the one screen whose whole
+purpose is that somebody read it.
+
+Counts after B-a: backend **827 tests / 214 suites**, frontend **307 / 33**, both green. Backend
+lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+`deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
@@ -514,7 +593,10 @@ Delete the two `@blocked` lines from the `commissionwatch.bmux.sh` block in `you
 Ordered by how much each blocks the product being real.
 
 1. ~~**Nothing ingests.**~~ Closed 2026-08-09 by P1. The scheduler is wired, a real sweep has run, and the pipeline lands meetings, documents, artifacts and agenda items. Remaining: enable the source on the live host, and move the body list out of the adapter into `ingestion_sources.config`.
-2. **W3 findings engine and review queue.** The core product. `anomaly_flags.review_state` now exists (B-d) and is the column the queue generalises: records-derived flags are written `held` and the public API filters them out. Generated narrative, mechanical claim-to-citation binding, operator approval before anything naming a person publishes. Not started. Spec exists in the production design.
+2. **W3 findings engine.** ~~and review queue~~ — the **review queue landed 2026-08-10** (B-a,
+   above): `approval_requests`, a single severity threshold, claim-to-citation binding, and
+   operator approval as the only thing that makes a finding public. What remains of this item is
+   the *generated narrative* — a finding today is the detector's own sentence, not composed prose.
 3. ~~**Bozeman adapter.**~~ Closed 2026-08-09 by P4. `backend/src/services/ingestion/adapters/bozeman-granicus.ts`, registered **disabled**, swept for real (below). `bozemanmt.gov` is still a blanket Akamai deny and is never fetched. ~~Outstanding from the same backlog item: the **public-records-request page**~~ — closed 2026-08-10 by P7, though it can draft nothing until `jurisdiction_records_law` is populated. See above.
 4. **MT CERS campaign finance** (`cers-ext.mt.gov/CampaignTracker`). Not started.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.
@@ -679,7 +761,9 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    construction is synchronous and database-free, `config.bodies` is written as slugs only and is
    lossy for both adapters, and `registerSource` never updates an existing row. See the declined
    list under Known defects for the detail before starting.
-4. **W3 findings engine and review queue**, with admin auth. The core product, and the highest-stakes component.
+4. ~~**W3 review queue**~~ — landed 2026-08-10, see B-a above. What remains under W3 is the
+   **generated narrative**: a finding is currently the detector's own sentence. The queue, the
+   threshold, the citation binding and the audit trail are all in place to receive one.
 5. ~~**Bozeman Granicus adapter**~~, landed 2026-08-09 and registered disabled. ~~The
    **public-records-request page** that goes with it is still outstanding~~ — landed 2026-08-10 as
    P7. The exception is now written on a promise that has a page behind it, and
