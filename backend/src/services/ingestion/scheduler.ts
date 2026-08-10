@@ -187,8 +187,17 @@ export function parseSourceRow(raw: unknown): SourceRow {
   };
 }
 
-const SUCCESS_KEYS = ["discovered", "fetched", "parsed", "analyzed"] as const;
-const FAILURE_KEYS = ["failed", "blocked"] as const;
+/**
+ * The `ingestion_runs.counts` keys that mean work reached the database, and the
+ * ones that mean it did not.
+ *
+ * Exported because the console totals lifetime records from the same two lists.
+ * If the console counted a different set, a source could read "0 ingested" on
+ * one screen and "succeeded" on another, which is the exact disagreement a
+ * transparency project cannot afford to have with itself.
+ */
+export const SUCCESS_KEYS = ["discovered", "fetched", "parsed", "analyzed"] as const;
+export const FAILURE_KEYS = ["failed", "blocked"] as const;
 
 /**
  * Reads a run's tallies into a terminal status.

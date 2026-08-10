@@ -128,6 +128,12 @@ export async function registerSource(
       health_status: descriptor.supportsLiveFetch ? "healthy" : "blocked",
       cron_expression: defaults.cronExpression ?? "17 7 * * *",
       expected_interval_hours: defaults.expectedIntervalHours ?? null,
+      // Why the source is off, taken from the adapter — the thing that actually
+      // knows. A disabled source stays listed in the console with this text, so
+      // "bozemanmt.gov is a blanket Akamai deny" lives where an operator looks
+      // rather than in somebody's memory. Null when the source starts enabled:
+      // there is then no reason to give.
+      disabled_reason: (defaults.enabled ?? false) ? null : (descriptor.notes ?? null),
     })
     .returning("id");
 

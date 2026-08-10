@@ -41,6 +41,24 @@ const VARCHAR_255 = 255;
 /** A description longer than this is a page of prose, not an item's subpoints. */
 const MAX_DESCRIPTION = 2000;
 
+/**
+ * How much the extractor stands behind one field of one item.
+ *
+ * Not a probability. Nothing here computes one, and a number would imply an
+ * accuracy this extractor does not have. Three levels and a stated reason say
+ * what is actually known.
+ */
+export type ConfidenceLevel = "high" | "medium" | "low";
+
+export interface FieldConfidence {
+  level: ConfidenceLevel;
+  /** Why. Shown to the operator verbatim, so it describes the evidence. */
+  reason: string;
+}
+
+/** Keyed by `agenda_items` column name. Maps to `agenda_items.field_confidence`. */
+export type FieldConfidenceMap = Record<string, FieldConfidence>;
+
 export interface AgendaItemDraft {
   /** Document-wide ordinal, 1-based. Maps to `agenda_items.item_number`. */
   itemNumber: number;
@@ -52,6 +70,14 @@ export interface AgendaItemDraft {
   description: string | null;
   /** `agenda_items.category` — the section heading the item sat under. */
   category: string | null;
+  /**
+   * Per field, never per record.
+   *
+   * Seven good items and one mangled one is not a low-confidence meeting, and a
+   * record-level score would say it was — about the seven that are fine as much
+   * as about the one that is not. So the mark goes on the field that is doubtful.
+   */
+  confidence: FieldConfidenceMap;
 }
 
 /** `I.`, `IV)`, `XII.` — a marker made only of roman numeral letters. */
@@ -165,9 +191,71 @@ export function mergeOrphanMarkers(lines: string[]): string[] {
   return merged;
 }
 
+/** Whether `clamp(text, max)` would have cut something off. */
+function wasClamped(text: string, max: number): boolean {
+  return text.replace(/\s+/g, " ").trim().length > max;
+}
+
+/** A title shorter than this is a marker with almost nothing behind it. */
+const MIN_CREDIBLE_TITLE = 4;
+
+/**
+ * Marks the fields of one item that the extractor is not sure about.
+ *
+ * Every mark names its evidence. "low" here means a specific, checkable thing
+ * went wrong — the column cut the text off, or the line carried almost nothing —
+ * not a general unease. `description` is absent from the map when the item had
+ * none, because "no subpoints were printed" is not a doubt about a value.
+ */
+function assessItem(
+  draft: Pick<AgendaItemDraft, "title" | "description" | "category">,
+  evidence: { titleTruncated: boolean; descriptionTruncated: boolean; sawAgendaHeading: boolean },
+): FieldConfidenceMap {
+  const confidence: FieldConfidenceMap = {};
+
+  if (evidence.titleTruncated) {
+    confidence.title = {
+      level: "low",
+      reason: `Truncated to the ${VARCHAR_255} characters agenda_items.title holds; the document printed more.`,
+    };
+  } else if (draft.title.length < MIN_CREDIBLE_TITLE) {
+    confidence.title = {
+      level: "low",
+      reason: `The marker was followed by fewer than ${MIN_CREDIBLE_TITLE} characters.`,
+    };
+  } else if (!evidence.sawAgendaHeading) {
+    confidence.title = {
+      level: "medium",
+      reason: "The document never declared itself an agenda, so its structure is inferred.",
+    };
+  } else {
+    confidence.title = {
+      level: "high",
+      reason: "Read whole from a marked line in a document that declares itself an agenda.",
+    };
+  }
+
+  confidence.category =
+    draft.category === null
+      ? { level: "low", reason: "No section heading preceded this item in the document." }
+      : { level: "high", reason: "Taken from the section heading immediately above the item." };
+
+  if (draft.description !== null) {
+    confidence.description = evidence.descriptionTruncated
+      ? {
+          level: "low",
+          reason: `Truncated at ${MAX_DESCRIPTION} characters; the item's subpoints ran longer.`,
+        }
+      : { level: "high", reason: "The item's subpoints were captured whole." };
+  }
+
+  return confidence;
+}
+
 export function extractAgendaItems(rawLines: string[]): AgendaExtraction {
   const lines = mergeOrphanMarkers(rawLines);
   const items: AgendaItemDraft[] = [];
+  const titleTruncated: boolean[] = [];
   const descriptions: string[][] = [];
   let category: string | null = null;
   let sawAgendaHeading = false;
@@ -202,7 +290,11 @@ export function extractAgendaItems(rawLines: string[]): AgendaExtraction {
         title: clamp(text, VARCHAR_255),
         description: null,
         category,
+        // Filled once the descriptions below are joined; a mark on `description`
+        // cannot be made before the item has one.
+        confidence: {},
       });
+      titleTruncated.push(wasClamped(text, VARCHAR_255));
       descriptions.push([]);
       continue;
     }
@@ -222,8 +314,13 @@ export function extractAgendaItems(rawLines: string[]): AgendaExtraction {
 
   for (let index = 0; index < items.length; index += 1) {
     const parts = descriptions[index];
-    items[index].description =
-      parts.length === 0 ? null : clamp(parts.join(" "), MAX_DESCRIPTION);
+    const joined = parts.join(" ");
+    items[index].description = parts.length === 0 ? null : clamp(joined, MAX_DESCRIPTION);
+    items[index].confidence = assessItem(items[index], {
+      titleTruncated: titleTruncated[index],
+      descriptionTruncated: parts.length > 0 && wasClamped(joined, MAX_DESCRIPTION),
+      sawAgendaHeading,
+    });
   }
 
   return { items, sawAgendaHeading };

@@ -2,7 +2,7 @@ import type { Knex } from "knex";
 import type { AdapterRegistry } from "./adapters/registry";
 import { asDocumentKind } from "./adapters/types";
 import type { DocumentRef, MeetingRef, SourceAdapter } from "./adapters/types";
-import { extractAgendaItems } from "./agenda-items";
+import { extractAgendaItems, type FieldConfidenceMap } from "./agenda-items";
 import { extractDocumentText } from "./document-text";
 import { UnsupportedDocumentError } from "./pdf-text";
 import type { ArtifactRef, HandlerRegistry, StageResult } from "./worker";
@@ -255,7 +255,14 @@ export async function upsertMeetingDocument(
     .merge({ title: ref.title, document_type: ref.kind, updated_at: db.fn.now() });
 }
 
-/** Replaces a meeting's agenda items with `drafts`. Idempotent on ordinal. */
+/**
+ * Replaces a meeting's agenda items with `drafts`. Idempotent on ordinal.
+ *
+ * `field_confidence` is written alongside the values it describes, in the same
+ * statement, so a re-parse can never leave last parse's marks attached to this
+ * parse's text. A draft that carries no assessment writes `{}` — no marks,
+ * which is not the same as a clean bill of health and does not claim to be.
+ */
 export async function upsertAgendaItems(
   db: Knex,
   meetingId: string,
@@ -264,6 +271,7 @@ export async function upsertAgendaItems(
     title: string;
     description: string | null;
     category: string | null;
+    confidence?: FieldConfidenceMap;
   }>,
 ): Promise<number> {
   if (drafts.length === 0) return 0;
@@ -275,6 +283,7 @@ export async function upsertAgendaItems(
         title: draft.title,
         description: draft.description,
         category: draft.category,
+        field_confidence: JSON.stringify(draft.confidence ?? {}),
         created_at: db.fn.now(),
         updated_at: db.fn.now(),
       })),
@@ -284,6 +293,7 @@ export async function upsertAgendaItems(
       title: db.raw("excluded.title"),
       description: db.raw("excluded.description"),
       category: db.raw("excluded.category"),
+      field_confidence: db.raw("excluded.field_confidence"),
       updated_at: db.fn.now(),
     });
   return drafts.length;

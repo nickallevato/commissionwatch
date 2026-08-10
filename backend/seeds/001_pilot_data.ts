@@ -62,9 +62,22 @@ export async function seed(knex: Knex): Promise<void> {
     { id: GALLATIN_COMMISSION_ID, jurisdiction_id: GALLATIN_ID, name: 'Gallatin County Commission', description: 'Governing body for Gallatin County', meeting_schedule: 'Every Tuesday at 9:00 AM' },
   ]);
 
+  // `published_at` is set explicitly. Seed data is a demonstration of the
+  // *public* record, so a seeded meeting that sat unpublished would render the
+  // seeded site empty — and would say the seed was broken when in fact it was
+  // only undecided. Ingested meetings default to NULL; these are not ingested.
+  const seededPublishedAt = new Date();
   await knex('meetings').insert([
-    ...MEETINGS.bozeman.map((m) => ({ ...m, commission_id: BOZEMAN_COMMISSION_ID })),
-    ...MEETINGS.gallatin.map((m) => ({ ...m, commission_id: GALLATIN_COMMISSION_ID })),
+    ...MEETINGS.bozeman.map((m) => ({
+      ...m,
+      commission_id: BOZEMAN_COMMISSION_ID,
+      published_at: seededPublishedAt,
+    })),
+    ...MEETINGS.gallatin.map((m) => ({
+      ...m,
+      commission_id: GALLATIN_COMMISSION_ID,
+      published_at: seededPublishedAt,
+    })),
   ]);
 
   await knex('agenda_items').insert([
