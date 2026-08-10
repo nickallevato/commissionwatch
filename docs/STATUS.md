@@ -1,7 +1,8 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after landing P7 (the public-records request generator). Earlier the
-> same day: P5 (the agenda diff timeline) and P6 (full-text search).
+> Last updated: 2026-08-10, after landing the **public status page** and a sweep of the known
+> defects. Earlier the same day: P7 (the public-records request generator), P5 (the agenda diff
+> timeline) and P6 (full-text search).
 > Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
 > 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
@@ -297,6 +298,59 @@ the console — the exact rows the console exists to show. The law select delibe
 Counts after P7: backend **782 tests / 202 suites**, frontend **222 / 28**, both green, zero lint
 errors. `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## The public status page has landed
+
+Working from `docs/superpowers/plans/2026-08-10-public-status-page.md`. Migration 037.
+
+`/status` is a read-only public projection of `/admin/sources`, reading `ingestion_sources` and
+`ingestion_runs` through `GET /api/ingestion/sources`. It is unauthenticated: it describes *our*
+ingestion, not anybody's record, and the people this project reports for are the people entitled to
+know whether it is working.
+
+**Every figure is a query.** There is no maintained list on the page. A status page kept by hand is
+a status page that lies eventually, which is precisely the failure this project exists to find in
+other people's publications.
+
+**The judgements are reused, not reimplemented.** `assessSilence` and `assessVerdict` come from
+`services/pressroom/sources.ts` unchanged; `services/ingestion-status.ts` is a pure narrowing over
+`listSources`. A judgement written twice is a judgement that will disagree with itself, and the
+console and the public page must never render different verdicts for the same source.
+
+**The projection publishes figures and never text.** `ingestion_runs.error` and every run id stop
+at the console. That error string is written by whatever threw and routinely carries a document URL
+— and a Granicus URL carries a meeting title in its query string. So the public row says a run
+recorded three failures; it does not say what they said. `test/public-status.test.ts` builds the
+worst case deliberately — an unpublished meeting, an agenda item under it, and a run whose error
+quotes both — and asserts none of it survives, then hits `toPublicSource()` directly with a hostile
+row so the narrowing is proved by construction rather than by the fixture happening to be innocuous.
+
+**Nothing is filtered.** A never-run source says Never run. A disabled source is listed with its
+`disabled_reason` in the open rather than behind a disclosure, because this is the page where "why
+is Bozeman missing?" gets answered. An absence you can see is a commitment; an absence you cannot is
+a quiet failure.
+
+**Migration 037 registers MT CERS** so the page can show it. The page may only show what the table
+holds, and a source we committed to and never built is exactly the absence requirement two is about.
+`jurisdiction_type` gains `'state'` — a statewide filing system is neither a city nor a county, and
+typing it as one to dodge an enum change would put a false claim in the column the whole page
+derives from. PostgreSQL will not *use* an enum value added in the same transaction, so 037 runs
+with `config = { transaction: false }` and every statement in it is safe to re-run.
+
+**One trap.** `seeds/001_pilot_data.ts` deletes every `jurisdictions` row and `ingestion_sources`
+cascades from it, so 037's rows are absent on a seeded development or test database. That is
+pre-existing seed behaviour, not something this change introduced, and it is why the status-page
+tests build their own fixtures. Production is never seeded, so the row survives where it matters.
+
+The Methodology page's promise of a per-source table "when the ingestion registry ships" is now a
+link to `/status` rather than a paragraph explaining its own absence. The robots.txt disclosure
+itself is untouched — it is summarised on `/status` with the sentence that **the exception is valid
+only while it is disclosed**, and tests on both pages fail if either wording is removed.
+
+Counts after the status page and the defect sweep: backend **795 tests / 203 suites**, frontend
+**297 / 32**, both green. Backend lint: **2 warnings, 0 errors** — both deliberate, see Known
+defects. Frontend lint: **0 problems**, down from 10 warnings.
+`deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
@@ -338,9 +392,11 @@ seconds with the project's honest user agent. What landed locally:
 Two things the sweep taught us, both now in the spec:
 
 - **AgendaCenter has been reorganised.** It rendered **three** categories on 2026-08-09
-  (`cat3`, `cat2`, `cat4`) where the 2026-08-04 fixture captured twelve. The adapter's hardcoded
-  body list is now mostly wrong about what the site serves; it skips an unknown category loudly, so
-  the failure mode is safe, but the list belongs in `ingestion_sources.config` and is P2's job.
+  (`cat3`, `cat2`, `cat4`) where the adapter's `GALLATIN_BODIES` constant names twelve. (An earlier
+  version of this line said the *fixture* captured twelve. It does not — it holds those same three,
+  and `gallatin-civicplus.test.ts` asserts it. Corrected 2026-08-10.) The constant is mostly wrong
+  about what the site serves; it skips an unknown category loudly, so the failure mode is safe, but
+  the list belongs in `ingestion_sources.config`.
 - **Not every document is a PDF.** `/AgendaCenter/ViewFile/Agenda/_08062026-108` is a Word
   document. Parse records that as `parse_unsupported` and completes — the bytes are still stored
   and still citable. That meeting has 0 agenda items and the reason is recorded.
@@ -501,15 +557,95 @@ Ordered by how much each blocks the product being real.
 - ~~**Deploy pattern is push-based SSH**~~ — resolved 2026-08-06. No SSH key in CI, no rsync; secrets live in Parameter Store and are fetched by the host. Still push-based; a pull-based rollout watching ECR remains the better end state but is not blocking anything.
 - **The instance-role grant for Parameter Store is outstanding**, so deploys run degraded. Not a defect in this repo — it needs whoever administers `your-org/platform-aws`. `deploy/README.md` §3 has the exact policy.
 - **Images are tagged `:sha` and `:latest` only.** No `:version` tag: deriving one from `git describe` is unsafe on Gitea's shallow checkouts, where `--always` silently degrades to a bare SHA that looks like a valid answer. Rollback is by explicit pin instead, which works today.
-- **Homepage findings section is a placeholder constant** in `HomePage.tsx` with a TODO naming W3. It must not be filled with invented content about a real person.
+- ~~**Homepage findings section is a placeholder constant.**~~ Resolved 2026-08-10, and the audit
+  found a second defect underneath it. The constant is now `NO_FINDING_YET` and is **the honest
+  empty state, meant to be rendered** — not a placeholder awaiting prose. There is nothing to fill
+  in: no `findings` table, no endpoint, no hook, and the subject of a front-page claim on this site
+  is a real, living, named official. The name `PLACEHOLDER_FINDING` was itself the hazard, because
+  it invited the wrong repair.
+  The second defect was the byline under it, which read *"Generated {today} · N meetings
+  reviewed"*. **Both halves were false.** Nothing was generated — there is no finding above it —
+  and `N` is what the meetings endpoint returned, a count of meetings in the record rather than a
+  count of anything anybody reviewed. A site that exists to catch unsourced claims had two of them
+  under its own masthead. It now reads *"N meetings in the published record"*, and the test that
+  pinned the old wording now asserts `Generated` and `reviewed` are **absent**.
 - ~~**`Layout.tsx` hardcodes "Last sweep 12 min ago."**~~ Fixed 2026-08-09. The masthead reads
   `GET /api/ingestion/status`, which reports the newest `finished_at` of a `succeeded` or
   `partial` run, and says **"No sweep yet"** whenever there is nothing to report — including
   while the request is in flight and when it fails. Seven tests, where there were none.
-- **`meetings` has no `adjourned_at` or `meeting_type`.** `MeetingDetailPage` prints "Adjourned — Not recorded" verbatim.
-- **No tests** for `MeetingDetailPage`, `StatusBadge`, `RundownViewer`.
-- **`VoteBreakdown.tsx` may be unused** by any page — verify and delete or wire up.
+  Re-verified 2026-08-10: still true, no constant anywhere in `Layout.tsx`.
+- ~~**`meetings` has no `adjourned_at` or `meeting_type`.**~~ Resolved 2026-08-10 by deleting the
+  row. `meetings` has a `DATE`, a nullable `TIME`, a `location` and a `status`, and nothing else
+  about the sitting — so `MeetingDetailPage`'s Adjourned row rendered the literal string
+  "Not recorded" on every meeting that has ever existed and every meeting that ever will.
+  "Not recorded" is a claim about the custodian's minutes; what it actually described was a column
+  we never created. **A field that can only ever say one thing is not reporting**, and a field
+  reporting our schema gap as the city's is worse than absent. Convened and Location stay: those
+  columns are real, and their "Not recorded" is true of the source — Granicus publishes a time for
+  upcoming meetings only. `meeting_type` was never referenced; the page derives a label from
+  `status`, which is a real column. When an adjournment time is extracted from minutes it gets a
+  column first, and a row second.
+- ~~**No tests** for `MeetingDetailPage`, `StatusBadge`, `RundownViewer`.~~ Written 2026-08-10.
+- ~~**`VoteBreakdown.tsx` may be unused.**~~ **Stale — it was never unused.** Verified 2026-08-10:
+  `VotesPage.tsx` imports it and renders `<VoteBreakdown mode="roll-call" …>` in the expanded row,
+  and `VotesPage.test.tsx` exercises it through the disclosure. Nothing was deleted. Its
+  non-component exports (`VOTE_ORDER`, `VOTE_LABEL`, `tallyVotes`) moved to
+  `components/vote-tally.ts` as part of the lint work below.
+  **One real defect did turn up next to it**: `MeetingDetailPage` carries its own near-copy of
+  `tallyVotes` and `outcomeOf`. Two implementations of vote arithmetic on a site whose whole
+  product is vote arithmetic is a defect waiting for the two to disagree. Not merged in this pass —
+  see the declined list.
+- ~~**Ten frontend lint warnings.**~~ All ten cleared 2026-08-10, no rule disabled and
+  `.eslintrc.json` untouched. Every one was `react-refresh/only-export-components`: a non-component
+  export sharing a file with a component. Fixed by moving the exports to their own modules —
+  `components/severity.ts`, `components/flag-labels.ts`, `components/vote-tally.ts`,
+  `contexts/auth-context.ts` + `contexts/useAuth.ts`, `lib/AllProviders.tsx` — and repointing every
+  importer. `meetingStatusLabel` in `MeetingsPage.tsx` had zero consumers repo-wide and was deleted.
+- **The two backend lint warnings stay, and both are deliberate.** `errorHandler.ts`'s `_next` is
+  **not removable**: Express identifies error middleware by `fn.length === 4`, so dropping the
+  fourth parameter turns the error handler into ordinary middleware and errors stop being handled
+  at all. `embeddings.ts`'s `_limit` is the `$2` of a documented Phase-3 contract in a function with
+  no call sites; removing only the parameter would leave a signature reading "return everything",
+  which is not what the module means. The honest fix for both is
+  `argsIgnorePattern: "^_"` on `@typescript-eslint/no-unused-vars` — this codebase already uses a
+  leading underscore to mean "intentionally unused" (`_index`, `_rowIndex`, `_req`,
+  `_queryEmbedding`) and the config gives that convention no effect. That is a config change, so it
+  is left for a decision rather than made unilaterally under a brief that forbids weakening config.
 - **W1 critic findings were never fully cleared.** An orchestration bug capped repairs at 5 of 19. The remaining ones were partly fixed incidentally. Re-run the critics rather than trusting the old list.
+
+### Declined in the 2026-08-10 defect sweep, with reasons
+
+- **Moving the body lists into `ingestion_sources.config`.** This is a much larger change than the
+  backlog entry implies, and doing it shallowly would be worse than not doing it. Three facts, all
+  verified in the code rather than assumed:
+  1. **Adapter construction is synchronous, boot-time and database-free.**
+     `createDefaultRegistry()` builds both adapters with no arguments before `startIngestion` does
+     any database work, and the module-level `gallatinCivicPlusAdapter` / `bozemanGranicusAdapter`
+     singletons do the same at import. Reading config at construction means making the registry
+     async or deferring adapter creation to sweep time. That is the actual work; the constant is
+     not.
+  2. **What `registration.ts` writes is unusable as a round trip.** `config.bodies` is
+     `descriptor.bodies.map(b => b.key)` — slugs only. Gallatin's `catId` is dropped entirely, and
+     `urban-parks-forestry-board` cannot regenerate `Urban Parks & Forestry Board`. The two adapters
+     also take different shapes: Gallatin takes `{catId, name}[]`, Bozeman takes `string[]`.
+  3. **The write is insert-only.** `registerSource` returns early when the row exists, so an
+     existing deployment's `config` is frozen at first boot and no deploy would ever update it.
+     `ensureCommissions` is likewise insert-only and never deletes, so shrinking a list orphans
+     `commissions` rows.
+  The five Bozeman meetings this was blocking are fixed directly instead (see the commit); the
+  Gallatin list is stale but fails **safe** — an unknown category is skipped loudly, and the three
+  categories the live site serves are all in the list with the right ids.
+- **Correction to this file:** the line above said AgendaCenter "rendered three categories where the
+  2026-08-04 fixture captured twelve." The **fixture holds three** (`cat2`, `cat3`, `cat4`) and
+  `gallatin-civicplus.test.ts` asserts exactly that. Twelve exists only in the adapter's
+  `GALLATIN_BODIES` constant. The discrepancy is constant-versus-reality, not fixture-versus-live.
+- **Merging `MeetingDetailPage`'s private vote tally into `components/vote-tally.ts`.** Real debt,
+  and it is a behaviour change rather than a move: the two implementations disagree on the
+  zero-vote case (`unrecorded` versus `none`) and on labels, and `MeetingDetailPage` had no tests
+  when the sweep started. It now does. Merging them belongs in a change that can be judged on its
+  own, with the new tests as the safety net rather than written in the same breath.
+- **`argsIgnorePattern` on the backend lint config**, and therefore the two remaining backend
+  warnings. Reasons above.
 
 ## Invariants — do not break these
 
@@ -535,21 +671,22 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
    same time, or accept that the backup has not left the instance.
 2. **Prove CI deploy end to end.** Run `deploy-aws` and watch it succeed, so the manual deployment is no longer the only path that has ever worked.
-3. **Move both body lists into `ingestion_sources.config`.** AgendaCenter served three
-   categories on 2026-08-09 against twelve in the adapter's hardcoded list. Bozeman has the same
-   shape of problem from the other side: its Upcoming Events table names bodies differently from
-   its own archive — "Tax Increment Finance Advisory Board" against the panel's "Tax Increment
-   Financing Board" — so five upcoming meetings are skipped, loudly, every sweep. Both adapters
-   already take a `bodies` option; nothing reads it from the database yet. A city standing up a
-   committee should not need a deploy.
+3. **Move both body lists into `ingestion_sources.config`.** A city standing up a committee should
+   not need a deploy. **The five skipped Bozeman meetings are no longer the reason to do it** —
+   that was fixed directly on 2026-08-10 with a match-only `&`/`and` normalisation, an explicit
+   alias for "Tax Increment Finance Advisory Board", and three upcoming-only bodies added to the
+   list; all seventeen upcoming rows now resolve. What remains is the architecture: adapter
+   construction is synchronous and database-free, `config.bodies` is written as slugs only and is
+   lossy for both adapters, and `registerSource` never updates an existing row. See the declined
+   list under Known defects for the detail before starting.
 4. **W3 findings engine and review queue**, with admin auth. The core product, and the highest-stakes component.
 5. ~~**Bozeman Granicus adapter**~~, landed 2026-08-09 and registered disabled. ~~The
    **public-records-request page** that goes with it is still outstanding~~ — landed 2026-08-10 as
    P7. The exception is now written on a promise that has a page behind it, and
    `MethodologyPage.test.tsx` asserts the link is there as part of the disclosure suite.
-6. ~~**Status page** reading `ingestion_runs`~~ — closed 2026-08-10 by P2 for the *operator*.
-   `/admin/sources` reads the runs and marks a source past its expected interval as Suspect. A
-   **public** status page is still outstanding.
+6. ~~**Status page** reading `ingestion_runs`~~ — fully closed 2026-08-10. P2 shipped it for the
+   *operator* at `/admin/sources`; the **public** page is now at `/status`, reading the same tables
+   through the same judgements and publishing figures rather than run text. See above.
 7. Then W5 correlation, W6 funding network, W7 delivery channels, and the launch-readiness work.
 
 ## For future agents
