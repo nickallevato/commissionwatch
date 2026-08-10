@@ -110,13 +110,21 @@ const VARCHAR_255 = 255;
 // ---------------------------------------------------------------------------
 
 /**
- * The sixteen collapsible panels the archive rendered on 2026-08-09, in page order.
+ * Every body this adapter covers.
  *
- * `bozeman-access-spike.md` said "20+ other public bodies" on 2026-08-04. There are
- * sixteen in total, City Commission included. The list is a default rather than a truth:
- * an override goes through `options.bodies`, and a panel the list does not name is
- * skipped **loudly**, so a city standing up a new board reads as a warning in the run
- * rather than as a quiet month at City Hall.
+ * The first sixteen are the collapsible panels the archive rendered on 2026-08-09, in page
+ * order. `bozeman-access-spike.md` said "20+ other public bodies" on 2026-08-04; there are
+ * sixteen panels in total, City Commission included.
+ *
+ * The last three have **no archive panel at all** — they appear only in the Upcoming Events
+ * table. That is a fact about how Granicus is configured for this city, not a statement that
+ * these bodies are less real or that their meetings are less public, so they are configured
+ * here and their upcoming meetings are discovered like anyone else's. They will simply have
+ * no past rows until the city starts archiving them.
+ *
+ * The list is a default rather than a truth: an override goes through `options.bodies`, and
+ * a name the list does not carry is skipped **loudly**, so a city standing up a new board
+ * reads as a warning in the run rather than as a quiet month at City Hall.
  */
 export const BOZEMAN_BODIES: readonly string[] = Object.freeze([
   'Board of Ethics',
@@ -135,7 +143,49 @@ export const BOZEMAN_BODIES: readonly string[] = Object.freeze([
   'Tax Increment Financing Board',
   'Transportation Board',
   'Urban Parks & Forestry Board',
+  // Upcoming-only: no archive panel exists for these three.
+  'Gallatin Valley MPO - Transportation Policy Coordinating Committee',
+  'Gallatin Valley MPO - Transportation Technical Advisory Committee',
+  'Library Board of Trustees',
 ]);
+
+/**
+ * Upcoming-table spellings that name a body the archive spells differently.
+ *
+ * Each entry is a **deliberate human judgement** that two names are one body, made by
+ * reading both listings, and nothing here is derived by similarity. Close enough to guess
+ * is not close enough — guessing would file a real meeting under a body nobody configured,
+ * or silently merge two bodies that a city genuinely keeps apart — which is why guessing is
+ * exactly what this table exists instead of. Adding an alias is one line, and the cost of
+ * that line is that somebody had to check.
+ *
+ * Keys and values are the names as each table prints them; matching is done on the
+ * normalised form, so an alias does not have to reproduce punctuation exactly.
+ */
+export const BOZEMAN_BODY_ALIASES: ReadonlyMap<string, string> = new Map([
+  ['Tax Increment Finance Advisory Board', 'Tax Increment Financing Board'],
+]);
+
+/**
+ * The key two spellings of one body are compared on. **Matching only — never stored.**
+ *
+ * `slugifyBodyName` is deliberately not changed to do this: its output is
+ * `MeetingRef.bodyKey` and `describeSource().bodies[].key`, a stable identifier that has
+ * already been written to the database, and changing it would silently re-key existing
+ * meetings. So the extra normalisation lives here and stops here.
+ *
+ * On top of the shared slug it drops `and` as a standalone word, because the two tables
+ * disagree on the ampersand: the archive panel is "Urban Parks & Forestry Board" and the
+ * Upcoming table writes "Urban Parks and Forestry Board". `slugifyBodyName` turns `&` into
+ * a separator, so the ampersand form loses the word entirely and the spelled-out form keeps
+ * it; dropping it from both is what makes them meet.
+ */
+export function bozemanBodyMatchKey(name: string): string {
+  return slugifyBodyName(name)
+    .split('-')
+    .filter((part) => part !== '' && part !== 'and')
+    .join('-');
+}
 
 // ---------------------------------------------------------------------------
 // Dates
@@ -472,7 +522,22 @@ export function createBozemanGranicusAdapter(
     name,
     key: slugifyBodyName(name),
   }));
-  const bodyByKey = new Map(bodies.map((body) => [body.key, body]));
+  // Keyed on the match form, not on `body.key`, so the two tables' spellings of one body
+  // both land on it. The value still carries the stored `key` untouched.
+  const bodyByMatchKey = new Map(bodies.map((body) => [bozemanBodyMatchKey(body.name), body]));
+
+  const aliasTargetByMatchKey = new Map(
+    [...BOZEMAN_BODY_ALIASES].map(([from, to]) => [
+      bozemanBodyMatchKey(from),
+      bozemanBodyMatchKey(to),
+    ]),
+  );
+
+  /** The configured body a listing's name refers to, or undefined if none does. */
+  const resolveBody = (name: string): ResolvedBody | undefined => {
+    const key = bozemanBodyMatchKey(name);
+    return bodyByMatchKey.get(aliasTargetByMatchKey.get(key) ?? key);
+  };
 
   const allowedOrigins = [
     BOZEMAN_ORIGIN,
@@ -645,12 +710,13 @@ export function createBozemanGranicusAdapter(
       // Upcoming first, so a meeting listed in both tables keeps the id it was given while
       // it was still scheduled.
       for (const row of archive.upcoming) {
-        const body = bodyByKey.get(slugifyBodyName(row.title));
+        const body = resolveBody(row.title);
         if (!body) {
-          // The Upcoming table names bodies its own way — "Tax Increment Finance Advisory
-          // Board" against the archive's "Tax Increment Financing Board", and committees
-          // that have no panel at all. Guessing a match would file a meeting under a body
-          // nobody configured.
+          // The Upcoming table names bodies its own way. The two disagreements this source
+          // is known to have are handled deliberately — the ampersand by
+          // `bozemanBodyMatchKey`, "Tax Increment Finance Advisory Board" by an entry in
+          // `BOZEMAN_BODY_ALIASES` — and anything left over is a name nobody has checked.
+          // Guessing at it would file a meeting under a body nobody configured.
           logger.warn(
             `[${BOZEMAN_ADAPTER_KEY}] upcoming meeting '${row.title}' on ${row.date} names no ` +
               'configured body; skipped. Add it to ingestion_sources.config.bodies.',
@@ -661,7 +727,7 @@ export function createBozemanGranicusAdapter(
       }
 
       for (const panel of archive.panels) {
-        const body = bodyByKey.get(slugifyBodyName(panel.name));
+        const body = resolveBody(panel.name);
         if (!body) {
           logger.warn(
             `[${BOZEMAN_ADAPTER_KEY}] archive panel '${panel.name}' is not in the configured ` +

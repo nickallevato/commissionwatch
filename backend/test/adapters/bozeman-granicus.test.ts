@@ -360,20 +360,68 @@ describe('bozeman-granicus discovery', () => {
     );
   });
 
-  it('skips an upcoming row whose body name the archive does not use', async () => {
+  it('resolves every upcoming row the fixture lists', async () => {
+    // The upcoming table spells bodies its own way, and five of the seventeen rows used to
+    // fall on the floor with a warning every sweep — five bodies' next meetings simply
+    // absent from the site. Every row now resolves, and each of the three mechanisms that
+    // gets it there is asserted below rather than assumed.
     const warnings: string[] = [];
-    await createBozemanGranicusAdapter({
+    const meetings = await createBozemanGranicusAdapter({
       transport: createFixtureTransport().transport,
       now: () => NOW,
       logger: { warn: (message) => warnings.push(message) },
     }).discoverMeetings(new Date('2026-01-01T00:00:00Z'));
 
+    const upcomingWarnings = warnings.filter((warning) => warning.includes('upcoming meeting'));
+    expect(upcomingWarnings).toEqual([]);
+
+    const scheduled = meetings.filter((meeting) => meeting.status === 'scheduled');
+    // Seventeen upcoming rows in the fixture, each one now a meeting.
+    expect(scheduled).toHaveLength(17);
+  });
+
+  it('reads the upcoming table\'s spelling of a body as that body, by alias', async () => {
+    const meetings = await buildAdapter().discoverMeetings(new Date('2026-08-19T00:00:00Z'));
+    const tif = meetings.find((meeting) => meeting.date === '2026-08-20');
+
     // The upcoming table calls it "Tax Increment Finance Advisory Board"; the archive panel
-    // is "Tax Increment Financing Board". Close enough to guess is not close enough.
+    // is "Tax Increment Financing Board". They are one body, and the alias says so on a
+    // human's authority — it must not mint a second body key alongside the archive's.
+    expect(tif?.bodyKey).toBe('tax-increment-financing-board');
+    expect(tif?.title).toBe('Tax Increment Finance Advisory Board');
     expect(
-      warnings.some((warning) => warning.includes('Tax Increment Finance Advisory Board')),
+      meetings.every((meeting) => !/^tax-increment-finance-advisory/.test(meeting.bodyKey)),
     ).toBe(true);
-    expect(warnings.some((warning) => warning.includes('Library Board of Trustees'))).toBe(true);
+  });
+
+  it('reads an ampersand and the word `and` as the same body', async () => {
+    const meetings = await buildAdapter().discoverMeetings(new Date('2026-08-27T00:00:00Z'));
+    const parks = meetings.find(
+      (meeting) => meeting.title === 'Urban Parks and Forestry Board',
+    );
+
+    // The panel is "Urban Parks & Forestry Board" and the upcoming row spells the word out.
+    // The stored key stays the one slugifyBodyName has always produced for the panel.
+    expect(parks?.bodyKey).toBe('urban-parks-forestry-board');
+  });
+
+  it('still skips a body nobody configured, loudly', async () => {
+    // Normalising and aliasing known disagreements is not the same as accepting anything:
+    // a name outside the configured list is still refused, by name, with the fix.
+    const warnings: string[] = [];
+    const meetings = await createBozemanGranicusAdapter({
+      transport: createFixtureTransport().transport,
+      now: () => NOW,
+      bodies: ['City Commission'],
+      logger: { warn: (message) => warnings.push(message) },
+    }).discoverMeetings(new Date('2026-08-01T00:00:00Z'));
+
+    expect(meetings.every((meeting) => meeting.bodyKey === 'city-commission')).toBe(true);
+    const skipped = warnings.filter((warning) =>
+      warning.includes('Library Board of Trustees'),
+    );
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]).toContain('ingestion_sources.config.bodies');
   });
 
   it('leaves agenda packets alone unless an operator asks for them', async () => {
