@@ -183,14 +183,17 @@ export interface ContributionRow {
   committee_name: string | null;
   donor_name: string;
   /*
-   * No `donor_employer` and no `donor_occupation`. OpenFEC publishes both and
-   * this path already wrote NULL for them; the fields are now absent from the
-   * type so that "we do not ingest PII" is enforced by the compiler rather than
-   * by two literals a future edit could quietly replace with `record.*`.
-   * `campaign_contributions` still has the columns — they are migration 050's,
-   * outside the CERS block, and dropping them is the operator's call.
+   * No `donor_employer`, no `donor_occupation` and no `donor_city`. OpenFEC
+   * publishes all three and federal law is why a donor has to disclose them,
+   * which settles whether they are public and settles nothing about whether
+   * they are ours to keep. They are absent from this type so that "we do not
+   * ingest PII" is enforced by the compiler rather than by literals a future
+   * edit could quietly replace with `record.*`, and migration 051 dropped the
+   * columns so there is nowhere for such an edit to land either.
+   *
+   * `donor_state` stays: a state is the coarse geography that makes
+   * "out-of-state money" a sentence, not a place a person can be found.
    */
-  donor_city: string | null;
   donor_state: string | null;
   amount: number;
   contribution_date: string;
@@ -226,6 +229,45 @@ interface NormalizeContext {
 }
 
 /**
+ * Keys that must not survive into `campaign_contributions.raw`.
+ *
+ * Dropping `donor_employer`, `donor_occupation` and `donor_city` from the schema
+ * would have been theatre on its own. `raw` stores the OpenFEC record verbatim,
+ * and OpenFEC's `schedule_a` response carries `contributor_employer`,
+ * `contributor_occupation`, `contributor_city`, `contributor_street_1`,
+ * `contributor_street_2` and `contributor_zip` whether or not
+ * {@link OpenFecContributionRecord} declares them — the interface describes the
+ * fields this code reads, not the fields the API sends. So the same three values
+ * the migration removes from their own columns were landing one column over, in
+ * a jsonb blob nobody would think to grep.
+ *
+ * Matched by shape rather than by an exact list, because the exact list is only
+ * ever the fields somebody already knew about. `contributor_state` survives
+ * deliberately: a state is not a place a person can be found.
+ */
+const CONTRIBUTOR_PII_KEY =
+  /employer|occupation|street|address|_city|^city|zip|phone|email|\bdob\b|birth/i;
+
+/**
+ * The filed record minus the fields that describe the donor as a person.
+ *
+ * `raw` exists so that a normalisation defect stays visible against what the
+ * source actually sent, and it still does: everything about the *contribution*
+ * is kept exactly as filed. What is removed is the part that was never about the
+ * contribution.
+ */
+export function withoutContributorPii(
+  record: OpenFecContributionRecord,
+): Record<string, unknown> {
+  const kept: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (CONTRIBUTOR_PII_KEY.test(key)) continue;
+    kept[key] = value;
+  }
+  return kept;
+}
+
+/**
  * A filed record becomes a row, or it becomes nothing.
  *
  * There is no partial acceptance. A record missing a donor, a date or a
@@ -256,7 +298,6 @@ export function normalizeContribution(
     recipient_name: recipientName,
     committee_name: trimmed(record.committee_name),
     donor_name: donorName,
-    donor_city: trimmed(record.contributor_city),
     donor_state: trimmed(record.contributor_state),
     amount: round2(amount),
     contribution_date: date,
@@ -265,7 +306,7 @@ export function normalizeContribution(
     image_number: trimmed(record.image_number),
     source_url: context.sourceUrl,
     retrieved_at: context.retrievedAt,
-    raw: JSON.stringify(record),
+    raw: JSON.stringify(withoutContributorPii(record)),
   };
 }
 
