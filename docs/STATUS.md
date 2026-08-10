@@ -517,6 +517,80 @@ Counts after B3: backend **867 tests / 221 suites**, frontend **330 / 36**, both
 lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
 `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## Donor-to-vote correlation and the officials page have landed
+
+Tier C of `docs/superpowers/specs/2026-08-09-archive-salvage-design.md`, rebuilt rather than
+ported: `follow-the-money` and `vote-tracker`'s domain logic as plain services, with no
+`agent_registry`, `createTask`, `acquireLock` or `HeartbeatExecutor`. Migration 050.
+
+**`vote_donor_conflict` is raised at last.** It has been a legal `anomaly_flag_type` since
+migration 020 and nothing has ever raised it, because there was nowhere to put a contribution.
+`campaign_contributions` and `campaign_expenditures` are that place, and the OpenFEC client that
+landed with A2 and had never been called is what fills them, through `http_cache`. The rule is
+`services/finance/correlation.ts`, and it is the seventh check in `detectAnomalies`.
+`RULES_VERSION` is `4.0.0`.
+
+**Every finding is held, always.** Every one names a living person, so the draft sets
+`review_state: 'held'` regardless of severity and the threshold in `review/policy.ts` can only add
+holds. There is no configuration under which one of these publishes itself.
+
+**Uncertainty is modelled, not glossed.** A donor-to-agenda link is a *name* match and there is no
+identifier shared between the FEC's contributor field and a clerk's agenda text. So the matcher
+returns a band — `weak`, `moderate`, `strong` — and **there is deliberately no band above
+`strong`**; adding one would be a defect rather than an improvement. `moderate` is the floor to
+raise anything. The band, the score, the terms that matched, the terms that did not and the terms
+the matcher was blind to are all *stored on the finding* rather than recomputed, because the
+generic-term list will grow and an approved claim must keep meaning what it meant when a human read
+it.
+
+**Non-partisanship is structural here, not careful.** Every entity-class word — `llc`, `union`,
+`pac`, `foundation`, `association`, `developers`, `trade`, and the party words — is erased in
+`name-match.ts` *before* any decision is taken, so a corporation, a union, a PAC, a nonprofit, a
+developer and a trade association with the same distinctive name produce byte-identical output.
+Two tests hold it: six filings differing only in class must yield the same count, severity, band,
+score and (name aside) description; and the rule's own source is scanned for that vocabulary,
+because a detector cannot branch on a category it never names.
+
+**The archive's sentence is gone.** It wrote "voted yes on X **after receiving** a contribution
+from Y" — a sequence offered for the reader to complete. `describeFinding` is a pure function so
+the published sentence can be asserted character by character: the vote, the arithmetic, and in
+plain words that the link is a name match and not a verified identity. It is scanned against the
+review lexicon and against a second list of implied-causation phrases.
+
+**A contribution carrying neither the filing system's identifier nor a document image number is
+dropped before it can enter a claim**, and a finding built only from such records is not raised.
+A dollar figure is not a source. `source_url` is the API request with the key stripped, because
+that column is read by an unauthenticated API.
+
+**Federal only, and it says so where it will be read.** OpenFEC holds federal filings; a city or
+county commissioner ordinarily has none, so the ordinary result is *nothing found*, and the
+distance between that and *received nothing* is the whole of the credibility here.
+`services/finance/coverage.ts` is the single copy of the sentence. It is returned with every
+finance figure, stored inside each finding, reachable without an official at
+`GET /api/officials/finance-coverage`, and rendered on the page **outside every conditional** — the
+`FlagBar` is there whether or not anything is under it. `mt_cers` is listed as `planned` and named
+as not read. **No CERS adapter was built** — the `source_system` CHECK already admits it, so
+landing it is an insert path rather than a rewrite.
+
+**`/officials/:id` is the reader's view of one person**: voting record, attendance, majority
+alignment, twelve months of activity, a timeline of sittings and the donor overlay. Everything goes
+through `publication.ts` and is asserted in **both directions**, withheld then published — a
+profile is arithmetic over meetings, and arithmetic over a withheld record still discloses it.
+There is deliberately **no aggregate donor figure**: it would be a name match about a named person
+that no operator approved. The overlay shows published findings only.
+
+Two things the page refuses to say. A rate computed from nothing renders "Not measured", never
+`0%`. A month with no votes is drawn as a tick on the baseline, never omitted — the empty months
+are the information.
+
+Ingestion is an operator command, `npm run finance-sync`, not a scheduler tick: FEC filing periods
+are quarterly and a fifteen-minute sweep would spend a public API's rate limit re-reading the same
+three months. `OPENFEC_API_KEY` is required; **`DEMO_KEY` is never used**, in code or in tests.
+
+Counts: backend **959 tests / 241 suites**, frontend **409 / 41**, both green. Backend lint: 2
+warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+`deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
