@@ -303,4 +303,51 @@ describe("AdminRecordsPage", () => {
     expect(alerts.some((node) => /statute_citation/.test(node.textContent ?? ""))).toBe(true);
     expect(screen.queryByLabelText("Draft letter")).toBeNull();
   });
+
+  it("puts the counts in tiles and reds the jurisdictions with no statute", async () => {
+    // Screen 06's tile row. "No statute recorded" is not a cosmetic state: it
+    // is the reason no letter can be drafted for that jurisdiction at all.
+    server.use(...baseHandlers());
+    renderWithProviders(<AdminRecordsPage />);
+
+    await waitFor(() => expect(screen.getByText("Nowhere County")).toBeInTheDocument());
+    expect(screen.getByText("Jurisdictions without a statute")).toBeInTheDocument();
+    expect(screen.getByText("no letter can be drafted")).toBeInTheDocument();
+    expect(screen.getByText("derived, not listed")).toBeInTheDocument();
+  });
+
+  it("offers a real file input as the dropzone, not a styled div", async () => {
+    server.use(...baseHandlers());
+    renderWithProviders(<AdminRecordsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: "Paving contracts 2026" })).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText(/Drop a document/)).toHaveAttribute("type", "file");
+  });
+
+  it("marks an extraction that names people as held, and says why nothing publishes", async () => {
+    server.use(
+      ...baseHandlers(),
+      http.post("/api/admin/records/documents", () =>
+        HttpResponse.json({ artifact: { id: ARTIFACT_ID }, created: true }, { status: 201 }),
+      ),
+      http.get("/api/admin/records/documents/:id/extraction", () =>
+        HttpResponse.json({ current: EXTRACTION, history: [EXTRACTION] }),
+      ),
+    );
+
+    renderWithProviders(<AdminRecordsPage />);
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: "Paving contracts 2026" })).toBeInTheDocument(),
+    );
+    await userEvent.type(screen.getByLabelText("Filename"), "award.txt");
+    await userEvent.type(screen.getByLabelText("Document text"), "A sole source award.");
+    await userEvent.click(screen.getByRole("button", { name: "Upload" }));
+
+    const held = await screen.findByTestId("held-entities");
+    expect(held).toHaveTextContent("2 persons");
+    expect(held).toHaveTextContent("waits for the review queue");
+    expect(screen.getByTestId("extraction-summary")).toHaveTextContent("2 — held");
+  });
 });

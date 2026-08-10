@@ -73,6 +73,88 @@ describe("AdminChannelsPage", () => {
     await waitFor(() => expect(screen.getByLabelText("Webhook URL")).toHaveValue(""));
   });
 
+  it("tags the stored credential rather than reading it back, and never shows a full URL", async () => {
+    // Screen 05's masked field. "Stored" is the whole of what the API will
+    // say about a credential, and the page says exactly that much.
+    server.use(
+      listHandler(),
+      http.get("/api/admin/channels/:id", () =>
+        HttpResponse.json({
+          channel: { id: "c1", channel_type: "discord", name: "Operator alerts" },
+          routes: [],
+        }),
+      ),
+    );
+    renderWithProviders(<AdminChannelsPage />);
+
+    await waitFor(() => expect(screen.getByText("Operator alerts")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Edit routing: Operator alerts" }));
+
+    expect(await screen.findByText("Stored")).toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toMatch(/api\/webhooks/);
+  });
+
+  it("posts a route with the severity and cadence chosen on the segmented controls", async () => {
+    let posted: Record<string, unknown> = {};
+    server.use(
+      listHandler(),
+      http.get("/api/admin/channels/:id", () =>
+        HttpResponse.json({
+          channel: { id: "c1", channel_type: "discord", name: "Operator alerts" },
+          routes: [],
+        }),
+      ),
+      http.post("/api/admin/channels/:id/routes", async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ id: "r1" }, { status: 201 });
+      }),
+    );
+
+    renderWithProviders(<AdminChannelsPage />);
+    await waitFor(() => expect(screen.getByText("Operator alerts")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Edit routing: Operator alerts" }));
+
+    await screen.findByRole("radiogroup", { name: "Minimum severity for this route" });
+    await userEvent.click(screen.getByRole("radio", { name: "critical" }));
+    await userEvent.click(screen.getByRole("radio", { name: "daily" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save route" }));
+
+    await waitFor(() =>
+      expect(posted).toEqual({
+        event_type: "anomaly.flagged",
+        min_severity: "critical",
+        cadence: "daily",
+      }),
+    );
+  });
+
+  it("says there is no SMS cap rather than drawing a bar against an invented one", async () => {
+    server.use(
+      listHandler(),
+      http.get("/api/admin/channels/:id", () =>
+        HttpResponse.json({
+          channel: { id: "c1", channel_type: "discord", name: "Operator alerts" },
+          routes: [],
+        }),
+      ),
+    );
+    renderWithProviders(<AdminChannelsPage />);
+
+    await waitFor(() => expect(screen.getByText("Operator alerts")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Edit routing: Operator alerts" }));
+
+    expect(await screen.findByText(/no cap recorded/)).toBeInTheDocument();
+    expect(screen.queryByRole("meter")).toBeNull();
+  });
+
+  it("keeps the SSRF rule on the screen where a webhook is entered", async () => {
+    server.use(listHandler());
+    renderWithProviders(<AdminChannelsPage />);
+
+    await waitFor(() => expect(screen.getByText("Operator alerts")).toBeInTheDocument());
+    expect(screen.getByText(/private, loopback or link-local ranges/)).toBeInTheDocument();
+  });
+
   it("surfaces a rejected URL rather than failing silently", async () => {
     server.use(
       listHandler(),

@@ -1,23 +1,42 @@
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  ACTION_PRIMARY,
+  ACTION_QUIET,
+  ACTION_ROW,
+  ACTION_SMALL,
+  Dropzone,
+  FIELD,
+  FlagBar,
+  FOCUS_RING,
+  KeyValues,
+  StatusPill,
+  Tile,
+  Tiles,
+  WorkTitle,
+} from "@/components/PressroomUI";
 
 /**
  * `/admin/records` — public-records requests and the documents they produce.
+ * Screen 06 of the approved mockup.
  *
  * Operator-only, and not merely as a convenience: the extraction shown here
  * names people, and this is the only surface on which it is readable. Every
  * flag a document raises is written `held` and never reaches the public
  * anomalies API.
  *
+ * **One pipeline, two doors.** A hand-delivered PDF gets the same parse,
+ * extraction, detection and provenance display as a scraped one; the only
+ * difference in the record is that `source_url` is null.
+ *
+ * **Deduplication is free.** Identical bytes collide on the unique
+ * `artifacts.sha256` and are rejected rather than reprocessed. That is drawn
+ * here as a row, not hidden as a no-op, because "we already had this" is a
+ * fact about the custodian's response worth seeing.
+ *
  * The correction form appends. It submits a whole replacement set, and the
  * superseded version stays in the history — what the machine originally said
  * is part of the record on a project whose subject is the public record.
  */
-
-const focusRing =
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
-
-const fieldClass =
-  "mt-1.5 block w-full border border-rule bg-paper px-3 py-2 text-sm text-ink hover:border-ink";
 
 interface RecordsRequest {
   id: string;
@@ -25,6 +44,17 @@ interface RecordsRequest {
   status: string;
   submitted_at: string | null;
   responded_at: string | null;
+}
+
+/** `artifacts`, as `GET /api/admin/records/requests/:id` returns them. */
+interface RequestArtifact {
+  id: string;
+  sha256: string;
+  storage_key: string;
+  content_type: string | null;
+  source_url: string | null;
+  byte_size: number;
+  fetched_at: string;
 }
 
 interface ExtractedValue {
@@ -82,6 +112,9 @@ const FIELDS: ReadonlyArray<{ key: keyof ExtractedEntities; label: string }> = [
   { key: "dates", label: "Dates" },
 ];
 
+/** A request in one of these is finished with; anything else is still open. */
+const CLOSED_STATUSES: ReadonlySet<string> = new Set(["fulfilled", "denied", "withdrawn"]);
+
 type LoadResult = { ok: true; requests: RecordsRequest[] } | { ok: false };
 
 export function AdminRecordsPage() {
@@ -98,6 +131,10 @@ export function AdminRecordsPage() {
   const [uploading, setUploading] = useState(false);
   const [extraction, setExtraction] = useState<Extraction | null>(null);
   const [history, setHistory] = useState<Extraction[]>([]);
+
+  // The documents a request produced, and the hashes that arrived twice.
+  const [artifacts, setArtifacts] = useState<RequestArtifact[]>([]);
+  const [duplicates, setDuplicates] = useState<readonly string[]>([]);
 
   // P7 — the request generator.
   const [gaps, setGaps] = useState<RecordGap[]>([]);
@@ -182,6 +219,45 @@ export function AdminRecordsPage() {
       ignore = true;
     };
   }, []);
+
+  /**
+   * The documents one request produced.
+   *
+   * Keyed off the same control that decides where an upload lands, so an
+   * operator is never looking at one request's documents while filing into
+   * another's. Nothing is requested until a request is chosen.
+   */
+  const fetchArtifacts = useCallback(
+    async (requestId: string): Promise<RequestArtifact[] | null> => {
+      if (requestId === "") return null;
+      try {
+        const res = await fetch(`/api/admin/records/requests/${requestId}`, {
+          credentials: "same-origin",
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { artifacts: RequestArtifact[] };
+        return body.artifacts;
+      } catch {
+        // A failed document listing must not take the upload surface with it.
+        return null;
+      }
+    },
+    [],
+  );
+
+  // The fetch is separated from the state it lands in so the effect body
+  // touches state only in the continuation, never synchronously.
+  useEffect(() => {
+    let ignore = false;
+    void (async () => {
+      const rows = await fetchArtifacts(uploadRequestId);
+      if (ignore || rows === null) return;
+      setArtifacts(rows);
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [fetchArtifacts, uploadRequestId]);
 
   /**
    * Draft a letter for one gap.
@@ -278,16 +354,37 @@ export function AdminRecordsPage() {
         return;
       }
 
-      const body = (await res.json()) as { artifact: { id: string }; created: boolean };
+      const body = (await res.json()) as {
+        artifact: { id: string; sha256?: string };
+        created: boolean;
+      };
       if (!body.created) {
         setError("Those exact bytes were already stored, so nothing was reprocessed.");
+        if (typeof body.artifact.sha256 === "string") {
+          const sha = body.artifact.sha256;
+          setDuplicates((seen) => (seen.includes(sha) ? seen : [...seen, sha]));
+        }
       }
       await loadExtraction(body.artifact.id);
+      const rows = await fetchArtifacts(uploadRequestId);
+      if (rows !== null) setArtifacts(rows);
       setDocumentText("");
       setFilename("");
     } finally {
       setUploading(false);
     }
+  }
+
+  /** Read a dropped or chosen file as text and fill the upload form with it. */
+  function acceptFiles(files: FileList) {
+    const file = files[0];
+    if (!file) return;
+    setFilename(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setDocumentText(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.readAsText(file);
   }
 
   async function loadExtraction(artifactId: string) {
@@ -320,71 +417,322 @@ export function AdminRecordsPage() {
     if (res.ok) await loadExtraction(extraction.artifact_id);
   }
 
-  return (
-    <div>
-      <p className="kicker">Operator console</p>
-      <h1 className="headline text-3xl sm:text-4xl mt-1">Records requests</h1>
-      <div className="rule-hi mt-4" role="presentation" />
+  const summary = useMemo(() => {
+    const open = requests.filter((item) => !CLOSED_STATUSES.has(item.status));
+    const unverified = lawStatuses.filter((status) => status.law === null || status.stale);
+    return { open: open.length, unverified: unverified.length };
+  }, [requests, lawStatuses]);
 
-      <p className="mt-5 max-w-prose text-sm leading-relaxed text-ink-soft">
+  return (
+    <>
+      <WorkTitle
+        title="Records requests"
+        stamp={
+          loading
+            ? "loading…"
+            : `${requests.length} request${requests.length === 1 ? "" : "s"} · ${gaps.length} open gap${
+                gaps.length === 1 ? "" : "s"
+              }`
+        }
+      />
+
+      <p className="max-w-prose text-sm leading-relaxed text-ink-soft">
         A document obtained by hand takes the same path as a scraped one: hashed,
         stored, and read by the same detectors. Anything raised here is held for
         review and never appears on the public site.
       </p>
 
       {error && (
-        <p role="alert" className="mt-6 border-l-2 border-accent bg-paper-sunk px-4 py-3 text-sm text-ink-soft">
+        <p role="alert" className="border-l-2 border-accent bg-accent-50 px-4 py-3 text-sm text-ink-soft">
           {error}
         </p>
       )}
 
-      <h2 className="mt-10 font-display text-xl font-semibold text-ink">Requests</h2>
-      {loading ? (
-        <p className="mt-3 label-sm" role="status">
-          Loading requests…
-        </p>
-      ) : requests.length === 0 ? (
-        <p className="mt-3 text-sm text-muted">No requests yet.</p>
-      ) : (
-        <ul className="mt-4 divide-y divide-rule border-y border-rule">
-          {requests.map((item) => (
-            <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-3 py-4">
-              <span className="text-sm text-ink">{item.subject}</span>
-              <span className="label-sm">{item.status.replace(/_/g, " ")}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <Tiles>
+        <Tile label="Requests" value={requests.length} sub={`${summary.open} still open`} />
+        <Tile
+          label="Gaps in the record"
+          value={gaps.length}
+          tone={gaps.length > 0 ? "warn" : "good"}
+          sub="derived, not listed"
+        />
+        <Tile
+          label="Documents"
+          value={artifacts.length}
+          sub={
+            uploadRequestId === ""
+              ? "choose a request below"
+              : `${duplicates.length} duplicate rejected`
+          }
+        />
+        <Tile
+          label="Jurisdictions without a statute"
+          value={summary.unverified}
+          tone={summary.unverified > 0 ? "bad" : "good"}
+          sub="no letter can be drafted"
+        />
+      </Tiles>
 
-      <form onSubmit={handleCreate} className="mt-6 flex max-w-lg items-end gap-3">
-        <div className="flex-1">
-          <label htmlFor="request-subject" className="label-sm">
-            New request
-          </label>
-          <input
-            id="request-subject"
-            required
-            value={subject}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setSubject(event.target.value)}
-            className={`${fieldClass} ${focusRing}`}
+      <div className="flex flex-col gap-3 border border-rule px-4 py-3.5">
+        <span className="label-sm">Requests</span>
+        {loading ? (
+          <p className="label-sm" role="status">
+            Loading requests…
+          </p>
+        ) : requests.length === 0 ? (
+          <p className="text-sm text-muted">No requests yet.</p>
+        ) : (
+          <ul className="divide-y divide-rule border-y border-rule">
+            {requests.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-3 py-3">
+                <span className="text-sm text-ink">{item.subject}</span>
+                <StatusPill tone={CLOSED_STATUSES.has(item.status) ? "ok" : "warn"}>
+                  {item.status.replace(/_/g, " ")}
+                </StatusPill>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form onSubmit={handleCreate} className="flex max-w-lg items-end gap-3">
+          <div className="flex-1">
+            <label htmlFor="request-subject" className="label-sm">
+              New request
+            </label>
+            <input
+              id="request-subject"
+              required
+              value={subject}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setSubject(event.target.value)}
+              className={`${FIELD} ${FOCUS_RING}`}
+            />
+          </div>
+          <button type="submit" disabled={creating} className={`${ACTION_PRIMARY} ${FOCUS_RING}`}>
+            {creating ? "Adding…" : "Add"}
+          </button>
+        </form>
+      </div>
+
+      {/* The split: documents received on paper, what was pulled out of them
+          on the sunk ground beside it. */}
+      <div className="grid grid-cols-1 border border-rule lg:grid-cols-[1.35fr_1fr]">
+        <div className="flex flex-col gap-3 px-4 py-3.5">
+          <span className="label-sm">Documents received</span>
+
+          {uploadRequestId === "" ? (
+            <p className="text-sm text-muted">
+              Choose a request below to list the documents it produced.
+            </p>
+          ) : artifacts.length === 0 ? (
+            <p className="text-sm text-muted">No document has arrived against this request.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[24rem] border-collapse text-left text-[13px]">
+                <caption className="sr-only">Documents received against this request</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" className="label-sm border-b border-rule py-2 pr-3">File</th>
+                    <th scope="col" className="label-sm border-b border-rule py-2 pr-3">sha256</th>
+                    <th scope="col" className="label-sm border-b border-rule py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {artifacts.map((row) => {
+                    const duplicate = duplicates.includes(row.sha256);
+                    return (
+                      <tr
+                        key={row.id}
+                        className={`border-b border-rule last:border-b-0 ${
+                          duplicate ? "bg-paper-sunk" : ""
+                        }`}
+                      >
+                        <td className="py-2 pr-3">
+                          <span className="block break-all text-ink">{row.storage_key}</span>
+                          <span className="block text-[11.5px] text-muted">
+                            {row.byte_size} bytes · {row.content_type ?? "unknown type"}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 font-mono text-[11px] text-ink-soft">
+                          {row.sha256.slice(0, 4)}…{row.sha256.slice(-4)}
+                        </td>
+                        <td className="py-2">
+                          {duplicate ? (
+                            <StatusPill tone="warn">Duplicate</StatusPill>
+                          ) : (
+                            <StatusPill tone="ok">Stored</StatusPill>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <Dropzone
+            id="document-drop"
+            title="Drop a document, or choose a file"
+            hint="Hashed on arrival. Identical bytes collide on sha256 and are never reprocessed."
+            onFiles={acceptFiles}
+            disabled={uploading}
           />
+
+          <form onSubmit={handleUpload} className="max-w-lg space-y-4">
+            <div>
+              <label htmlFor="document-filename" className="label-sm">
+                Filename
+              </label>
+              <input
+                id="document-filename"
+                required
+                value={filename}
+                onChange={(event) => setFilename(event.target.value)}
+                className={`${FIELD} ${FOCUS_RING}`}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="document-request" className="label-sm">
+                Attach to request
+              </label>
+              <select
+                id="document-request"
+                value={uploadRequestId}
+                onChange={(event) => {
+                  // Clear here rather than in the effect: the documents on
+                  // screen must never belong to a request other than the one
+                  // an upload would file into.
+                  setArtifacts([]);
+                  setUploadRequestId(event.target.value);
+                }}
+                className={`${FIELD} ${FOCUS_RING}`}
+              >
+                <option value="">No request</option>
+                {requests.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.subject}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="document-text" className="label-sm">
+                Document text
+              </label>
+              <textarea
+                id="document-text"
+                required
+                rows={6}
+                value={documentText}
+                onChange={(event) => setDocumentText(event.target.value)}
+                className={`${FIELD} ${FOCUS_RING}`}
+              />
+            </div>
+
+            <button type="submit" disabled={uploading} className={`${ACTION_PRIMARY} ${FOCUS_RING}`}>
+              {uploading ? "Uploading…" : "Upload"}
+            </button>
+          </form>
         </div>
-        <button
-          type="submit"
-          disabled={creating}
-          className={`border border-ink bg-ink px-4 py-2.5 text-[11px] font-semibold uppercase tracking-label text-paper hover:bg-ink-soft disabled:opacity-50 ${focusRing}`}
-        >
-          {creating ? "Adding…" : "Add"}
-        </button>
-      </form>
+
+        <div className="flex flex-col gap-3 border-t border-rule bg-paper-sunk px-4 py-3.5 lg:border-l lg:border-t-0">
+          <span className="label-sm">Extraction</span>
+          {extraction === null ? (
+            <p className="text-sm text-muted">
+              Upload a document to see what the extractors found in it.
+            </p>
+          ) : (
+            <>
+              <KeyValues
+                testId="extraction-summary"
+                items={[
+                  {
+                    key: "Organisations",
+                    value: `${extraction.entities.organizations.length} found`,
+                  },
+                  { key: "Amounts", value: `${extraction.entities.amounts.length} found` },
+                  { key: "Dates", value: `${extraction.entities.dates.length} found` },
+                  {
+                    key: "People",
+                    value:
+                      extraction.entities.people.length === 0
+                        ? "none found"
+                        : `${extraction.entities.people.length} — held`,
+                    tone: extraction.entities.people.length === 0 ? "plain" : "warn",
+                  },
+                  { key: "Source", value: "records request (no URL)" },
+                  { key: "Pipeline", value: "identical to scraped" },
+                ]}
+              />
+
+              {extraction.entities.people.length > 0 && (
+                <FlagBar label="Held" testId="held-entities">
+                  This extraction names{" "}
+                  <b className="font-semibold text-ink">
+                    {extraction.entities.people.length} person
+                    {extraction.entities.people.length === 1 ? "" : "s"}
+                  </b>
+                  , so nothing raised from it publishes — it waits for the review
+                  queue exactly as a scraped finding does.
+                </FlagBar>
+              )}
+
+              <p className="max-w-prose text-[11.5px] leading-relaxed text-muted">
+                Confidence is a heuristic, not a judgement. The person heuristic in
+                particular matches any two capitalised words, so a room name reads
+                the same as a name — remove anything that is not what it claims to
+                be. Corrections append; nothing is overwritten.
+              </p>
+
+              {FIELDS.map((field) => (
+                <div key={field.key}>
+                  <h2 className="label-sm">{field.label}</h2>
+                  {extraction.entities[field.key].length === 0 ? (
+                    <p className="mt-1 text-sm text-muted">None.</p>
+                  ) : (
+                    <ul className="mt-1.5 divide-y divide-rule border-y border-rule">
+                      {extraction.entities[field.key].map((entry) => (
+                        <li
+                          key={entry.value}
+                          className="flex flex-wrap items-baseline justify-between gap-3 py-2"
+                        >
+                          <span className="text-sm text-ink">{entry.value}</span>
+                          <span className="flex items-baseline gap-3">
+                            <span className="label-sm">
+                              {entry.confidence} · {entry.pattern}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void removeValue(field.key, entry.value)}
+                              className={`${ACTION_QUIET} ${ACTION_SMALL} ${FOCUS_RING}`}
+                            >
+                              Remove
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+
+              <p className="label-sm">
+                {history.length} version{history.length === 1 ? "" : "s"} on record
+              </p>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* ---- P7: the records law, and the gaps it unlocks ---------------- */}
 
-      <section className="mt-12" aria-labelledby="records-law">
-        <h2 id="records-law" className="font-display text-xl font-semibold text-ink">
+      <section className="flex flex-col gap-3 border border-rule px-4 py-3.5" aria-labelledby="records-law">
+        <h2 id="records-law" className="label-sm">
           Records law
         </h2>
-        <p className="mt-2 max-w-prose text-sm leading-relaxed text-muted">
+        <p className="max-w-prose text-sm leading-relaxed text-muted">
           A request cites the statute recorded for its jurisdiction, and nothing
           else. Montana&rsquo;s published deadlines are written for executive
           branch agencies and for public agencies that are not local
@@ -395,11 +743,11 @@ export function AdminRecordsPage() {
         </p>
 
         {lawStatuses.length === 0 ? (
-          <p className="mt-3 text-sm text-muted">No jurisdictions on file.</p>
+          <p className="text-sm text-muted">No jurisdictions on file.</p>
         ) : (
-          <ul className="mt-4 divide-y divide-rule border-y border-rule">
+          <ul className="divide-y divide-rule border-y border-rule">
             {lawStatuses.map((status) => (
-              <li key={status.jurisdiction_id} className="py-4">
+              <li key={status.jurisdiction_id} className="py-3">
                 <p className="flex flex-wrap items-baseline justify-between gap-3">
                   <span className="text-sm text-ink">{status.jurisdiction_name}</span>
                   <span className={`label-sm ${status.law === null || status.stale ? "text-accent" : ""}`}>
@@ -417,17 +765,17 @@ export function AdminRecordsPage() {
         )}
       </section>
 
-      <section className="mt-12" aria-labelledby="gaps">
-        <h2 id="gaps" className="font-display text-xl font-semibold text-ink">
+      <section className="flex flex-col gap-3 border border-rule px-4 py-3.5" aria-labelledby="gaps">
+        <h2 id="gaps" className="label-sm">
           Gaps in the record
         </h2>
-        <p className="mt-2 max-w-prose text-sm leading-relaxed text-muted">
+        <p className="max-w-prose text-sm leading-relaxed text-muted">
           Derived from the record, not from a list. Drafting produces letter text
           and a request in <em>draft</em>. It sends nothing — copy the letter and
           send it yourself, under your own name.
         </p>
 
-        <div className="mt-4 flex max-w-lg flex-wrap gap-4">
+        <div className="flex max-w-lg flex-wrap gap-4">
           <div className="flex-1">
             <label htmlFor="requester-name" className="label-sm">
               Requester name
@@ -436,7 +784,7 @@ export function AdminRecordsPage() {
               id="requester-name"
               value={requesterName}
               onChange={(event) => setRequesterName(event.target.value)}
-              className={`${fieldClass} ${focusRing}`}
+              className={`${FIELD} ${FOCUS_RING}`}
             />
           </div>
           <div className="flex-1">
@@ -448,31 +796,33 @@ export function AdminRecordsPage() {
               type="email"
               value={requesterEmail}
               onChange={(event) => setRequesterEmail(event.target.value)}
-              className={`${fieldClass} ${focusRing}`}
+              className={`${FIELD} ${FOCUS_RING}`}
             />
           </div>
         </div>
 
         {gaps.length === 0 ? (
-          <p className="mt-4 text-sm text-muted">No gaps are open.</p>
+          <p className="text-sm text-muted">No gaps are open.</p>
         ) : (
-          <ul className="mt-4 divide-y divide-rule border-y border-rule">
+          <ul className="divide-y divide-rule border-y border-rule">
             {gaps.map((gap) => (
-              <li key={gap.id} className="flex flex-wrap items-baseline justify-between gap-3 py-4">
+              <li key={gap.id} className="flex flex-wrap items-baseline justify-between gap-3 py-3">
                 <span className="max-w-prose">
                   <span className="label-sm block">
                     {GAP_KIND_LABELS[gap.kind] ?? gap.kind} · {gap.jurisdiction_name}
                   </span>
                   <span className="mt-1 block text-sm text-ink">{gap.summary}</span>
                 </span>
-                <button
-                  type="button"
-                  disabled={drafting !== ""}
-                  onClick={() => void draftRequest(gap.id)}
-                  className={`border border-rule px-2 py-1 text-[11px] font-semibold uppercase tracking-label text-muted hover:border-ink hover:text-ink disabled:opacity-50 ${focusRing}`}
-                >
-                  {drafting === gap.id ? "Drafting…" : "Draft request"}
-                </button>
+                <span className={ACTION_ROW}>
+                  <button
+                    type="button"
+                    disabled={drafting !== ""}
+                    onClick={() => void draftRequest(gap.id)}
+                    className={`${ACTION_QUIET} ${ACTION_SMALL} ${FOCUS_RING}`}
+                  >
+                    {drafting === gap.id ? "Drafting…" : "Draft request"}
+                  </button>
+                </span>
               </li>
             ))}
           </ul>
@@ -481,14 +831,14 @@ export function AdminRecordsPage() {
         {refusal && (
           <p
             role="alert"
-            className="mt-6 max-w-prose border-l-2 border-accent bg-paper-sunk px-4 py-3 text-sm leading-relaxed text-ink-soft"
+            className="max-w-prose border-l-2 border-accent bg-paper-sunk px-4 py-3 text-sm leading-relaxed text-ink-soft"
           >
             {refusal}
           </p>
         )}
 
         {letter && (
-          <div className="mt-6">
+          <div>
             {letterWarnings.map((warning) => (
               <p
                 key={warning}
@@ -505,116 +855,11 @@ export function AdminRecordsPage() {
               readOnly
               rows={20}
               value={letter}
-              className={`${fieldClass} font-mono text-xs leading-relaxed ${focusRing}`}
+              className={`${FIELD} text-xs leading-relaxed ${FOCUS_RING}`}
             />
           </div>
         )}
       </section>
-
-      <h2 className="mt-12 font-display text-xl font-semibold text-ink">Add a document</h2>
-      <form onSubmit={handleUpload} className="mt-4 max-w-lg space-y-5">
-        <div>
-          <label htmlFor="document-filename" className="label-sm">
-            Filename
-          </label>
-          <input
-            id="document-filename"
-            required
-            value={filename}
-            onChange={(event) => setFilename(event.target.value)}
-            className={`${fieldClass} ${focusRing}`}
-          />
-        </div>
-
-        <div>
-          <label htmlFor="document-request" className="label-sm">
-            Attach to request
-          </label>
-          <select
-            id="document-request"
-            value={uploadRequestId}
-            onChange={(event) => setUploadRequestId(event.target.value)}
-            className={`${fieldClass} ${focusRing}`}
-          >
-            <option value="">No request</option>
-            {requests.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.subject}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label htmlFor="document-text" className="label-sm">
-            Document text
-          </label>
-          <textarea
-            id="document-text"
-            required
-            rows={6}
-            value={documentText}
-            onChange={(event) => setDocumentText(event.target.value)}
-            className={`${fieldClass} ${focusRing}`}
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={uploading}
-          className={`border border-ink bg-ink px-4 py-2.5 text-[11px] font-semibold uppercase tracking-label text-paper hover:bg-ink-soft disabled:opacity-50 ${focusRing}`}
-        >
-          {uploading ? "Uploading…" : "Upload"}
-        </button>
-      </form>
-
-      {extraction && (
-        <section className="mt-12">
-          <h2 className="font-display text-xl font-semibold text-ink">Extraction</h2>
-          <p className="mt-2 max-w-prose text-sm leading-relaxed text-muted">
-            Confidence is a heuristic, not a judgement. The person heuristic in
-            particular matches any two capitalised words, so a room name reads
-            the same as a name — remove anything that is not what it claims to
-            be. Corrections append; nothing is overwritten.
-          </p>
-
-          {FIELDS.map((field) => (
-            <div key={field.key} className="mt-6">
-              <h3 className="label-sm">{field.label}</h3>
-              {extraction.entities[field.key].length === 0 ? (
-                <p className="mt-1 text-sm text-muted">None.</p>
-              ) : (
-                <ul className="mt-2 divide-y divide-rule border-y border-rule">
-                  {extraction.entities[field.key].map((entry) => (
-                    <li
-                      key={entry.value}
-                      className="flex flex-wrap items-baseline justify-between gap-3 py-2.5"
-                    >
-                      <span className="text-sm text-ink">{entry.value}</span>
-                      <span className="flex items-baseline gap-3">
-                        <span className="label-sm">
-                          {entry.confidence} · {entry.pattern}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => void removeValue(field.key, entry.value)}
-                          className={`border border-rule px-2 py-1 text-[11px] font-semibold uppercase tracking-label text-muted hover:border-ink hover:text-ink ${focusRing}`}
-                        >
-                          Remove
-                        </button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
-
-          <p className="mt-6 label-sm">
-            {history.length} version{history.length === 1 ? "" : "s"} on record
-          </p>
-        </section>
-      )}
-    </div>
+    </>
   );
 }

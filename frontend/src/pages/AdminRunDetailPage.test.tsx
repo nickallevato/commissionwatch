@@ -144,6 +144,58 @@ describe("AdminRunDetailPage", () => {
     expect(await screen.findByText("No job in this run failed.")).toBeInTheDocument();
   });
 
+  it("shows one red stage row against the green ones rather than one red run", async () => {
+    // Screen 03. 34 of 37 parsed is a success with a footnote; a table that
+    // collapsed to "failed" would train the operator to ignore the status.
+    server.use(runHandler());
+    renderRun();
+
+    const headline = await screen.findByTestId("run-headline");
+    expect(headline).toHaveClass("text-pass");
+
+    // Three stage rows: two done, one failed, each with its own count.
+    expect(screen.getAllByText("done")).toHaveLength(2);
+    expect(screen.getAllByText("failed").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("parse")).toHaveLength(2);
+    // 34 parsed of 37 fetched — both counts survive on the stage table, and
+    // both appear again in the tiles, so these count rather than assert one.
+    expect(screen.getAllByText("34").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("37").length).toBeGreaterThan(0);
+  });
+
+  it("admits which provenance the run does not carry instead of inventing it", async () => {
+    // The mockup shows a robots check, a rate limit, a user agent, an artifact
+    // count and a deploy sha. `GET /runs/:id` carries the adapter and no more,
+    // and a fabricated provenance line is worse than a missing one.
+    server.use(runHandler());
+    renderRun();
+
+    const panel = await screen.findByTestId("provenance");
+    expect(panel).toHaveTextContent("gallatin_civicplus");
+    for (const key of ["Robots", "Rate limit", "User-agent", "Artifacts", "Deploy sha"]) {
+      expect(panel).toHaveTextContent(key);
+    }
+    expect(panel.textContent ?? "").toContain("Not recorded on the run");
+  });
+
+  it("uses the failed jobs' own error text as the log tail, because there is no log", async () => {
+    server.use(runHandler());
+    renderRun();
+
+    const tail = await screen.findByTestId("log-tail");
+    expect(tail).toHaveTextContent(PARSE_ERROR);
+  });
+
+  it("draws the actions it cannot yet perform as disabled rather than as buttons that lie", async () => {
+    server.use(runHandler());
+    renderRun();
+
+    await screen.findByTestId("run-headline");
+    expect(screen.getByRole("button", { name: "Retry 3 failed jobs" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Backfill date range…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Re-parse stored bytes" })).toBeEnabled();
+  });
+
   it("renders an error state when the run cannot be loaded", async () => {
     server.use(
       http.get("/api/admin/pressroom/runs/:id", () => new HttpResponse(null, { status: 404 })),

@@ -170,6 +170,84 @@ describe("AdminSourcesPage", () => {
     expect(alert).toHaveTextContent("Ingestion sources could not be loaded.");
   });
 
+  it("puts the lifetime figure in a tile, and renders a lifetime total of zero as a failure", async () => {
+    // Screen 02's first tile row. The number that has been true for the
+    // product's whole life should look wrong at the top of the screen too,
+    // not only in a cell somebody has to scroll to.
+    server.use(listHandler([barren, blocked]));
+    renderWithProviders(<AdminSourcesPage />);
+
+    const tile = await screen.findByTestId("tile-lifetime-records");
+    expect(tile).toHaveTextContent("0");
+    expect(tile).toHaveAttribute("data-tone", "bad");
+  });
+
+  it("does not dress a real lifetime total up as a failure", async () => {
+    server.use(listHandler([gallatin]));
+    renderWithProviders(<AdminSourcesPage />);
+
+    const tile = await screen.findByTestId("tile-lifetime-records");
+    expect(tile).toHaveTextContent("412");
+    expect(tile).toHaveAttribute("data-tone", "plain");
+  });
+
+  it("shows the longest silence as unbounded when a source has never succeeded", async () => {
+    // Not the largest known figure: a source that never ran has been silent
+    // for the whole life of the product, and rounding that to a plausible
+    // number hides the worst case behind an ordinary one.
+    server.use(listHandler());
+    renderWithProviders(<AdminSourcesPage />);
+
+    expect(await screen.findByText("∞")).toBeInTheDocument();
+    expect(screen.getByText(/bozeman_legistar, never succeeded/)).toBeInTheDocument();
+  });
+
+  it("draws a fourteen-slot sweep strip and says in words how much of it is real", async () => {
+    // The API returns `latest_run` and no history. The unknown slots are drawn
+    // grey — no sweep — and the sentence says so, rather than the strip
+    // implying thirteen sweeps nobody has a record of.
+    server.use(listHandler());
+    renderWithProviders(<AdminSourcesPage />);
+
+    const cell = await screen.findByTestId("sweeps-s1");
+    const bars = cell.querySelectorAll("i");
+    expect(bars).toHaveLength(14);
+    expect(bars[13]).toHaveAttribute("data-kind", "ok");
+    expect(bars[0]).toHaveAttribute("data-kind", "none");
+    expect(cell).toHaveTextContent("one sweep on record");
+    expect(cell).toHaveTextContent("The other 13 slots hold no sweep");
+
+    // A source that has never run has nothing real in its strip at all.
+    const never = screen.getByTestId("sweeps-s3");
+    expect(never).toHaveTextContent("no sweep is on record");
+    for (const bar of never.querySelectorAll("i")) {
+      expect(bar).toHaveAttribute("data-kind", "none");
+    }
+  });
+
+  it("gives every row a status pill whose meaning is a word, and a stripe beside it", async () => {
+    server.use(listHandler());
+    renderWithProviders(<AdminSourcesPage />);
+
+    expect(await screen.findByTestId("verdict-s1")).toHaveTextContent("Healthy");
+    expect(screen.getByTestId("verdict-s2")).toHaveTextContent("Suspect");
+    expect(screen.getByTestId("verdict-s3")).toHaveTextContent("Disabled");
+
+    // Three rows, three stripes, and none of them the only carrier of meaning.
+    expect(screen.getAllByTestId("severity-stripe")).toHaveLength(3);
+  });
+
+  it("names the expected cadence in the silence-watch bar", async () => {
+    // Without this, a dead scraper is invisible by construction.
+    server.use(listHandler());
+    renderWithProviders(<AdminSourcesPage />);
+
+    const bar = await screen.findByTestId("silence-watch");
+    expect(bar).toHaveTextContent("gallatin_civicplus");
+    expect(bar).toHaveTextContent("every 6 h");
+    expect(bar).toHaveTextContent("silence is treated as a failure until proven otherwise");
+  });
+
   it("renders zero rows without crashing, and calls that out too", async () => {
     server.use(listHandler([]));
     renderWithProviders(<AdminSourcesPage />);

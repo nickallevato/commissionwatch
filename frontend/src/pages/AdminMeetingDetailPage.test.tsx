@@ -270,6 +270,68 @@ describe("AdminMeetingDetailPage", () => {
     expect(screen.getByText("Nothing on this record has been corrected.")).toBeInTheDocument();
   });
 
+  it("says plainly that publishing would be over a known defect, and counts the items", async () => {
+    // Decision 8's gate. The override is permitted; it is never silent.
+    server.use(detailHandler());
+    renderMeeting();
+
+    const gate = await screen.findByTestId("publish-gate");
+    expect(gate).toHaveTextContent("1 item marked Fix");
+    expect(gate).toHaveTextContent("publishing over a known defect");
+  });
+
+  it("says so just as plainly when there is no defect to publish over", async () => {
+    server.use(
+      detailHandler({
+        ...base,
+        agenda_items: [
+          {
+            ...base.agenda_items[0],
+            field_confidence: {
+              title: { level: "high", reason: "Matched the minutes verbatim" },
+            },
+          },
+        ],
+      }),
+    );
+    renderMeeting();
+
+    const gate = await screen.findByTestId("publish-gate");
+    expect(gate).toHaveTextContent("No field on this record is marked Fix");
+  });
+
+  it("marks a low-confidence field Fix and a high-confidence one OK, on the same item", async () => {
+    // Seven good items and one mangled one is not a low-confidence meeting,
+    // and one mangled title is not a low-confidence item — so the row's own
+    // pill reads the worst mark on it and never an average of them.
+    server.use(detailHandler());
+    renderMeeting();
+
+    expect(await screen.findByTestId("confidence-a1-title")).toHaveTextContent("Fix");
+    expect(screen.getByTestId("confidence-a1-description")).toHaveTextContent("OK");
+    expect(screen.getByTestId("item-mark-a1")).toHaveTextContent("Fix");
+  });
+
+  it("shows the artifact's hash and admits the page count is not recorded", async () => {
+    server.use(detailHandler());
+    renderMeeting();
+
+    const panel = await screen.findByTestId("artifact-facts");
+    expect(panel).toHaveTextContent("0f1e…e1f0");
+    expect(panel).toHaveTextContent("481203 bytes");
+    // The mockup shows a page count. Nothing stores one, so the row stays and
+    // says so rather than carrying a plausible number.
+    expect(panel).toHaveTextContent("Not recorded");
+  });
+
+  it("shows the parsed value for the item most in need of a look", async () => {
+    server.use(detailHandler());
+    renderMeeting();
+
+    const text = await screen.findByTestId("extracted-text");
+    expect(text).toHaveTextContent("CONSENT AGENDA ITEM 4 CONTINUED");
+  });
+
   it("renders an error state when the meeting cannot be loaded", async () => {
     server.use(
       http.get("/api/admin/pressroom/meetings/:id", () => new HttpResponse(null, { status: 404 })),
