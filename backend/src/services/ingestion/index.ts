@@ -2,6 +2,7 @@ import type { Knex } from "knex";
 import { createAdapterRegistry, type AdapterRegistry } from "./adapters/registry";
 import { createBozemanGranicusAdapter } from "./adapters/bozeman-granicus";
 import { createGallatinCivicPlusAdapter } from "./adapters/gallatin-civicplus";
+import { createMtCersAdapter } from "./adapters/mt-cers";
 import { createArtifactStore, createIngestionHandlers, type ArtifactWriter } from "./handlers";
 import { IngestionQueue } from "./queue";
 import { registerSources, type RegisteredSource } from "./registration";
@@ -29,6 +30,7 @@ export function createDefaultRegistry(): AdapterRegistry {
   return createAdapterRegistry([
     createBozemanGranicusAdapter(),
     createGallatinCivicPlusAdapter(),
+    createMtCersAdapter(),
   ]);
 }
 

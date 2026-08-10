@@ -74,8 +74,13 @@ export function asDocumentKind(value: unknown): DocumentKind | null {
   return found[0] ?? null;
 }
 
-/** Mirrors the `jurisdiction_type` enum. */
-export type JurisdictionType = 'city' | 'county';
+/**
+ * Mirrors the `jurisdiction_type` enum.
+ *
+ * `'state'` was added to the database by migration 037 and never reached this
+ * union, so a statewide source could be registered by SQL and not by an adapter.
+ */
+export type JurisdictionType = 'city' | 'county' | 'state';
 
 export interface JurisdictionDescriptor {
   /** `jurisdictions.name`, e.g. 'Gallatin County'. */
@@ -154,6 +159,18 @@ export interface DocumentRef {
   meetingExternalId?: string;
   /** Best guess ahead of the fetch, e.g. 'application/pdf'. */
   expectedContentType?: string;
+  /**
+   * Adapter-specific context, carried verbatim through `ingestion_jobs.target`
+   * from discovery to fetch to parse.
+   *
+   * It exists because not every source addresses a document by URL alone. CERS
+   * holds a search's criteria in an HTTP session, so obtaining one filing's
+   * contribution schedule means replaying a chain of requests, and the chain's
+   * parameters are the document's real address. String values only: this
+   * round-trips through JSON in a database column, and a nested object here
+   * would be a schema nobody validated.
+   */
+  metadata?: Record<string, string>;
 }
 
 /** A meeting the adapter discovered. Serialized into `ingestion_jobs.target`. */
@@ -214,6 +231,24 @@ export interface SourceAdapter {
   describeSource(): SourceDescriptor;
   /** Meetings on or after `since`. Discovery only — no documents are fetched. */
   discoverMeetings(since: Date): Promise<MeetingRef[]>;
+  /**
+   * Documents that belong to no meeting, on or after `since`. Optional.
+   *
+   * Every source in this project until now published *meetings*, and a document
+   * was something a meeting had. Campaign finance is not shaped that way: a
+   * filed C-5 belongs to a candidacy and a reporting period, and there is no
+   * meeting anywhere in it. The alternative was to invent a meeting per filing
+   * period so the existing path would accept it, which would have put a
+   * fabricated public record in `meetings` in order to reuse a function.
+   *
+   * Refs returned here are enqueued for `fetch` with **no meeting id**, so they
+   * are stored, content-addressed and citable exactly like any other artifact,
+   * and the `parse` stage routes them on `metadata.recordKind`.
+   *
+   * An adapter that implements this may legitimately declare no bodies and
+   * discover no meetings.
+   */
+  discoverDocuments?(since: Date): Promise<DocumentRef[]>;
   /** Fetches one document and content-addresses it. */
   fetchDocument(ref: DocumentRef): Promise<FetchedArtifact>;
 }
