@@ -1,5 +1,57 @@
 import type { Knex } from 'knex';
-import { encryptConfig } from '../src/services/delivery/crypto';
+import { createCipheriv, randomBytes } from 'node:crypto';
+
+/**
+ * Deliberately self-contained. This file previously imported `encryptConfig`
+ * from `../src/services/delivery/crypto`, which works on every developer
+ * machine and in no production image: `backend/Dockerfile` copies `dist/` and
+ * `migrations/`, never `src/`. The import therefore resolved in every test and
+ * failed at module load inside the container, before a single line of the
+ * careful logic below could run — so even a database with zero subscriptions
+ * died here. The entrypoint runs migrations under `set -e`, so the server never
+ * started, and `restart: unless-stopped` retried the same failure forever. That
+ * took production down from 2026-08-09T23:18Z until it was found.
+ *
+ * A migration runs against schemas its author will never see, in an image that
+ * ships no application source. It must depend on nothing but knex and the Node
+ * standard library. `backend/test/migrations-selfcontained.test.ts` enforces
+ * that for every migration, so this cannot recur.
+ *
+ * The envelope below MUST stay byte-identical to
+ * `src/services/delivery/crypto.ts`, because the application reads what this
+ * writes: [version:1][iv:12][tag:16][ciphertext:n], AES-256-GCM, version 1.
+ */
+const ALGORITHM = 'aes-256-gcm';
+const KEY_BYTES = 32;
+const IV_BYTES = 12;
+const VERSION = 1;
+
+function resolveChannelKey(): Buffer {
+  const raw = (process.env.CHANNEL_SECRET_KEY ?? '').trim();
+  if (raw.length === 0) {
+    throw new Error('CHANNEL_SECRET_KEY is not set');
+  }
+  const key = /^[0-9a-fA-F]{64}$/.test(raw)
+    ? Buffer.from(raw, 'hex')
+    : Buffer.from(raw, 'base64');
+  if (key.length !== KEY_BYTES) {
+    throw new Error(
+      `CHANNEL_SECRET_KEY must decode to ${KEY_BYTES} bytes (got ${key.length})`,
+    );
+  }
+  return key;
+}
+
+function encryptConfig(config: unknown): Buffer {
+  const key = resolveChannelKey();
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGORITHM, key, iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(config), 'utf8'),
+    cipher.final(),
+  ]);
+  return Buffer.concat([Buffer.from([VERSION]), iv, cipher.getAuthTag(), ciphertext]);
+}
 
 interface LegacySubscription {
   id: string;
