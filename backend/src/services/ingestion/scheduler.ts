@@ -206,12 +206,54 @@ export const FAILURE_KEYS = ["failed", "blocked"] as const;
  * about, and a decision worth an explicit test is a decision worth its own
  * function.
  */
-export function classifyRun(counts: Record<string, number>, threw: boolean): RunStatus {
+export function classifyRun(
+  counts: Record<string, number>,
+  threw: boolean,
+  /**
+   * Jobs still queued when the sweep's clock ran out, if that is why it stopped.
+   *
+   * A sweep is time-boxed, and for a large archive the box is smaller than the
+   * work. Bozeman's Granicus page yields 339 meetings; at the 10-second
+   * crawl-delay we publish on the Methodology page that is ~57 minutes of
+   * fetching against a 15-minute deadline, so a first sweep of it **cannot**
+   * finish, however healthy everything is. On 2026-08-10 one did exactly that:
+   * 89 documents fetched at 10.1s each, not one job failed, and the run was
+   * recorded `failed` — indistinguishable on the sources screen from a scraper
+   * that is dead. That is the confusion `/admin/sources` exists to prevent.
+   *
+   * Hitting the deadline with work outstanding and no errors is `partial`: real
+   * progress, not finished. The backlog is not lost — `CLAIM_SQL` carries no
+   * `run_id` filter and orders by `next_attempt_at`, so the next drain picks up
+   * the oldest outstanding jobs first and the archive fills in across runs.
+   *
+   * A sweep that threw for any *other* reason is still `failed`.
+   */
+  outstanding = 0,
+): RunStatus {
   const work = SUCCESS_KEYS.reduce((total, key) => total + (counts[key] ?? 0), 0);
   const errors = FAILURE_KEYS.reduce((total, key) => total + (counts[key] ?? 0), 0);
   if (threw) return "failed";
+  if (outstanding > 0) {
+    // Deadline reached. Only a run that achieved nothing at all is a failure —
+    // that one really did not work.
+    return work === 0 ? "failed" : "partial";
+  }
   if (work === 0) return "failed";
   return errors > 0 ? "partial" : "succeeded";
+}
+
+/**
+ * The sweep ran out of clock with jobs still queued.
+ *
+ * A distinct type rather than a string match on the message, so `runSweep` can
+ * tell "the box was too small for the work" from "something broke" without
+ * parsing English.
+ */
+export class SweepDeadlineReached extends Error {
+  constructor(readonly outstanding: number, timeoutMs: number) {
+    super(`sweep reached its ${timeoutMs}ms deadline with ${outstanding} job(s) still queued`);
+    this.name = "SweepDeadlineReached";
+  }
 }
 
 export class SourceScheduler {
@@ -368,6 +410,11 @@ export class SourceScheduler {
    * Also the entry point a console "sweep now" button will use, which is why it
    * is public and why it takes no cron context.
    */
+  /** Whether this process is already sweeping that source. */
+  isSweeping(sourceId: string): boolean {
+    return this.inFlight.has(sourceId);
+  }
+
   async sweepSource(sourceId: string): Promise<SweepOutcome> {
     if (this.inFlight.has(sourceId)) {
       // In-process guard. The advisory lock below is the real one — it also
@@ -432,18 +479,31 @@ export class SourceScheduler {
     const runId = runRow.id;
 
     let threw: string | null = null;
+    let outstanding = 0;
     try {
       const since = new Date(this.now().getTime() - this.lookbackDays * 24 * 60 * 60 * 1000);
       await this.options.queue.enqueue("discover", { since: since.toISOString() }, runId);
       await this.drain(runId);
     } catch (error) {
-      threw = errorMessage(error);
-      this.logger.error(`SourceScheduler: sweep ${runId} of ${sourceId} failed — ${threw}`);
+      if (error instanceof SweepDeadlineReached) {
+        // Not an error. The sweep did as much as its clock allowed, and the
+        // rest stays queued for the next drain. Recorded, never as `error`:
+        // the sources screen reads that column to decide a source is failing.
+        outstanding = error.outstanding;
+        this.logger.info(
+          `SourceScheduler: sweep ${runId} of ${sourceId} reached its deadline with ` +
+            `${outstanding} job(s) queued; they carry over to the next drain`,
+        );
+      } else {
+        threw = errorMessage(error);
+        this.logger.error(`SourceScheduler: sweep ${runId} of ${sourceId} failed — ${threw}`);
+      }
     }
 
     const counts = await this.readCounts(runId);
+    if (outstanding > 0) counts.outstanding = outstanding;
     const jobErrors = await this.readJobErrors(runId);
-    const status = classifyRun(counts, threw !== null);
+    const status = classifyRun(counts, threw !== null, outstanding);
     const errorText = [threw, ...jobErrors].filter((value): value is string => value !== null && value !== "");
 
     await this.db("ingestion_runs")
@@ -451,6 +511,10 @@ export class SourceScheduler {
       .update({
         status,
         finished_at: this.db.fn.now(),
+        // Written back because `outstanding` is added here, not by a handler.
+        // Without this the number the operator most needs — how much is left —
+        // would exist only in a log line.
+        counts: JSON.stringify(counts),
         // Nothing is swallowed: every error the sweep produced is in the row.
         error: errorText.length > 0 ? errorText.join("\n") : null,
         updated_at: this.db.fn.now(),
@@ -478,9 +542,7 @@ export class SourceScheduler {
       const outstanding = await this.countOutstanding(runId);
       if (outstanding === 0) return;
       if (Date.now() > deadline) {
-        throw new Error(
-          `sweep timed out after ${this.sweepTimeoutMs}ms with ${outstanding} job(s) outstanding`,
-        );
+        throw new SweepDeadlineReached(outstanding, this.sweepTimeoutMs);
       }
       const tick = await this.options.worker.runOnce();
       if (tick.claimed === 0) {

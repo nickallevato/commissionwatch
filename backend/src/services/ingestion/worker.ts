@@ -162,6 +162,14 @@ export interface WorkerOptions {
   batchSize?: number;
   /** Pause after an empty claim. Default 1000ms. */
   idleDelayMs?: number;
+  /**
+   * Restrict this worker to these stages. Omitted means every stage.
+   *
+   * The standing worker started at boot passes `["parse", "analyze"]`, the two
+   * stages that cannot reach the network. Leaving it unset — as the sweep's own
+   * drain does — keeps the original behaviour.
+   */
+  stages?: readonly IngestionStage[];
   logger?: WorkerLogger;
 }
 
@@ -189,6 +197,7 @@ export class IngestionWorker {
   private readonly artifacts: ArtifactStore | undefined;
   private readonly batchSize: number;
   private readonly idleDelayMs: number;
+  private readonly stages: readonly IngestionStage[] | undefined;
   private readonly logger: WorkerLogger;
   private controller = new AbortController();
   private looping = false;
@@ -202,6 +211,7 @@ export class IngestionWorker {
     this.artifacts = options.artifacts;
     this.batchSize = options.batchSize ?? 5;
     this.idleDelayMs = options.idleDelayMs ?? 1000;
+    this.stages = options.stages;
     this.logger = options.logger ?? defaultLogger;
   }
 
@@ -246,7 +256,7 @@ export class IngestionWorker {
    * caller (or a test) can drive the worker deterministically without a loop.
    */
   async runOnce(): Promise<TickResult> {
-    const jobs = await this.queue.claim(this.batchSize);
+    const jobs = await this.queue.claim(this.batchSize, undefined, this.stages);
     if (jobs.length === 0) return { ...EMPTY_TICK };
 
     const tick: TickResult = { ...EMPTY_TICK, claimed: jobs.length };

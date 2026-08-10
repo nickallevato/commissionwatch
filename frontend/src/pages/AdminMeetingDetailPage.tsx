@@ -19,6 +19,7 @@ import type {
   CorrectionTargetTable,
   DisputeItem,
   MeetingDetailPayload,
+  MeetingParseStatus,
   ReparseResult,
 } from "@/types";
 
@@ -83,6 +84,57 @@ type LoadResult = { ok: true; detail: MeetingDetailPayload } | { ok: false };
 function formatStamp(value: string | null): string {
   if (!value) return "—";
   return new Date(value).toLocaleString();
+}
+
+/**
+ * Zero agenda items, said honestly.
+ *
+ * This screen used to render one sentence — *"No agenda item was extracted"* —
+ * for two opposite situations: a document the parser read and found nothing in,
+ * and a document the parser has never opened. On 2026-08-10 a live Bozeman
+ * meeting showed the second while reading as the first, because the sweep hit
+ * its time limit with `parse done 0` and every parse job still queued.
+ *
+ * The difference matters to the only decision this screen exists for. "Parsed,
+ * genuinely empty" may be a record worth publishing with a note; "not parsed
+ * yet" is not a record anyone should be deciding about.
+ */
+function ParseEmptyState({ parse }: { parse: MeetingParseStatus }) {
+  if (parse.state === "not_run" || parse.state === "running") {
+    return (
+      <p className="text-sm text-ink" data-testid="parse-state">
+        <b className="font-semibold">Not parsed yet.</b>{" "}
+        {parse.outstanding} parse job{parse.outstanding === 1 ? "" : "s"} queued for this meeting.
+        Parsing replays stored bytes and makes no request to the source, so this completes on its
+        own — nothing here is waiting on the county.
+      </p>
+    );
+  }
+
+  if (parse.state === "failed") {
+    return (
+      <p className="text-sm text-accent" data-testid="parse-state">
+        <b className="font-semibold">The parse failed.</b>{" "}
+        {/* Verbatim. A tidied error is one an operator cannot act on. */}
+        {parse.last_error ?? "No error text was recorded, which is itself a defect."}
+      </p>
+    );
+  }
+
+  if (parse.state === "no_document") {
+    return (
+      <p className="text-sm text-muted" data-testid="parse-state">
+        No document has been fetched for this meeting, so there is nothing to parse. The record is
+        the listing entry alone.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-sm text-muted" data-testid="parse-state">
+      The parser read this document and found no agenda item in it.
+    </p>
+  );
 }
 
 export function AdminMeetingDetailPage() {
@@ -359,7 +411,18 @@ export function AdminMeetingDetailPage() {
       Object.values(item.field_confidence).some((mark) => mark.level === "low"),
     );
     const chosen = worst ?? items[0];
-    if (!chosen) return "Nothing was extracted from this document.";
+    if (!chosen) {
+      // "Nothing was extracted" is a claim about the parser's output, and it is
+      // only true once the parser has run. Saying it about a queued document
+      // reports a finding nobody made.
+      const state = detail?.parse.state;
+      if (state === "not_run" || state === "running") {
+        return "Not parsed yet — this document is queued, so the parser has not read it.";
+      }
+      if (state === "failed") return "The parse of this document failed. See below.";
+      if (state === "no_document") return "No document has been fetched for this meeting.";
+      return "Nothing was extracted from this document.";
+    }
     return chosen.description
       ? `${chosen.item_number}.  ${chosen.title}\n    ${chosen.description}`
       : `${chosen.item_number}.  ${chosen.title}`;
@@ -499,10 +562,13 @@ export function AdminMeetingDetailPage() {
             {/* Decision 6. */}
             <div className="flex flex-col gap-3 px-4 py-3.5">
               <span className="label-sm">
-                Agenda items — {detail.agenda_items.length} extracted
+                Agenda items —{" "}
+                {detail.parse.state === "not_run" || detail.parse.state === "running"
+                  ? "not parsed yet"
+                  : `${detail.agenda_items.length} extracted`}
               </span>
               {detail.agenda_items.length === 0 ? (
-                <p className="text-sm text-muted">No agenda item was extracted.</p>
+                <ParseEmptyState parse={detail.parse} />
               ) : (
                 <ul className="flex flex-col">
                   {detail.agenda_items.map((item) => {

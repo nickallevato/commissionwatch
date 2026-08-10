@@ -146,29 +146,53 @@ router.patch(
 /**
  * Sweep now. Distinct from re-parse, which touches no network at all.
  *
- * 202 rather than 200: the sweep has run by the time this returns, but the
- * queue it filled has not drained, so the work is accepted rather than done.
+ * **Returns as soon as the sweep is launched, not when it finishes.** It used
+ * to await the whole thing, and the comment here claimed "the sweep has run by
+ * the time this returns" — true for a small source and impossible for a large
+ * one. `frontend/nginx.conf` sets no timeouts on `location /api/`, so it takes
+ * nginx's default 60-second `proxy_read_timeout`. On 2026-08-10 an operator
+ * started the first Bozeman sweep, which had 339 documents to fetch at the
+ * 10-second crawl-delay we publish; at 60 seconds the browser got a gateway
+ * timeout whose HTML body carried no `error` field, and the console reported
+ * *"bozeman-granicus could not be swept"* about a sweep that was working
+ * perfectly and ran on for another 15 minutes.
+ *
+ * So the response is now genuinely a 202: accepted, running, watch the run. The
+ * truth about how it went lives in the `ingestion_runs` row, which is where a
+ * sweep's outcome has always belonged and is what the monitor reads.
+ *
+ * The 409 is decided before launching, from the in-process in-flight set. The
+ * cross-container advisory lock still guards correctness; it just cannot be
+ * consulted without holding a transaction open for the sweep's lifetime, which
+ * is the thing we are no longer willing to make an HTTP client wait for.
  */
-router.post("/sources/:id/sweep", async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    if (!UUID_RE.test(id)) return badId(res, "source");
-    const live = requireStack(res);
-    if (live === null) return;
+router.post("/sources/:id/sweep", (req, res) => {
+  const { id } = req.params;
+  if (!UUID_RE.test(id)) return badId(res, "source");
+  const live = requireStack(res);
+  if (live === null) return;
 
-    const outcome = await live.scheduler.sweepSource(id);
-    if (outcome.kind === "skipped" && outcome.reason === "locked") {
-      res.status(409).json({
-        error: "A sweep of this source is already running",
-        statusCode: 409,
-        outcome,
-      });
-      return;
-    }
-    res.status(202).json({ outcome });
-  } catch (err) {
-    next(err);
+  if (live.scheduler.isSweeping(id)) {
+    res.status(409).json({
+      error: "A sweep of this source is already running",
+      statusCode: 409,
+    });
+    return;
   }
+
+  // Detached on purpose. Every outcome, including a throw, is already recorded
+  // on the run row by `runSweep`; this catch exists so an unhandled rejection
+  // cannot take the process down.
+  void live.scheduler.sweepSource(id).catch((error: unknown) => {
+    console.error(`Sweep of source ${id} threw outside its run`, error);
+  });
+
+  res.status(202).json({
+    outcome: { kind: "started", sourceId: id },
+    message:
+      "Sweep started. It runs at the source's published crawl-delay and may take a while; " +
+      "watch the run for progress.",
+  });
 });
 
 // ---------------------------------------------------------------------------

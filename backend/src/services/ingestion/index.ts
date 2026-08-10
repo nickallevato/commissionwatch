@@ -41,10 +41,23 @@ export const minioArtifactWriter: ArtifactWriter = {
   },
 };
 
+/**
+ * Stages the standing worker is allowed to claim.
+ *
+ * `fetch` and `discover` are deliberately absent. They are the only stages that
+ * reach the network, and a loop that starts with the process would let a
+ * crash-looping container become a crawl of a county web server — the exact
+ * thing `SourceScheduler.start()` refuses to do by never sweeping on start.
+ * Network work stays sweep-driven, which is to say operator-driven.
+ */
+export const STATIONARY_STAGES = ["parse", "analyze"] as const;
+
 export interface IngestionStack {
   registry: AdapterRegistry;
   queue: IngestionQueue;
   worker: IngestionWorker;
+  /** Polls `parse` and `analyze` from boot. Never claims a networked stage. */
+  stationaryWorker: IngestionWorker;
   scheduler: SourceScheduler;
 }
 
@@ -72,6 +85,31 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     // wider batch would only make the politeness delay look like slowness.
     batchSize: 1,
   });
+  /**
+   * The standing worker, restricted to the stages that touch nothing.
+   *
+   * A separate instance from `worker` rather than a flag on it, because the two
+   * have genuinely different jobs: `worker` is driven by a sweep and may claim
+   * any stage including `fetch`; this one polls from boot and must never be
+   * able to. `parse` and `analyze` receive a content address and no URL, and a
+   * context with no fetcher — so there is nothing in scope for this loop to
+   * dereference, which is what makes running it from boot safe.
+   */
+  const stationaryWorker = new IngestionWorker(db, queue, {
+    handlers: createIngestionHandlers({
+      db,
+      registry,
+      artifacts: options.artifacts ?? minioArtifactWriter,
+      logger: { info: (message) => console.log(message), warn: (message) => console.warn(message) },
+    }),
+    artifacts: createArtifactStore(options.read ?? downloadDocument),
+    batchSize: 1,
+    stages: STATIONARY_STAGES,
+    // Longer than the sweep worker's: this loop lives for the life of the
+    // process, and polling an empty table every second forever is a query per
+    // second for nothing.
+    idleDelayMs: 5000,
+  });
   const scheduler = new SourceScheduler(db, {
     queue,
     worker,
@@ -79,7 +117,7 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     ...(options.enabled === undefined ? {} : { enabled: options.enabled }),
     ...(options.lookbackDays === undefined ? {} : { lookbackDays: options.lookbackDays }),
   });
-  return { registry, queue, worker, scheduler };
+  return { registry, queue, worker, stationaryWorker, scheduler };
 }
 
 /**
@@ -105,6 +143,47 @@ export async function startIngestion(
     }
   }
   await stack.scheduler.start();
+
+  /**
+   * Turn the queue continuously, not only inside a sweep.
+   *
+   * `IngestionWorker` has had a poll loop since it was written and nothing ever
+   * called it — `index.ts` referenced `worker.stop()` on shutdown and
+   * `worker.start()` nowhere. So the only thing that ever drained the queue was
+   * `SourceScheduler.drain()`, which runs inside a sweep and gives up at the
+   * sweep deadline.
+   *
+   * Two consequences, both seen in production on 2026-08-10:
+   *
+   *  - **Re-parse did nothing observable.** It enqueues `parse` jobs and
+   *    answers 202, and with no worker running they sat `pending` until the
+   *    next sweep. The button reported success and produced silence.
+   *  - **A time-boxed sweep left its remainder frozen.** Bozeman's first sweep
+   *    fetched 89 documents and stopped with 250 fetches and 89 parses queued.
+   *    Those are stored bytes needing no network — parse touches nothing
+   *    outside — and nothing was going to run them for a day.
+   *
+   * Started here rather than in `index.ts` so the queue and the cron arm
+   * together: both are "ingestion is live", and a deployment with one and not
+   * the other is the state that produced the confusion above.
+   *
+   * It claims `parse` and `analyze` only — see `STATIONARY_STAGES`. Those two
+   * cannot reach the network, so this loop cannot turn a restart into a crawl,
+   * and the boot-safety rule that `SourceScheduler.start()` enforces stays
+   * intact. Fetching remains sweep-driven.
+   *
+   * Gated on the same flag as the scheduler: a test process that quietly ran
+   * handlers against its own fixtures would make suites depend on timing they
+   * never asked for.
+   *
+   * Not awaited: `start()` resolves only when the loop winds down at shutdown.
+   */
+  if (schedulerEnabled()) {
+    void stack.stationaryWorker.start().catch((error: unknown) => {
+      console.error("Ingestion: parse/analyze worker loop stopped", error);
+    });
+  }
+
   return registered;
 }
 

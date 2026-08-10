@@ -206,3 +206,76 @@ describe("AdminRunDetailPage", () => {
     expect(alert).toHaveTextContent("That run could not be loaded.");
   });
 });
+
+describe("a run in progress is a monitor", () => {
+  /** 89 fetched of 429, still going — the shape of the first live Bozeman sweep. */
+  const runningRun: RunDetail = {
+    ...partialRun,
+    run: {
+      ...partialRun.run,
+      status: "running",
+      started_at: "2026-08-10T21:49:33.000Z",
+      finished_at: null,
+    },
+    jobs: {
+      total: 429,
+      by_status: { pending: 339, running: 1, done: 89, failed: 0, blocked: 0 },
+      by_stage: [
+        { stage: "discover", status: "done", count: 1 },
+        { stage: "fetch", status: "done", count: 88 },
+        { stage: "fetch", status: "pending", count: 250 },
+        { stage: "parse", status: "pending", count: 89 },
+      ],
+    },
+    outcome: { headline: "running", records: 90, failures: 0 },
+  };
+
+  it("shows how far along it is rather than only that it is running", async () => {
+    server.use(http.get("/api/admin/pressroom/runs/run-1", () => HttpResponse.json(runningRun)));
+    renderRun();
+
+    const progress = await screen.findByTestId("sweep-progress");
+    expect(progress).toHaveTextContent("89 of 429 jobs");
+    expect(progress).toHaveTextContent("340 queued");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "21");
+  });
+
+  it("explains a stopped run with work still queued as a limit, not a failure", async () => {
+    // The defect this replaced: a sweep that fetched 89 documents perfectly and
+    // ran out of clock was reported identically to a dead scraper.
+    server.use(
+      http.get("/api/admin/pressroom/runs/run-1", () =>
+        HttpResponse.json({
+          ...runningRun,
+          run: { ...runningRun.run, status: "partial", finished_at: "2026-08-10T22:04:33.000Z" },
+          outcome: { headline: "partial", records: 90, failures: 0 },
+        }),
+      ),
+    );
+    renderRun();
+
+    const progress = await screen.findByTestId("sweep-progress");
+    expect(progress).toHaveTextContent(/reached its time limit rather than failing/i);
+    expect(progress).toHaveTextContent(/the next sweep continues where this one stopped/i);
+  });
+
+  it("says nothing is outstanding when every job finished", async () => {
+    server.use(
+      http.get("/api/admin/pressroom/runs/run-1", () =>
+        HttpResponse.json({
+          ...runningRun,
+          run: { ...runningRun.run, status: "succeeded", finished_at: "2026-08-10T22:04:33.000Z" },
+          jobs: {
+            ...runningRun.jobs,
+            by_status: { pending: 0, running: 0, done: 429, failed: 0, blocked: 0 },
+          },
+          outcome: { headline: "succeeded", records: 429, failures: 0 },
+        }),
+      ),
+    );
+    renderRun();
+
+    const progress = await screen.findByTestId("sweep-progress");
+    expect(progress).toHaveTextContent(/every job in this run reached a terminal state/i);
+  });
+});

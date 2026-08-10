@@ -57,6 +57,111 @@ const HEADLINE_CLASS: Record<IngestionRunStatus, string> = {
   failed: "text-accent",
 };
 
+/**
+ * How far along a sweep is, and — while it runs — how much longer.
+ *
+ * A sweep fetches at the crawl-delay we publish, so it is slow on purpose and a
+ * screen with no progress on it is indistinguishable from a screen with a stuck
+ * job on it. Bozeman's first run made this concrete: 89 documents in 15 minutes,
+ * 339 still queued, and nothing anywhere said so until the run had already
+ * ended and written it into an error string.
+ *
+ * The rate is **observed**, computed from this run's own elapsed time and its
+ * own completed jobs, rather than assumed from a configured delay. A configured
+ * number would keep saying "10s per document" while the source throttled us to
+ * thirty, and the estimate would get more confident as it got more wrong.
+ */
+function SweepProgress({ detail, readAt }: { detail: RunDetail; readAt: number }) {
+  const { by_status: byStatus, total } = detail.jobs;
+  const done = byStatus.done;
+  const outstanding = byStatus.pending + byStatus.running;
+  const running = detail.run.status === "running";
+
+  if (total === 0) return null;
+
+  // `readAt` is stamped when the payload arrived, not read during render:
+  // `Date.now()` here is impure and the lint rule that says so is a CI gate.
+  // It is also the more correct number — the elapsed time belongs to the data
+  // on screen, not to whenever React last decided to paint.
+  const elapsedMs =
+    (detail.run.finished_at === null ? readAt : new Date(detail.run.finished_at).getTime()) -
+    new Date(detail.run.started_at).getTime();
+  const perJobMs = done > 0 && elapsedMs > 0 ? elapsedMs / done : null;
+  const etaMs = running && perJobMs !== null ? perJobMs * outstanding : null;
+  const percent = total === 0 ? 0 : Math.round((done / total) * 100);
+
+  return (
+    <section
+      className="border border-rule bg-paper-sunk px-4 py-3"
+      aria-label="Sweep progress"
+      data-testid="sweep-progress"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="label-sm">
+          {running ? "Sweeping" : "Progress"} · {done} of {total} jobs
+        </span>
+        <span className="font-mono text-[12px] tabular text-ink-soft">
+          {percent}%
+          {outstanding > 0 && ` · ${outstanding} queued`}
+        </span>
+      </div>
+
+      <div
+        className="mt-2 h-2 w-full border border-rule bg-paper"
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Jobs completed"
+      >
+        <div className="h-full bg-ink" style={{ width: `${percent}%` }} />
+      </div>
+
+      <p className="mt-2 max-w-prose text-[11.5px] leading-relaxed text-muted">
+        {running ? (
+          <>
+            Refreshing every 5 seconds.
+            {perJobMs !== null && (
+              <>
+                {" "}
+                Observed rate <b className="font-mono tabular">{(perJobMs / 1000).toFixed(1)}s</b> per
+                job
+                {etaMs !== null && (
+                  <>
+                    {" "}
+                    — about <b className="font-mono tabular">{humanDuration(etaMs)}</b> of work left
+                    at that rate.
+                  </>
+                )}
+              </>
+            )}
+          </>
+        ) : outstanding > 0 ? (
+          <>
+            This run stopped with <b className="font-mono tabular">{outstanding}</b> job
+            {outstanding === 1 ? "" : "s"} still queued — it reached its time limit rather than
+            failing. Nothing is lost: queued work is claimed oldest-first, so the next sweep
+            continues where this one stopped. Stored bytes are parsed continuously and need no
+            sweep at all.
+          </>
+        ) : (
+          <>Every job in this run reached a terminal state.</>
+        )}
+      </p>
+    </section>
+  );
+}
+
+/** Rounded to the largest useful unit. An ETA to the second is false precision. */
+function humanDuration(ms: number): string {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+}
+
 /** A stage row's pill. Only `failed` and `blocked` are red. */
 function stageTone(status: string): Severity | "plain" {
   if (status === "failed") return "bad";
@@ -82,6 +187,8 @@ function duration(started: string, finished: string | null): string {
 export function AdminRunDetailPage() {
   const { id = "" } = useParams<{ id: string }>();
   const [detail, setDetail] = useState<RunDetail | null>(null);
+  /** When the payload on screen arrived. Stamped on apply, never in render. */
+  const [readAt, setReadAt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reparsing, setReparsing] = useState(false);
@@ -108,6 +215,7 @@ export function AdminRunDetailPage() {
   const applyResult = useCallback((result: LoadResult) => {
     if (result.ok) {
       setDetail(result.detail);
+      setReadAt(Date.now());
       setError("");
     } else {
       setError("That run could not be loaded.");
@@ -126,6 +234,36 @@ export function AdminRunDetailPage() {
       ignore = true;
     };
   }, [applyResult, fetchRun]);
+
+  /**
+   * While a run is running, this screen is a monitor.
+   *
+   * A sweep at a published crawl-delay is slow by design — Bozeman's first one
+   * took 89 documents at 10 seconds each — so a static page is a page an
+   * operator reloads by hand while wondering whether anything is happening.
+   * Polling stops the moment the run reaches a terminal status, so a finished
+   * run costs nothing.
+   *
+   * Five seconds: fast enough that the tallies visibly move at a ten-second
+   * fetch rate, slow enough that watching a long sweep is not a request per
+   * second for an hour.
+   */
+  const isRunning = detail?.run.status === "running";
+  useEffect(() => {
+    if (!isRunning) return;
+    let ignore = false;
+    const timer = setInterval(() => {
+      void (async () => {
+        const result = await fetchRun();
+        if (ignore) return;
+        applyResult(result);
+      })();
+    }, 5000);
+    return () => {
+      ignore = true;
+      clearInterval(timer);
+    };
+  }, [isRunning, applyResult, fetchRun]);
 
   async function handleReparse() {
     setReparsing(true);
@@ -225,7 +363,9 @@ export function AdminRunDetailPage() {
             </p>
           </div>
 
-          {detail.outcome.headline === "partial" && (
+          <SweepProgress detail={detail} readAt={readAt} />
+
+          {detail.outcome.headline === "partial" && detail.outcome.failures > 0 && (
             <p className="max-w-prose text-sm leading-relaxed text-ink-soft">
               A partial run is a success with a footnote. What it did keep is
               real; the failures are listed below and nothing has been rounded

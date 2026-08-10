@@ -5,7 +5,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AdminMeetingDetailPage } from "./AdminMeetingDetailPage";
 import { server } from "@/mocks/server";
-import type { DisputeItem, MeetingDetailPayload } from "@/types";
+import type {
+  MeetingParseStatus, DisputeItem, MeetingDetailPayload } from "@/types";
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
@@ -27,7 +28,22 @@ function renderMeeting(id = "m1", search = "") {
 
 const PUBLISHED_AT = "2026-08-10T18:00:00.000Z";
 
+/**
+ * Parsed, and it found what is in `agenda_items`. The suites that care about
+ * the other states override this — "not parsed yet" and "parsed, found
+ * nothing" are different sentences on this screen and each gets its own test.
+ */
+const PARSED: MeetingParseStatus = {
+  state: "done",
+  total: 1,
+  done: 1,
+  outstanding: 0,
+  failed: 0,
+  last_error: null,
+};
+
 const base: MeetingDetailPayload = {
+  parse: PARSED,
   meeting: {
     id: "m1",
     commission_id: "c1",
@@ -414,11 +430,19 @@ describe("AdminMeetingDetailPage", () => {
         documents: [],
         artifacts: [],
         corrections: [],
+        // Nothing attached means nothing was ever fetched, so there is nothing
+        // for the parser to have read. Saying "the parser found no agenda item"
+        // here would claim a result nobody produced.
+        parse: { state: "no_document", total: 0, done: 0, outstanding: 0, failed: 0, last_error: null },
       }),
     );
     renderMeeting();
 
-    expect(await screen.findByText("No agenda item was extracted.")).toBeInTheDocument();
+    // By test id: the extracted-text panel says something similar for the same
+    // state, and a bare text query would match both.
+    expect(await screen.findByTestId("parse-state")).toHaveTextContent(
+      /no document has been fetched for this meeting/i,
+    );
     expect(screen.getByText("No document is linked to this meeting.")).toBeInTheDocument();
     expect(screen.getByText("Nothing on this record has been corrected.")).toBeInTheDocument();
   });
@@ -493,5 +517,77 @@ describe("AdminMeetingDetailPage", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("That meeting could not be loaded.");
+  });
+});
+
+describe("zero agenda items means two different things", () => {
+  it("says 'not parsed yet' while the parse job is queued", async () => {
+    // The live Bozeman case: the sweep timed out with every parse job pending,
+    // and the screen reported a parser result for a document the parser had
+    // never opened.
+    server.use(
+      http.get("/api/admin/pressroom/meetings/m1", () =>
+        HttpResponse.json({
+          ...base,
+          agenda_items: [],
+          parse: { state: "not_run", total: 1, done: 0, outstanding: 1, failed: 0, last_error: null },
+        }),
+      ),
+    );
+
+    renderMeeting();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("parse-state")).toHaveTextContent(/not parsed yet/i);
+    });
+    expect(screen.getByTestId("parse-state")).toHaveTextContent(/1 parse job queued/i);
+    expect(screen.queryByText(/no agenda item was extracted/i)).not.toBeInTheDocument();
+  });
+
+  it("says the parser found nothing once it has actually run", async () => {
+    server.use(
+      http.get("/api/admin/pressroom/meetings/m1", () =>
+        HttpResponse.json({
+          ...base,
+          agenda_items: [],
+          parse: { state: "done", total: 1, done: 1, outstanding: 0, failed: 0, last_error: null },
+        }),
+      ),
+    );
+
+    renderMeeting();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("parse-state")).toHaveTextContent(
+        /read this document and found no agenda item/i,
+      );
+    });
+  });
+
+  it("shows a failed parse with its error verbatim", async () => {
+    server.use(
+      http.get("/api/admin/pressroom/meetings/m1", () =>
+        HttpResponse.json({
+          ...base,
+          agenda_items: [],
+          parse: {
+            state: "failed",
+            total: 1,
+            done: 0,
+            outstanding: 0,
+            failed: 1,
+            last_error: "Unreadable content type application/msword",
+          },
+        }),
+      ),
+    );
+
+    renderMeeting();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("parse-state")).toHaveTextContent(
+        "Unreadable content type application/msword",
+      );
+    });
   });
 });

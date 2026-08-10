@@ -385,6 +385,8 @@ export interface MeetingDetailPayload {
   documents: MeetingDocument[];
   artifacts: StoredArtifact[];
   corrections: RecordCorrection[];
+  /** Whether the parser has read these bytes — not the same as what it found. */
+  parse: MeetingParseStatus;
 }
 
 /** The tables a correction may target — mirrors the column's check constraint. */
@@ -1005,4 +1007,16 @@ export interface BulkPublishResult {
   published: string[];
   already_published: string[];
   not_found: string[];
+}
+
+/** Whether the parser has actually been asked about a meeting's stored bytes. */
+export type ParseState = "no_document" | "not_run" | "running" | "done" | "failed";
+
+export interface MeetingParseStatus {
+  state: ParseState;
+  total: number;
+  done: number;
+  outstanding: number;
+  failed: number;
+  last_error: string | null;
 }

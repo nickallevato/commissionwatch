@@ -46,6 +46,7 @@ function shutdown() {
   digestScheduler.stop();
   ingestion.scheduler.stop();
   ingestion.worker.stop();
+  ingestion.stationaryWorker.stop();
   server.close(() => {
     db.destroy().then(() => process.exit(0));
   });

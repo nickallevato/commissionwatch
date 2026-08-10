@@ -51,6 +51,8 @@ export interface MeetingDetail {
   documents: Array<Record<string, unknown>>;
   artifacts: PressroomArtifact[];
   corrections: CorrectionRow[];
+  /** Whether the parser has actually been asked about this meeting's bytes. */
+  parse: MeetingParseStatus;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -105,6 +107,77 @@ export function readFieldConfidence(value: unknown): Record<string, FieldConfide
   return marks;
 }
 
+/**
+ * Has this meeting's stored bytes actually been through the parser?
+ *
+ * "Zero agenda items" has two completely different meanings and the console
+ * showed one screen for both. On 2026-08-10 a Bozeman meeting rendered *"0
+ * extracted · Nothing was extracted from this document"* while its parse job
+ * had never run — the sweep timed out with `parse pending 89, parse done 0`. So
+ * the screen reported a parser result for a parser that had not been asked a
+ * question, which is an absence dressed as a finding and the exact failure this
+ * project exists to refuse.
+ *
+ * `not_run` and `empty` therefore have to be different words on the screen, and
+ * that means they have to be different values here.
+ */
+export type ParseState = "no_document" | "not_run" | "running" | "done" | "failed";
+
+export interface MeetingParseStatus {
+  state: ParseState;
+  total: number;
+  done: number;
+  outstanding: number;
+  failed: number;
+  /** Verbatim, from the most recent parse job that carries one. */
+  last_error: string | null;
+}
+
+export async function meetingParseStatus(
+  db: Knex,
+  meetingId: string,
+): Promise<MeetingParseStatus> {
+  const rows: unknown = await db("ingestion_jobs")
+    .where({ stage: "parse" })
+    .whereRaw("target ->> 'meetingId' = ?", [meetingId])
+    .orderBy("created_at", "desc")
+    .select("status", "last_error");
+
+  const jobs = (Array.isArray(rows) ? rows : []).filter(isRecord);
+  if (jobs.length === 0) {
+    return { state: "no_document", total: 0, done: 0, outstanding: 0, failed: 0, last_error: null };
+  }
+
+  let done = 0;
+  let outstanding = 0;
+  let failed = 0;
+  let running = 0;
+  let lastError: string | null = null;
+  for (const job of jobs) {
+    const status = asString(job.status);
+    if (status === "done") done += 1;
+    else if (status === "failed" || status === "blocked") failed += 1;
+    else if (status === "running") running += 1;
+    else outstanding += 1;
+    if (lastError === null && typeof job.last_error === "string" && job.last_error !== "") {
+      lastError = job.last_error;
+    }
+  }
+
+  // Precedence mirrors the sources screen's verdict: what is still happening
+  // outranks what already went wrong, because it may yet change the answer.
+  const state: ParseState =
+    running > 0
+      ? "running"
+      : outstanding > 0
+        ? "not_run"
+        : failed > 0 && done === 0
+          ? "failed"
+          : "done";
+
+  return { state, total: jobs.length, done, outstanding: outstanding + running, failed, last_error: lastError };
+}
+
 /** Content addresses this meeting's documents were parsed from, in job order. */
 async function meetingArtifactHashes(db: Knex, meetingId: string): Promise<string[]> {
   const rows: unknown = await db("ingestion_jobs")
@@ -155,7 +228,10 @@ export async function getMeetingDetail(db: Knex, meetingId: string): Promise<Mee
     db("meeting_documents").where({ meeting_id: meetingId }).orderBy("created_at", "asc"),
   ]);
 
-  const hashes = await meetingArtifactHashes(db, meetingId);
+  const [hashes, parse] = await Promise.all([
+    meetingArtifactHashes(db, meetingId),
+    meetingParseStatus(db, meetingId),
+  ]);
   const artifactRows: unknown =
     hashes.length === 0
       ? []
@@ -214,6 +290,7 @@ export async function getMeetingDetail(db: Knex, meetingId: string): Promise<Mee
     documents: (Array.isArray(documentRows) ? documentRows : []).filter(isRecord),
     artifacts,
     corrections,
+    parse,
   };
 }
 

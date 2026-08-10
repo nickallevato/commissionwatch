@@ -422,6 +422,31 @@ const CLAIM_SQL = `
   LIMIT ?
 `;
 
+/**
+ * The same claim, restricted to named stages.
+ *
+ * Exists for the standing worker, which drains `parse` and `analyze` only.
+ * Those two stages cannot reach the network by construction — their targets
+ * carry a content address and no URL, and their context carries no fetcher and
+ * no storage client — so a worker limited to them can run from boot with no
+ * risk of a crash-looping container turning into a crawl of a county web
+ * server. That rule is why `SourceScheduler.start()` refuses to sweep on start,
+ * and a standing worker claiming `fetch` would walk straight around it.
+ *
+ * `= ANY(?)` rather than an interpolated IN list: the stage set is small and
+ * fixed, but building SQL by concatenating an array only has to be wrong once.
+ */
+const CLAIM_STAGES_SQL = `
+  SELECT id
+  FROM ingestion_jobs
+  WHERE status = 'pending'
+    AND next_attempt_at <= now()
+    AND stage = ANY(?)
+  ORDER BY next_attempt_at
+  FOR UPDATE SKIP LOCKED
+  LIMIT ?
+`;
+
 export class IngestionQueue {
   readonly maxAttempts: number;
   readonly baseBackoffMs: number;
@@ -517,21 +542,36 @@ export class IngestionQueue {
    * only durable once that transaction commits, and the rows stay locked
    * against other claimers until then.
    */
-  async claim(limit: number, executor?: QueryExecutor): Promise<ClaimedJob[]> {
+  async claim(
+    limit: number,
+    executor?: QueryExecutor,
+    /** Restrict the claim to these stages. Omitted means any stage. */
+    stages?: readonly IngestionStage[],
+  ): Promise<ClaimedJob[]> {
     if (!Number.isInteger(limit) || limit <= 0) {
       throw new RangeError("claim limit must be a positive integer");
     }
-    if (executor) {
-      return this.claimIn(executor, limit);
+    if (stages !== undefined && stages.length === 0) {
+      // An empty list claims nothing while reading like "no restriction". A
+      // worker that silently does nothing is the failure this whole file is
+      // written to avoid.
+      throw new RangeError("claim stages, when given, must name at least one stage");
     }
-    return this.db.transaction((trx) => this.claimIn(trx, limit));
+    if (executor) {
+      return this.claimIn(executor, limit, stages);
+    }
+    return this.db.transaction((trx) => this.claimIn(trx, limit, stages));
   }
 
   private async claimIn(
     executor: QueryExecutor,
     limit: number,
+    stages?: readonly IngestionStage[],
   ): Promise<ClaimedJob[]> {
-    const selected = await executor.raw(CLAIM_SQL, [limit]);
+    const selected =
+      stages === undefined
+        ? await executor.raw(CLAIM_SQL, [limit])
+        : await executor.raw(CLAIM_STAGES_SQL, [[...stages], limit]);
     const selectedRows: unknown[] = Array.isArray(selected?.rows)
       ? selected.rows
       : [];
