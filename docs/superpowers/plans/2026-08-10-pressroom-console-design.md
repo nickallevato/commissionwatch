@@ -175,6 +175,12 @@ on.
 5. **Artifact page count** is not stored. Byte size and content type are.
 6. **SMS spend** has no counter. The meter renders against the route's
    `daily_send_cap` where one is set and says "no cap recorded" where none is.
+7. **Channel "last delivery"** has no counter either. Every row reads
+   "Not recorded", with a line under the table saying why.
+8. **The mockup's `--rule-firm`, `--ok-wash` and `--warn-wash`** have no token.
+   Firm borders draw in `rule`; a tinted row takes `paper-sunk` or `accent-50`
+   and keeps its meaning from the stripe and the pill, both of which carry
+   text. No palette entry was added.
 
 ## Verification
 
