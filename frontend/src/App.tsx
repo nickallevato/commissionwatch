@@ -6,6 +6,7 @@ import { HomePage } from "./pages/HomePage";
 import { MeetingsPage } from "./pages/MeetingsPage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
 import { MembersPage } from "./pages/MembersPage";
+import { OfficialPage } from "./pages/OfficialPage";
 import { SearchPage } from "./pages/SearchPage";
 import { VotesPage } from "./pages/VotesPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
@@ -15,6 +16,7 @@ import { CorrectionsPage } from "./pages/CorrectionsPage";
 import { DisputePage } from "./pages/DisputePage";
 import { StatusPage } from "./pages/StatusPage";
 import { DataLicensePage } from "./pages/DataLicensePage";
+import { CalendarPage } from "./pages/CalendarPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminHomePage } from "./pages/AdminHomePage";
@@ -52,6 +54,10 @@ export function App() {
           <Route path="meetings" element={<MeetingsPage />} />
           <Route path="meetings/:id" element={<MeetingDetailPage />} />
           <Route path="members" element={<MembersPage />} />
+          {/* One official as a subject: voting record, attendance, patterns
+            and the campaign-finance overlay. Reached from the roster, not
+            from the nav — the roster is the index of this page. */}
+          <Route path="officials/:id" element={<OfficialPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="votes" element={<VotesPage />} />
           <Route path="anomalies" element={<AnomaliesPage />} />
@@ -69,7 +75,16 @@ export function App() {
             site has written about, and they do not have an account here. */}
           <Route path="corrections" element={<CorrectionsPage />} />
           <Route path="corrections/dispute" element={<DisputePage />} />
+          {/* The open-data page answers at `/data`, which is the address the
+            launch-readiness spec names and the one the Dataset JSON-LD points
+            at. `/data-license` is kept as it was: it has been the published
+            address of this page, and a transparency site does not break a URL
+            it asked people to cite. */}
+          <Route path="data" element={<DataLicensePage />} />
           <Route path="data-license" element={<DataLicensePage />} />
+          {/* The public meeting calendar and the per-jurisdiction iCal feeds it
+            links to. Published meetings only. */}
+          <Route path="calendar" element={<CalendarPage />} />
           <Route path="subscribe" element={<SubscribePage />} />
 
         </Route>

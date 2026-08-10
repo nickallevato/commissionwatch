@@ -324,4 +324,38 @@ export const handlers = [
    * otherwise hit an unhandled request.
    */
   http.get("/api/corrections", () => list([])),
+
+  /**
+   * The public meeting calendar, and the export manifest behind `/data`.
+   *
+   * Empty and minimal by default, for the same reason as the two handlers
+   * above: the chrome walk now mounts `/calendar` from the masthead and `/data`
+   * from the colophon, and each suite supplies its own fixtures.
+   */
+  http.get("/api/calendar", () => list([])),
+  http.get("/api/data", () =>
+    HttpResponse.json({
+      generated_at: "2026-08-10T00:00:00.000Z",
+      schema_migration: "039_create_record_disputes.ts",
+      attribution: "CommissionWatch — commissionwatch.bmux.sh",
+      license: {
+        dataset: {
+          name: "CC BY 4.0",
+          url: "https://creativecommons.org/licenses/by/4.0/",
+          covers: "The compiled dataset.",
+          attribution:
+            "Data from CommissionWatch — commissionwatch.bmux.sh, CC BY 4.0.",
+        },
+        code: { name: "MIT", url: null, covers: "The repository." },
+        documents: {
+          name: "No licence asserted",
+          url: null,
+          covers: "The government documents.",
+        },
+      },
+      republication_request: "Republish a finding's corrections status with it.",
+      publication_rule: "Only records an operator has published appear here.",
+      datasets: [],
+    }),
+  ),
 ];

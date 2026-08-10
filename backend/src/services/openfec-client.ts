@@ -80,6 +80,65 @@ export interface SearchExpendituresInput {
   perPage?: number;
 }
 
+export const CONTRIBUTIONS_PATH = '/schedules/schedule_a/';
+export const EXPENDITURES_PATH = '/schedules/schedule_b/by_recipient/';
+
+/**
+ * The query the client sends for a contribution search, as data.
+ *
+ * Exported so a caller that persists these records can record **the request
+ * that returned them** as provenance without guessing at it. A caller that
+ * rebuilt the query string by hand would be recording a URL that resembles the
+ * one we sent, and the day the two drift is the day a stored citation stops
+ * resolving to what it claims.
+ */
+export function contributionParams(
+  input: SearchContributionsInput,
+): Record<string, Primitive | null | undefined> {
+  return {
+    sort_hide_null: false,
+    sort: '-contribution_receipt_date',
+    per_page: input.perPage ?? 20,
+    candidate_name: input.candidateName,
+    committee_name: input.committeeName,
+    contributor_name: input.contributorName,
+    min_amount: input.minAmount,
+    two_year_transaction_period: input.cycle,
+  };
+}
+
+export function expenditureParams(
+  input: SearchExpendituresInput,
+): Record<string, Primitive | null | undefined> {
+  return {
+    sort_hide_null: false,
+    sort: '-disbursement_date',
+    per_page: input.perPage ?? 20,
+    committee_name: input.committeeName,
+    recipient_name: input.recipientName,
+    min_amount: input.minAmount,
+    two_year_transaction_period: input.cycle,
+  };
+}
+
+/**
+ * The request URL **without the API key**, for storing beside a persisted
+ * record so a reader can reissue it.
+ *
+ * The key is never in it, and that is not an oversight to be corrected later:
+ * `campaign_contributions.source_url` is a public column read by an
+ * unauthenticated API, and a URL carrying a credential would be published the
+ * first time anybody opened an official's page.
+ */
+export function publicRequestUrl(
+  path: string,
+  params: Record<string, Primitive | null | undefined>,
+  baseUrl: string = DEFAULT_BASE_URL,
+): string {
+  const search = toSearchParams(sanitizeParams(params));
+  return `${baseUrl}${path}?${search.toString()}`;
+}
+
 export class OpenFecClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -108,21 +167,20 @@ export class OpenFecClient {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
+  /**
+   * The API root this instance talks to, so a caller persisting a record can
+   * cite the host it actually came from rather than the default constant.
+   */
+  get requestBaseUrl(): string {
+    return this.baseUrl;
+  }
+
   async searchContributions(
     input: SearchContributionsInput,
   ): Promise<OpenFecResponse<OpenFecContributionRecord>> {
     return this.query<OpenFecContributionRecord>({
-      path: '/schedules/schedule_a/',
-      params: {
-        sort_hide_null: false,
-        sort: '-contribution_receipt_date',
-        per_page: input.perPage ?? 20,
-        candidate_name: input.candidateName,
-        committee_name: input.committeeName,
-        contributor_name: input.contributorName,
-        min_amount: input.minAmount,
-        two_year_transaction_period: input.cycle,
-      },
+      path: CONTRIBUTIONS_PATH,
+      params: contributionParams(input),
     });
   }
 
@@ -130,16 +188,8 @@ export class OpenFecClient {
     input: SearchExpendituresInput,
   ): Promise<OpenFecResponse<OpenFecExpenditureRecord>> {
     return this.query<OpenFecExpenditureRecord>({
-      path: '/schedules/schedule_b/by_recipient/',
-      params: {
-        sort_hide_null: false,
-        sort: '-disbursement_date',
-        per_page: input.perPage ?? 20,
-        committee_name: input.committeeName,
-        recipient_name: input.recipientName,
-        min_amount: input.minAmount,
-        two_year_transaction_period: input.cycle,
-      },
+      path: EXPENDITURES_PATH,
+      params: expenditureParams(input),
     });
   }
 

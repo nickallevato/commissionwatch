@@ -1,21 +1,32 @@
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import type { DataManifest, DataManifestDataset } from "@/types";
 
 /**
- * `/data-license` — the terms under which this site's data can be reused, what
- * is withheld from it and why, and how to verify any record against the
- * government document it came from. Static: no fetches, so it renders when the
- * API does not.
+ * `/data` (and its original address `/data-license`) — the dataset, the terms
+ * under which it can be reused, what is withheld from it and why, and how to
+ * verify any record against the government document it came from.
  *
  * Three layers are licensed separately and are never conflated: the compiled
  * dataset (CC BY 4.0), the code (MIT, per the repository LICENSE file), and the
  * underlying government documents (public records, no license asserted here).
  *
- * As on `/methodology`, nothing links to a surface that does not exist. The bulk
- * export paths are described as planned, in plain words, rather than linked.
+ * **The dataset table is a query, not a list.** It is read from
+ * `GET /api/data` — the export's own manifest — so the tables, their columns,
+ * their row counts and how each row traces to a stored document are whatever
+ * the API actually serves. A schema table maintained by hand is a schema table
+ * that is wrong eventually, which is the failure this project exists to find in
+ * other people's publications. Everything that does not depend on the record —
+ * the license, the attribution line, the withheld list — is static and still
+ * renders when the API does not.
+ *
+ * The page carries `Dataset` JSON-LD so the export is discoverable through
+ * Google Dataset Search. Nothing in that block is asserted anywhere else on the
+ * page: a machine-readable claim nobody reads is exactly where a false one
+ * survives longest.
  */
 
-const REVISED = "August 4, 2026";
+const REVISED = "August 10, 2026";
 const SITE = "commissionwatch.bmux.sh";
 const REPO_URL = "https://github.com/nickallevato/commissionwatch";
 const CC_BY_URL = "https://creativecommons.org/licenses/by/4.0/";
@@ -91,6 +102,22 @@ const WITHHELD: readonly Withheld[] = [
     what: "The bytes of source documents",
     why: "Not ours to redistribute. Every record names the source URL and the SHA-256 instead, so you can fetch the original from the government and verify it is the same file.",
   },
+  {
+    what: "Meetings an operator has not published",
+    why: "A sweep produces a candidate; an operator produces a publication. A withheld meeting, its agenda items, its documents, its votes and any finding about it are all absent from the export — including the content address of its documents, because a document URL can carry a meeting's title in its query string.",
+  },
+  {
+    what: "The storage key of a stored document",
+    why: "An internal address for bytes that are not redistributed. The content address and the URL the government published it at are exported instead, which are the two things that let you check the file.",
+  },
+  {
+    what: "Operator accounts and sessions",
+    why: "Credentials and the identity of the person who approved a record. Who publishes this site is named on the methodology page; a login is not a public record.",
+  },
+  {
+    what: "The text of an ingestion failure",
+    why: "It is written by whatever threw and routinely quotes a document URL, which can belong to a meeting no operator has published. The public collection status carries the counts instead.",
+  },
 ];
 
 /* ---------------------------------------------------------------------------
@@ -134,19 +161,152 @@ function Prose({ children }: { children: ReactNode }) {
 }
 
 /* ---------------------------------------------------------------------------
+   Dataset JSON-LD
+   ------------------------------------------------------------------------- */
+
+const SITE_ORIGIN = "https://commissionwatch.bmux.sh";
+
+/**
+ * `Dataset` structured data, so the export is findable through Google Dataset
+ * Search rather than only by someone who already knows this site exists.
+ *
+ * Every claim in it is one the page states in words too. The distributions are
+ * generated from the manifest, so the block can never advertise a file the API
+ * does not serve — an invented `contentUrl` is a 404 that a search engine
+ * publishes on this project's behalf.
+ *
+ * Rendered as a text child of `<script>`, not through `dangerouslySetInnerHTML`:
+ * `JSON.stringify` escapes nothing for HTML, so the one hazard is a `</script>`
+ * sequence inside a value, and the replace below closes it. The values come from
+ * our own manifest rather than from a document, but the export's whole subject
+ * is third-party text and the next field added here may well carry some.
+ */
+function DatasetJsonLd({ datasets }: { datasets: DataManifestDataset[] }) {
+  const distribution = datasets.flatMap((dataset) => [
+    {
+      "@type": "DataDownload",
+      name: `${dataset.name} (CSV)`,
+      encodingFormat: "text/csv",
+      contentUrl: `${SITE_ORIGIN}${dataset.csv_url}`,
+    },
+    {
+      "@type": "DataDownload",
+      name: `${dataset.name} (JSON)`,
+      encodingFormat: "application/json",
+      contentUrl: `${SITE_ORIGIN}${dataset.json_url}`,
+    },
+  ]);
+
+  const payload = {
+    "@context": "https://schema.org",
+    "@type": "Dataset",
+    name: "CommissionWatch — local government meeting record",
+    description:
+      "Published meetings, agenda items, documents, officials, votes and reviewed findings for the local government bodies CommissionWatch monitors, with the SHA-256 content address of the source document each record was read out of.",
+    url: `${SITE_ORIGIN}/data`,
+    license: CC_BY_URL,
+    isAccessibleForFree: true,
+    creator: {
+      "@type": "Organization",
+      name: "CommissionWatch",
+      url: SITE_ORIGIN,
+    },
+    keywords: [
+      "local government",
+      "civic transparency",
+      "public meetings",
+      "open data",
+      "Montana",
+    ],
+    spatialCoverage: "Montana, United States",
+    distribution,
+  };
+
+  return (
+    <script type="application/ld+json">
+      {JSON.stringify(payload).replace(/<\/script/gi, "<\\/script")}
+    </script>
+  );
+}
+
+/** One row of the export table: what it holds, how big it is, where to get it. */
+function DatasetRow({ dataset }: { dataset: DataManifestDataset }) {
+  return (
+    <tr className="border-b border-rule align-top">
+      <td className="py-3 pr-4">
+        <span className="font-mono text-sm font-semibold text-ink">
+          {dataset.name}
+        </span>
+        <span className="mt-1 block max-w-prose text-sm leading-relaxed text-muted">
+          {dataset.description}
+        </span>
+        <span className="mt-1 block max-w-prose text-xs leading-relaxed text-ink-soft">
+          {dataset.provenance ??
+            "No source document is recorded for these rows, so they carry no artifact reference."}
+        </span>
+        <span className="mt-1 block max-w-prose font-mono text-xs leading-relaxed text-muted">
+          {dataset.columns.join(", ")}
+        </span>
+      </td>
+      <td className="py-3 pr-4 text-right text-sm text-ink tabular">
+        {dataset.row_count}
+      </td>
+      <td className="py-3 text-right">
+        <span className="flex flex-wrap justify-end gap-2">
+          <a className="cite" href={dataset.csv_url}>
+            CSV
+          </a>
+          <a className="cite" href={dataset.json_url}>
+            JSON
+          </a>
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+/* ---------------------------------------------------------------------------
    Page
    ------------------------------------------------------------------------- */
 
 export function DataLicensePage() {
+  const [manifest, setManifest] = useState<DataManifest | null>(null);
+  const [manifestFailed, setManifestFailed] = useState(false);
+
+  const load = useCallback(async (): Promise<DataManifest | null> => {
+    try {
+      const res = await fetch("/api/data");
+      if (!res.ok) return null;
+      return (await res.json()) as DataManifest;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    void (async () => {
+      const loaded = await load();
+      if (ignore) return;
+      if (loaded === null) setManifestFailed(true);
+      else setManifest(loaded);
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [load]);
+
   return (
     <div className="mx-auto max-w-3xl">
+      {manifest !== null && <DatasetJsonLd datasets={manifest.datasets} />}
+
       <header>
-        <p className="kicker">Open data</p>
-        <h1 className="headline mt-2 text-4xl sm:text-5xl">Data license</h1>
+        <p className="kicker">Bulk export</p>
+        <h1 className="headline mt-2 text-4xl sm:text-5xl">Open data</h1>
         <p className="mt-4 max-w-prose text-base leading-relaxed text-ink-soft">
           &ldquo;Here is what the record shows&rdquo; is only a checkable claim
-          if you can get the record. These are the terms for taking this data
-          and using it — including to contradict us.
+          if you can get the record. Here is the record, in bulk, with the terms
+          for taking it and using it — including to contradict us.
         </p>
         <p className="mt-4 text-xs text-muted">
           Revised <span className="figure">{REVISED}</span>
@@ -256,14 +416,148 @@ export function DataLicensePage() {
             ))}
           </ul>
           <Prose>
-            Be reasonable with it. If you want everything, wait for the bulk
-            export rather than crawling the API: nightly CSV and JSON Lines per
-            table, a full zip, and a manifest carrying a SHA-256 and a row count
-            for every file, with dated snapshots kept so that &ldquo;what did
-            this site say in March&rdquo; stays answerable. That export is not
-            published yet. When it is, it will be linked from this page and
-            described here in full — not announced somewhere else and left for
-            you to find.
+            Be reasonable with it. If you want everything, take the bulk export
+            below rather than crawling the API — it is the same record in one
+            request per table, and it costs both of us less.
+          </Prose>
+        </section>
+
+        {/* -------------------------------------------------- The bulk export */}
+        <section className="mt-12" aria-labelledby="export">
+          <SectionHeading id="export">The bulk export</SectionHeading>
+          <Prose>
+            Every table below is public, unauthenticated and served in two
+            formats: JSON, and CSV to RFC 4180. Nothing is paginated at the
+            surface — each file is the whole of that table&rsquo;s published
+            rows, written out as they are read rather than assembled in memory,
+            so a large corpus downloads rather than failing.{" "}
+            <a className="cite" href="/api/data">
+              /api/data
+            </a>{" "}
+            is the manifest: the same list, machine-readable, with the column
+            names and row counts.
+          </Prose>
+          <Prose>
+            <strong className="font-semibold text-ink">
+              Only records an operator has published appear here.
+            </strong>{" "}
+            A sweep produces a candidate and an operator produces a publication;
+            a meeting still in review is absent from the export along with
+            everything hanging off it, and a finding that has not been approved
+            is absent whatever the state of its meeting.
+          </Prose>
+
+          {manifestFailed && (
+            <p
+              role="alert"
+              className="mt-6 max-w-prose border-l-2 border-accent bg-paper px-4 py-3 text-sm text-ink-soft"
+            >
+              The export manifest could not be loaded, so this page cannot list
+              the tables or their sizes right now. The files themselves are at{" "}
+              <span className="font-mono text-sm">/api/data</span>.
+            </p>
+          )}
+
+          {manifest !== null && (
+            <>
+              <div className="mt-6 overflow-x-auto">
+                <table className="w-full min-w-[40rem] border-collapse text-left">
+                  <caption className="sr-only">
+                    Every exported table, its row count and its download links
+                  </caption>
+                  <thead>
+                    <tr className="border-b border-ink">
+                      <th scope="col" className="pb-2 pr-4 text-left align-bottom">
+                        <span className="label-sm">Table</span>
+                      </th>
+                      <th scope="col" className="w-24 pb-2 pr-4 text-right align-bottom">
+                        <span className="label-sm">Rows</span>
+                      </th>
+                      <th scope="col" className="w-32 pb-2 text-right align-bottom">
+                        <span className="label-sm">Download</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manifest.datasets.map((dataset) => (
+                      <DatasetRow key={dataset.name} dataset={dataset} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-4 text-xs text-muted tabular">
+                Schema version{" "}
+                <span className="figure">
+                  {manifest.schema_migration ?? "not reported"}
+                </span>
+                . Manifest generated{" "}
+                <span className="figure">
+                  {new Date(manifest.generated_at).toLocaleString()}
+                </span>
+                .
+              </p>
+            </>
+          )}
+        </section>
+
+        {/* -------------------------------------------------- Provenance */}
+        <section className="mt-12" aria-labelledby="provenance">
+          <SectionHeading id="provenance">
+            Every row carries its source
+          </SectionHeading>
+          <Prose>
+            A row without an artifact reference is a claim without a source,
+            which is the thing this project exists not to publish. So a meeting,
+            its agenda items, its documents and its votes each carry{" "}
+            <span className="font-mono text-sm">source_artifact_sha256</span> —
+            the SHA-256 of the stored copy of the document they were read out
+            of. The{" "}
+            <span className="font-mono text-sm">artifact_references</span> table
+            carries the full mapping: every stored version of every linked
+            document, with the URL the bytes actually came from after redirects.
+          </Prose>
+          <Prose>
+            Three tables have no such column, and that is stated rather than
+            filled in with a blank. Officials, jurisdictions and commissions are
+            structural records: the schema stores no source document for them,
+            so an empty provenance column would read as a lost source when the
+            truth is that there never was one.
+          </Prose>
+        </section>
+
+        {/* -------------------------------------------------- Cadence */}
+        <section className="mt-12" aria-labelledby="cadence">
+          <SectionHeading id="cadence">How often it changes</SectionHeading>
+          <Prose>
+            The export is generated from the live record when you request it, so
+            it is exactly as fresh as two things: the last time a source was
+            swept, and the last time an operator published what the sweep found.
+            There is no nightly snapshot and no dated archive — that is honest
+            about what exists rather than a promise, and it means there is
+            currently no way to ask this site what it said in March.
+          </Prose>
+          <Prose>
+            Each source has its own schedule and its own health.{" "}
+            <Link
+              to="/status"
+              className="underline underline-offset-2 hover:text-accent"
+            >
+              Collection status
+            </Link>{" "}
+            reports when each one last succeeded, and marks a source that has
+            gone quiet past its own expected interval rather than leaving it
+            looking calm.
+          </Prose>
+          <Prose>
+            If you want the meeting schedule rather than the whole record,{" "}
+            <Link
+              to="/calendar"
+              className="underline underline-offset-2 hover:text-accent"
+            >
+              the calendar
+            </Link>{" "}
+            publishes an iCalendar feed per jurisdiction that you can subscribe
+            to directly.
           </Prose>
         </section>
 

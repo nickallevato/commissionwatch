@@ -27,6 +27,10 @@ const navItems: NavItem[] = [
   // P6. Search sits with the record it searches, not in the utility row: the
   // archive is the product, and a reader arriving with a question starts here.
   { to: "/search", label: "Search" },
+  // When these bodies sit. In the masthead rather than the colophon because a
+  // reader who wants to attend a meeting is looking for the record, not for an
+  // account of how the site works.
+  { to: "/calendar", label: "Calendar" },
   { to: "/methodology", label: "Methodology" },
   { to: "/subscribe", label: "Alerts" },
 ];
@@ -171,10 +175,10 @@ export function Layout() {
               Corrections
             </Link>
             <Link
-              to="/data-license"
+              to="/data"
               className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
             >
-              Data License
+              Open data
             </Link>
           </nav>
         </div>

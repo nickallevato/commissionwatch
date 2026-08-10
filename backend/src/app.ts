@@ -6,6 +6,7 @@ import versionRouter from "./routes/version";
 import jurisdictionsRouter from "./routes/jurisdictions";
 import meetingsRouter from "./routes/meetings";
 import membersRouter from "./routes/members";
+import officialsRouter from "./routes/officials";
 import votesRouter from "./routes/votes";
 import anomaliesRouter from "./routes/anomalies";
 import ingestionRouter from "./routes/ingestion";
@@ -16,6 +17,8 @@ import smsRouter from "./routes/sms";
 import searchRouter from "./routes/search";
 import publicRecordsRouter from "./routes/public-records";
 import correctionsRouter from "./routes/corrections";
+import dataRouter from "./routes/data";
+import calendarRouter from "./routes/calendar";
 import adminRouter from "./routes/admin";
 import { errorHandler } from "./middleware/errorHandler";
 
@@ -74,6 +77,9 @@ app.use("/api/version", versionRouter);
 app.use("/api/jurisdictions", jurisdictionsRouter);
 app.use("/api/meetings", meetingsRouter);
 app.use("/api/members", membersRouter);
+// The reader's view of one official: voting record, attendance, patterns and
+// the donor overlay. Published records only, filtered in services/officials.ts.
+app.use("/api/officials", officialsRouter);
 app.use("/api/votes", votesRouter);
 app.use("/api/anomalies", anomaliesRouter);
 // P6 · full-text search. Public and unauthenticated like the rest of the read
@@ -85,6 +91,15 @@ app.use("/api/public-records", publicRecordsRouter);
 // B3 · the public corrections log, and the dispute route. Unauthenticated, and
 // the only unauthenticated write in the product — see routes/corrections.ts.
 app.use("/api/corrections", correctionsRouter);
+// The bulk export. Unauthenticated, no key: "here is what the record shows" is
+// only checkable if you can get the record. Published rows only — every query
+// routes through services/publication.ts, and data-export.test.ts walks all ten
+// datasets in both directions.
+app.use("/api/data", dataRouter);
+// The public meeting calendar and the per-jurisdiction iCal feeds. Published
+// meetings only; a meeting with no published time is an all-day event rather
+// than an appointment at midnight.
+app.use("/api/calendar", calendarRouter);
 app.use("/api/ingestion", ingestionRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/notifications", notificationsRouter);

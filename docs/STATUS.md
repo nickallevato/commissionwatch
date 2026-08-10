@@ -1,7 +1,8 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after landing **B3 — the public corrections log and the dispute
-> route**, which was the last build gate on making this site publicly reachable. Earlier the same
+> Last updated: 2026-08-10, after landing the **bulk data export, the fork path and the public
+> meeting calendar** (see below) — the launch-readiness item that was not B3. Before that: **B3 —
+> the public corrections log and the dispute route**, which was the last build gate on making this site publicly reachable. Earlier the same
 > day: the **findings review queue** (B-a and B-b's
 > replacement) — the change that made publishing a finding possible at all. Earlier still:
 > the **public status page** and a sweep of the known defects; and before those: P7 (the public-records request generator), P5 (the agenda diff
@@ -517,6 +518,289 @@ Counts after B3: backend **867 tests / 221 suites**, frontend **330 / 36**, both
 lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
 `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## The external monitor has landed, and the Gitea scheduler does not fire
+
+Working from `docs/superpowers/plans/2026-08-10-external-monitoring.md`. No migration, no
+dependency, no new runtime code in the application.
+
+**Why it is outside the application.** On 2026-08-09 production returned 502 on every `/api/*`
+route for about four hours and the only reason anyone found out was a person opening the site.
+Every account this codebase gives of its own health — the masthead's sweep clock, `/admin/sources`,
+`/status` — is served by the process that was down. A watch inside the process can only report
+while the process is alive, which is exactly when it has nothing to report.
+
+`backend/src/scripts/external-monitor.ts` probes the live site and exits non-zero on any failure:
+`/api/health` must be 200 with `database: connected`; `/api/version` and `/version.json` must both
+be 200 and **must serve the same sha**; and no *enabled* ingestion source may be past its
+`expected_interval_hours`. It never POSTs to `/api/internal/events` — when `DISCORD_WEBHOOK_URL` is
+configured it posts **straight to the webhook** and says in the message that it bypassed the
+application's routing, which is the W7 fallback reasoning taken to its conclusion: a deploy that
+broke the backend is exactly when the backend cannot be trusted to say so. With no webhook, the
+failed run is the alert and nothing else is invented.
+
+**⛔ SCHEDULED WORKFLOWS DO NOT RUN ON `gitea.example.invalid`.** Measured on 2026-08-10, not assumed.
+The instance is 1.25.5 — five minor versions past the release that added the feature — and
+`monitor.yml` registered `active` on the default branch and then sat through the 04:30 and 04:45
+ticks without a run. So every repository on the instance was checked: **eight workflows across 82
+repositories declare a cron schedule, and the number of `schedule`-triggered runs that have ever
+existed is zero.** `na/minobi`'s `watchdog.yml` asks for `*/5 * * * *` and has 20,493 runs, every
+one of them a push. Somebody already believes they have a watchdog and they do not.
+`workflow_dispatch` and `workflow_run` both fire normally, so this is the scheduler specifically
+and not Actions. The likely cause is the instance's cron being off in `app.ini`, which is an
+operator change on the Gitea host — **and it would light up eight workflows at once.**
+
+**What runs today, given that.** The `schedule:` block stays, because it is correct and starts
+working the day the instance does. `workflow_dispatch` is proven: run 26478 probed production green
+from a `POST …/actions/workflows/monitor.yml/dispatches` that answers 204, and the exact request is
+in the workflow's header comment, so a Tracker routine or anything else holding a token can drive
+it. And `deploy.yml` now runs the identical probe as its last step — not a substitute for a
+periodic check and not offered as one, but aimed at the failure that actually happened, because the
+existing "Verify the site responds" step proves only that `/api/health` answers 200 while the images
+roll independently.
+
+**A disabled source is not a stale source, and a never-run one is not either.** All three
+registered sources are disabled, so the monitor reports three skips and passes — correct rather
+than lucky: its subject is whether what we turned on is running, and nothing is turned on. An
+enabled source with a stated interval that has **never** swept is a *warning*, not a failure,
+because the public feed does not record when a source was enabled and the first minute after an
+operator enables Gallatin is exactly that state. Only an enabled source with an interval and a
+successful sweep older than that interval fails the run. The arithmetic is recomputed from the raw
+figures against the monitor's own clock rather than read from the feed's `silence.verdict`: an
+external monitor does not ask its subject how it is doing.
+
+**No `npm install` anywhere on the path.** Node 22 strips TypeScript types natively (v22.23.2 in
+`node:22-bookworm`), so the workflow is one `docker run` of a stock image over a single
+dependency-free file. A monitor whose green run depends on the npm registry goes red for reasons
+that have nothing to do with the site. That is also why the file has no local imports — one
+`import "./x"` would buy back the whole build step.
+
+The judgement is a tested module and not shell `if` statements, which is the difference between a
+monitor and a monitor-shaped thing: 27 tests over healthy, database disconnected, 502, 403 at the
+Caddy allowlist, nothing answering at all, version skew, two `unknown` shas, stale, never-run,
+disabled, an empty registry and three shapes of malformed response.
+
+**The runner label is load-bearing.** `dh1` only. The live site is IP-gated at Caddy and `dh1` is
+the only runner proven to get through it; `ubuntu-latest` has never made an outbound request to the
+site, so its egress address is unproven and a monitor red because of its own network position is a
+monitor people mute.
+
+Counts after the external monitor: backend **894 tests / 226 suites**, frontend **383 / 39**, both
+green. Backend lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+
+## Donor-to-vote correlation and the officials page have landed
+
+Tier C of `docs/superpowers/specs/2026-08-09-archive-salvage-design.md`, rebuilt rather than
+ported: `follow-the-money` and `vote-tracker`'s domain logic as plain services, with no
+`agent_registry`, `createTask`, `acquireLock` or `HeartbeatExecutor`. Migration 050.
+
+**`vote_donor_conflict` is raised at last.** It has been a legal `anomaly_flag_type` since
+migration 020 and nothing has ever raised it, because there was nowhere to put a contribution.
+`campaign_contributions` and `campaign_expenditures` are that place, and the OpenFEC client that
+landed with A2 and had never been called is what fills them, through `http_cache`. The rule is
+`services/finance/correlation.ts`, and it is the seventh check in `detectAnomalies`.
+`RULES_VERSION` is `4.0.0`.
+
+**Every finding is held, always.** Every one names a living person, so the draft sets
+`review_state: 'held'` regardless of severity and the threshold in `review/policy.ts` can only add
+holds. There is no configuration under which one of these publishes itself.
+
+**Uncertainty is modelled, not glossed.** A donor-to-agenda link is a *name* match and there is no
+identifier shared between the FEC's contributor field and a clerk's agenda text. So the matcher
+returns a band — `weak`, `moderate`, `strong` — and **there is deliberately no band above
+`strong`**; adding one would be a defect rather than an improvement. `moderate` is the floor to
+raise anything. The band, the score, the terms that matched, the terms that did not and the terms
+the matcher was blind to are all *stored on the finding* rather than recomputed, because the
+generic-term list will grow and an approved claim must keep meaning what it meant when a human read
+it.
+
+**Non-partisanship is structural here, not careful.** Every entity-class word — `llc`, `union`,
+`pac`, `foundation`, `association`, `developers`, `trade`, and the party words — is erased in
+`name-match.ts` *before* any decision is taken, so a corporation, a union, a PAC, a nonprofit, a
+developer and a trade association with the same distinctive name produce byte-identical output.
+Two tests hold it: six filings differing only in class must yield the same count, severity, band,
+score and (name aside) description; and the rule's own source is scanned for that vocabulary,
+because a detector cannot branch on a category it never names.
+
+**The archive's sentence is gone.** It wrote "voted yes on X **after receiving** a contribution
+from Y" — a sequence offered for the reader to complete. `describeFinding` is a pure function so
+the published sentence can be asserted character by character: the vote, the arithmetic, and in
+plain words that the link is a name match and not a verified identity. It is scanned against the
+review lexicon and against a second list of implied-causation phrases.
+
+**A contribution carrying neither the filing system's identifier nor a document image number is
+dropped before it can enter a claim**, and a finding built only from such records is not raised.
+A dollar figure is not a source. `source_url` is the API request with the key stripped, because
+that column is read by an unauthenticated API.
+
+**Federal only, and it says so where it will be read.** OpenFEC holds federal filings; a city or
+county commissioner ordinarily has none, so the ordinary result is *nothing found*, and the
+distance between that and *received nothing* is the whole of the credibility here.
+`services/finance/coverage.ts` is the single copy of the sentence. It is returned with every
+finance figure, stored inside each finding, reachable without an official at
+`GET /api/officials/finance-coverage`, and rendered on the page **outside every conditional** — the
+`FlagBar` is there whether or not anything is under it. `mt_cers` is listed as `planned` and named
+as not read. **No CERS adapter was built** — the `source_system` CHECK already admits it, so
+landing it is an insert path rather than a rewrite.
+
+**`/officials/:id` is the reader's view of one person**: voting record, attendance, majority
+alignment, twelve months of activity, a timeline of sittings and the donor overlay. Everything goes
+through `publication.ts` and is asserted in **both directions**, withheld then published — a
+profile is arithmetic over meetings, and arithmetic over a withheld record still discloses it.
+There is deliberately **no aggregate donor figure**: it would be a name match about a named person
+that no operator approved. The overlay shows published findings only.
+
+Two things the page refuses to say. A rate computed from nothing renders "Not measured", never
+`0%`. A month with no votes is drawn as a tick on the baseline, never omitted — the empty months
+are the information.
+
+Ingestion is an operator command, `npm run finance-sync`, not a scheduler tick: FEC filing periods
+are quarterly and a fifteen-minute sweep would spend a public API's rate limit re-reading the same
+three months. `OPENFEC_API_KEY` is required; **`DEMO_KEY` is never used**, in code or in tests.
+
+Counts: backend **959 tests / 241 suites**, frontend **409 / 41**, both green. Backend lint: 2
+warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+
+## Open data, the fork path and the meeting calendar have landed
+
+Working from `docs/superpowers/specs/2026-08-04-launch-readiness-design.md` § 2 for the export
+and the licence. **No migration** — none of this needed a schema change, which is itself the
+finding: the publication wall, the content addresses and `jurisdictions.timezone` were all
+already there.
+
+### The bulk export — `/api/data`
+
+**Ten datasets, JSON and CSV, public and unauthenticated.** `jurisdictions`, `commissions`,
+`meetings`, `agenda_items`, `meeting_documents`, `members`, `votes`, `findings`,
+`artifact_references`, `artifacts`. `GET /api/data` is the manifest and computes its own row
+counts, column lists and schema version — there is no maintained list anywhere.
+
+**This is the largest public surface the product has, and it is a new shape of risk.** Every other
+public path takes a meeting id, so a reader who cannot guess one cannot reach a withheld record;
+P6's search takes a *word*, which is why it needed its own wall test. The export takes **nothing**.
+It hands over whole tables, so one missed predicate empties the review queue into a file that looks
+entirely correct. Every query routes through `services/publication.ts` —
+`whereMeetingPublished` and `whereFindingPublic` — and `data-export.test.ts` walks all ten datasets
+in **both formats and both directions**, withheld then published.
+
+Three specific leaks were closed by construction rather than by care:
+
+- **A published flag on an unpublished meeting.** The fixture sets `review_state = 'published'` on
+  the withheld meeting's flag deliberately, because filtering on `review_state` alone would export
+  it along with a sentence of the withheld meeting's content.
+- **`artifacts` is not a table of harmless hashes.** `source_url` on a withheld meeting's document
+  carries that meeting's URL, and a Granicus URL carries its title in the query string. The
+  artifacts dataset is filtered through the publication wall for that reason, and the test asserts
+  the withheld content address never appears.
+- **`storage_key` is never exported.** It addresses bytes this project does not redistribute.
+
+**Provenance travels with the row.** `meetings`, `agenda_items`, `meeting_documents` and `votes`
+each carry `source_artifact_sha256`; `artifact_references` carries the full document-to-artifact
+mapping with the post-redirect `source_url`. **Where the schema records no artifact — `members`,
+`jurisdictions`, `commissions` — the column is absent rather than null**, and `/data` says so in
+words: an empty provenance column reads as a lost source, and no column reads as "there never was
+one", which is the true statement.
+
+**Nothing is buffered.** Keyset batches of 500, written to the response as they are read. Knex's
+`.stream()` needs `pg-query-stream`, which is not a dependency here. **One trap this introduced:**
+`ORDER BY id` resolves against the select list and is fine, while `WHERE id > ?` resolves against
+the tables and is ambiguous on a joined query — and the loop always asks one batch more than it
+needs, so the failure appears only on the *second* batch. `artifact_references` hit it. Datasets
+name their keyset column now.
+
+### The licence, stated per layer
+
+Unchanged from the spec and now stated in code as well as prose: the **compiled dataset is
+CC BY 4.0**, the **code is MIT** per the repository `LICENSE`, and **no licence is asserted over
+the government documents** — they are not ours, and their bytes are not redistributed. The manifest
+carries all three, and an `X-License` / `X-Attribution` header travels with every file because a
+`curl -O` of a CSV keeps no envelope.
+
+### `/data`, and what it stops promising
+
+The page at `/data-license` has been extended and now also answers at **`/data`**, which is the
+address the spec names and the one the JSON-LD points at. `/data-license` still resolves; it has
+been the published address of that page.
+
+**The dataset table is a query**, read from the manifest, so columns and row counts cannot drift
+from what the API serves. It carries `Dataset` JSON-LD whose `distribution` entries are generated
+from that same manifest — a hand-written `contentUrl` is a 404 a search engine publishes on this
+project's behalf.
+
+Three paragraphs of promise came off. The page said the bulk export "is not published yet" while
+describing nightly zips and dated snapshots. The export exists; **the dated archive does not**, and
+the page now says plainly that there is no snapshot and no way to ask what this site said in March.
+Three withheld entries were added because the export made them real: an unpublished meeting, the
+storage key, and the text of an ingestion failure.
+
+### The calendar and the iCal feeds
+
+`/calendar` groups upcoming and recent published meetings by jurisdiction;
+`GET /api/calendar/{jurisdiction_id}.ics` is a subscribable feed. Published meetings only — a
+subscribed calendar keeps fetching long after anyone last looked at the site, so a leak here sits
+in a stranger's phone until they unsubscribe.
+
+**The timezone trap, handled explicitly, because both halves of it are live here.** `meetings` has
+no `scheduled_at`: a `DATE` and a **nullable** `TIME`, naive, with the zone on
+`jurisdictions.timezone`. Composing the instant in the server's zone publishes a 7pm Bozeman
+meeting at one in the afternoon, so the wall time is converted through the jurisdiction's zone with
+`Intl` and emitted as **UTC** — which also means no `VTIMEZONE` block to get wrong, and no `TZID`
+referring to a definition the file does not contain. An unrecognised zone returns null and the
+event is **omitted**, never silently placed in UTC.
+
+**A meeting with no published time is an all-day event** — `DTSTART;VALUE=DATE` with an exclusive
+`DTEND` on the following day — never midnight. Most rows have no time; `00:00` is what a naive cast
+produces, not what the record says.
+
+**A timed event carries no `DTEND` and no `DURATION`.** RFC 5545 §3.6.1 defines that as ending at
+its start, and clients render it as a moment. The record does not state when a meeting adjourned,
+and `DURATION:PT2H` would be the meeting page's deleted *"Adjourned: Not recorded"* row all over
+again — in a file people subscribe to. This is a deliberate decision, not an omission.
+
+UIDs are keyed on the meeting id alone, so a rescheduled meeting updates the subscriber's entry
+rather than appearing twice. **No new runtime dependency:** an `.ics` file is text, folded at 75
+*octets* (not characters — a multi-byte character must not be split across a fold) and escaped by
+hand.
+
+### The fork path
+
+`README.md` was rewritten — it predated almost everything here — plus `CONTRIBUTING.md`,
+`docs/ADAPTERS.md` and `scripts/dev-setup.sh`, **which was executed end to end twice** before any
+of it was written, on Node v22.22.2 and Docker Compose v5.1.4.
+
+`docs/ADAPTERS.md` leads with **what is not config**, because that is what the pitch misleads
+about: hardcoded body lists, jurisdictions created by the registration path, an
+`ingestion_sources.config` that is written once and is lossy for both adapters, and the
+`adapterRegistry` export in `registry.ts` that is a decoy — permanently empty, referenced nowhere,
+while the live list is `createDefaultRegistry()`. Then the contract, the suite's real assertions,
+the fixture and `PROVENANCE.md` discipline, the conduct rules with the vendor-`robots.txt`
+exception and its disclosure condition, the hard line on evasion, and the two worked examples with
+what each live sweep *disproved*.
+
+**Three defects found by actually running the thing**, each of which would have stopped a forker
+in the first hour:
+
+1. **`vite.config.ts` proxied `/api` to port 8000.** No part of this project has ever listened on
+   8000. Every `/api` call from `npm run dev` was a proxy error, which surfaces as an empty
+   response rather than a 404 — so it reads as a broken backend rather than a misdirected proxy.
+   The README had been asserting `:3001` for months.
+2. **`backend/.env.example` carried `commwatch:commwatch-secret` as `DATABASE_URL`.** Those are the
+   MinIO credentials and have never been the Postgres ones, so anyone who exported that file got an
+   authentication failure against a database that was running fine. The file now also opens by
+   saying that **nothing in the Node process reads it** — there is no `dotenv` dependency and no
+   `env_file` in compose — because the larger waste of time was believing it was load-bearing.
+3. **`commissionwatch_test` only exists if the data volume was initialised after
+   `scripts/init-databases.sql` landed.** A carried-over volume leaves `npm test` failing on a
+   missing database while everything else works. `dev-setup.sh` creates it idempotently.
+
+The caveats it cannot fix are written down rather than left to be discovered: the compose stack
+binds fixed host ports with no variable, the `pgdata` volume survives a branch change and produces
+the "migration directory is corrupt" failure, and **no ingestion source is enabled** — which is
+correct, because enabling one means this machine starts fetching a real county's web server.
+
+Counts after this work: backend **926 tests / 229 suites**, frontend **399 / 40**, both green.
+Backend lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+`deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
+
 ## MT CERS — Montana campaign finance has landed, and it has swept
 
 Working from `docs/exploration/mt-cers-spike.md` and
@@ -786,8 +1070,12 @@ Ordered by how much each blocks the product being real.
 7. **Launch readiness**: ~~corrections and dispute policy~~ — **closed 2026-08-10 by B3**, see
    above. `/corrections` publishes the policy and the log, `/corrections/dispute` is the route, and
    disputes reach the operator queue. **This was the gate on making the site public**; the rest of
-   this item is not. Still outstanding: public data export and licensing, backups with a tested
-   restore (see item 8 — `BACKUP_S3_URI` and the cron), accessibility and shareability.
+   this item is not. ~~public data export and licensing~~ — **closed 2026-08-10**: ten datasets in
+   JSON and CSV at `/api/data`, CC BY 4.0 for the compilation and MIT for the code, described on
+   `/data` with `Dataset` JSON-LD. Still outstanding: backups with a tested restore (see item 8 —
+   `BACKUP_S3_URI` and the cron), accessibility, and shareability. Also outstanding from the same
+   spec and deliberately not built: the **dated export archive**, so "what did this site say in
+   March" is still unanswerable, and that is stated on `/data` rather than implied.
 8. ~~**No database backups.**~~ Closed 2026-08-09 by P3. `deploy/backup.sh` takes a nightly
    `pg_dump -Fc` plus a MinIO mirror with 7 daily / 4 weekly retention and emits
    `ops.backup_succeeded` / `ops.backup_failed` through the delivery dispatcher.
@@ -796,8 +1084,10 @@ Ordered by how much each blocks the product being real.
    **Outstanding:** `BACKUP_S3_URI` is unset, so an archive currently never leaves the instance —
    that is a copy, not a backup. Setting it needs a bucket, which costs money and is the operator's
    call. The cron entry also still has to be installed on the host.
-9. **No monitoring.** Nothing alerts if the site goes down or ingestion silently stops. P2's
-   console makes a stalled scraper *visible to an operator who looks*; it does not page anyone.
+9. **No monitoring** — **mostly closed 2026-08-10 by the external monitor, with one operator task
+   left.** See the section below. The probe is built, tested and green against production; what is
+   missing is a periodic trigger, because **scheduled workflows do not fire on this Gitea
+   instance** and that is measured, not suspected.
 10. ~~**No admin authentication.**~~ Closed 2026-08-09 by A1. One operator class, `scrypt` from
     `node:crypto`, revocable server-side sessions in an httpOnly cookie, no public registration.
     The review queue is no longer blocked on it.

@@ -43,6 +43,8 @@ describe("Layout", () => {
       ["Votes", "/votes"],
       // P6: search over the published record.
       ["Search", "/search"],
+      // When these bodies sit, and the iCal feeds behind it.
+      ["Calendar", "/calendar"],
       ["Methodology", "/methodology"],
       // B-e: the public self-serve alerts page. The admin routes are
       // deliberately absent — an operator door does not belong in a public
@@ -190,8 +192,8 @@ describe("Layout", () => {
       within(footerNav).getByRole("link", { name: "Methodology" }),
     ).toHaveAttribute("href", "/methodology");
     expect(
-      within(footerNav).getByRole("link", { name: "Data License" }),
-    ).toHaveAttribute("href", "/data-license");
+      within(footerNav).getByRole("link", { name: "Open data" }),
+    ).toHaveAttribute("href", "/data");
   });
 
   it("offers a skip link to the main content", () => {

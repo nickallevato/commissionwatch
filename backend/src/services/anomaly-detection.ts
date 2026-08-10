@@ -5,17 +5,22 @@ import {
   loadDocumentTimelines,
   scheduledInstant,
 } from "./agenda-diff";
+import { checkVoteDonorConflict } from "./finance/correlation";
 import { anomalyEvents } from "./notification";
 import { loadPolicy, resolveReviewState } from "./review/policy";
 import { ensureApprovalRequests } from "./review/queue";
 
 /**
- * Bumped for P5. `last_minute_agenda_change` no longer means what it meant in
- * 2.0.0 — it is now derived from document version history rather than from
- * ingestion timestamps — and a `detection_runs` row recording which rules
- * produced it is only useful if the version changes when the rules do.
+ * Bumped to 4.0.0: `vote_donor_conflict` is now raised by
+ * `finance/correlation.ts`, where before nothing raised it at all. A
+ * `detection_runs` row recording which rules produced a finding is only useful
+ * if the version changes when the set of rules does.
+ *
+ * 3.0.0 was P5, where `last_minute_agenda_change` stopped meaning what it meant
+ * in 2.0.0 — it is derived from document version history rather than from
+ * ingestion timestamps.
  */
-export const RULES_VERSION = "3.0.0";
+export const RULES_VERSION = "4.0.0";
 
 /**
  * The shape the individual `check*` rules produce — an anomaly that has not
@@ -95,6 +100,11 @@ export async function detectAnomalies(db: Knex, meetingId: string): Promise<Anom
     checkLastMinuteAgendaChange(db, meeting),
     checkUnanimousControversial(db, meeting),
     checkClosedDoorVote(db, meeting),
+    // The seventh rule, and the only one that reads a table outside the
+    // meeting record. It returns drafts that are always `held`; see
+    // `finance/correlation.ts` for why that is structural rather than a
+    // severity decision.
+    checkVoteDonorConflict(db, meeting),
   ];
 
   const results = await Promise.all(checks);
