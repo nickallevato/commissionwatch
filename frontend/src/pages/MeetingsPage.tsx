@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 import { useMeetings, useJurisdictions } from "@/hooks/useMeetings";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { StatusBadge } from "@/components/StatusBadge";
-import { AnomalyBadge, severityOrder } from "@/components/AnomalyBadge";
-import type { Meeting, MeetingStatus, AnomalyFlag } from "@/types";
+import { AnomalyBadge } from "@/components/AnomalyBadge";
+import { severityOrder } from "@/components/severity";
+import type { Meeting, AnomalyFlag } from "@/types";
 
 /** Hairline control on paper — square corners, ink on hover. No pills. */
 const controlClass =
@@ -284,8 +285,4 @@ function MeetingRow({ meeting, anomalies }: MeetingRowProps) {
       </Link>
     </article>
   );
-}
-
-export function meetingStatusLabel(status: MeetingStatus): string {
-  return status.charAt(0).toUpperCase() + status.slice(1);
 }

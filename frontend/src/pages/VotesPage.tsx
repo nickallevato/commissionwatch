@@ -3,13 +3,13 @@ import { useQueries } from "@tanstack/react-query";
 import { useVotes } from "@/hooks/useVotes";
 import { agendaItemsQuery, useMeetings } from "@/hooks/useMeetings";
 import { useMembers } from "@/hooks/useMembers";
+import { VoteBreakdown } from "@/components/VoteBreakdown";
 import {
-  VoteBreakdown,
   VOTE_LABEL,
   VOTE_ORDER,
   tallyVotes,
   type VoteTally,
-} from "@/components/VoteBreakdown";
+} from "@/components/vote-tally";
 import type { AgendaItem, Vote } from "@/types";
 
 const controlClass =

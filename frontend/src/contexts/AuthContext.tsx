@@ -1,35 +1,5 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-
-export interface Operator {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  last_login_at: string | null;
-}
-
-interface AuthContextValue {
-  operator: Operator | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signOut: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
-  return ctx;
-}
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AuthContext, type Operator } from "./auth-context";
 
 /**
  * The session lives in an httpOnly cookie, which JavaScript cannot read by

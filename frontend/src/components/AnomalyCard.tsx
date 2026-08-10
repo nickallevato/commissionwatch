@@ -1,20 +1,7 @@
 import { Link } from "react-router-dom";
 import { SeverityMark } from "@/components/AnomalyBadge";
-import type { AnomalyFlag, AnomalyFlagType, Meeting } from "@/types";
-
-/**
- * Keyed by the `anomaly_flag_type` enum — the single source of display names.
- * Sentence case, and deliberately descriptive rather than accusatory: a flag
- * marks something for a person to read, it does not assert wrongdoing.
- */
-export const flagTypeLabels: Record<AnomalyFlagType, string> = {
-  emergency_session: "Emergency session",
-  closed_door_vote: "Closed-door vote",
-  last_minute_agenda_change: "Last-minute agenda change",
-  quorum_issue: "Quorum issue",
-  unanimous_controversial: "Unanimous vote on a contested item",
-  missing_minutes: "Minutes not published",
-};
+import { flagTypeLabels } from "@/components/flag-labels";
+import type { AnomalyFlag, Meeting } from "@/types";
 
 /** How the flag entered the ledger. Provenance is part of the citation. */
 const sourceLabels: Record<AnomalyFlag["source"], string> = {

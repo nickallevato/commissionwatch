@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { AnomalyBadge, SeverityMark, severityRank } from "./AnomalyBadge";
+import { AnomalyBadge, SeverityMark } from "./AnomalyBadge";
+import { severityRank } from "./severity";
 
 describe("AnomalyBadge", () => {
   it("renders nothing when count is 0", () => {

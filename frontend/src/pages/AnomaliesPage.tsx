@@ -1,12 +1,13 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { useMeetings } from "@/hooks/useMeetings";
-import { AnomalyCard, flagTypeLabels } from "@/components/AnomalyCard";
+import { AnomalyCard } from "@/components/AnomalyCard";
+import { flagTypeLabels } from "@/components/flag-labels";
 import {
   severityLabels,
   severityOrder,
   severityRank,
-} from "@/components/AnomalyBadge";
+} from "@/components/severity";
 import type { AnomalyFlagType } from "@/types";
 
 /** Every member of the `anomaly_flag_type` enum, in filter-menu order. */

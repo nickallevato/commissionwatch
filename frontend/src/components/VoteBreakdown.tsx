@@ -1,32 +1,6 @@
 import { useState } from "react";
+import { VOTE_LABEL, VOTE_ORDER, tallyVotes } from "@/components/vote-tally";
 import type { Vote, Member, VoteValue } from "@/types";
-
-/**
- * Every member of the Postgres `vote_value` enum, in tally display order.
- * This is the only vote vocabulary the interface speaks: yes / no / abstain /
- * absent. Never "yea" / "nay" — the database does not store those.
- */
-export const VOTE_ORDER: VoteValue[] = ["yes", "no", "abstain", "absent"];
-
-/** Display capitalisation for each `vote_value`. */
-export const VOTE_LABEL: Record<VoteValue, string> = {
-  yes: "Yes",
-  no: "No",
-  abstain: "Abstain",
-  absent: "Absent",
-};
-
-/** Counts keyed by every `vote_value`, including the zeroes. */
-export type VoteTally = Record<VoteValue, number>;
-
-/** Count a set of cast votes into a complete tally. */
-export function tallyVotes(votes: Vote[]): VoteTally {
-  const counts: VoteTally = { yes: 0, no: 0, abstain: 0, absent: 0 };
-  for (const vote of votes) {
-    counts[vote.vote] += 1;
-  }
-  return counts;
-}
 
 const voteColor: Record<VoteValue, string> = {
   yes: "text-pass",

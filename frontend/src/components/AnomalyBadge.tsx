@@ -1,33 +1,5 @@
+import { severityLabels, severityRank } from "@/components/severity";
 import type { AnomalySeverity } from "@/types";
-
-/**
- * The four `anomaly_severity` enum members projected onto the 1–5 scale the
- * editorial palette is built around: 4–5 accent red, 3 amber, 1–2 grey.
- * The numeral is the primary signal; colour only reinforces it, because colour
- * alone is not an accessible way to encode severity.
- */
-export const severityRank: Record<AnomalySeverity, number> = {
-  critical: 5,
-  high: 4,
-  medium: 3,
-  low: 2,
-};
-
-/** Sentence-case display names for the severity enum. */
-export const severityLabels: Record<AnomalySeverity, string> = {
-  critical: "Critical",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
-
-/** Descending — highest first. Filter menus and max-severity lookups use this. */
-export const severityOrder: AnomalySeverity[] = [
-  "critical",
-  "high",
-  "medium",
-  "low",
-];
 
 /**
  * Square fill plus numeral colour. Written as whole literal class names so the
