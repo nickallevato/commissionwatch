@@ -1,8 +1,8 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after landing P2 (the Pressroom console) and the deploy healthcheck
-> fix. Previously 2026-08-09, after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman
-> Granicus adapter).
+> Last updated: 2026-08-10, after landing P5 (the agenda diff timeline) and P6 (full-text search).
+> Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
+> 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
 
 ## Archive salvage — what has landed
@@ -14,7 +14,7 @@ Working from `docs/superpowers/specs/2026-08-09-archive-salvage-design.md`.
 | A4 · `vote_donor_conflict` anomaly type | **Landed.** Migration 020. The enum carries seven values. |
 | A2 · OpenFEC client | **Landed.** Migrations 021, plus `HttpCache` and `OpenFecClient`. No orchestration framework came with it. Needs `OPENFEC_API_KEY` to make a live call; every test is fixture-based. |
 | A1 · Operator authentication | **Landed.** Migrations 022–023, scrypt passwords, server-side sessions in an httpOnly cookie, `/api/admin/*` closed by default, CORS split. |
-| A3 · Embedding client | **Withdrawn.** Nothing consumes embeddings; see the spec. |
+| A3 · Embedding client | **Withdrawn.** Nothing consumes embeddings; see the spec. The want underneath it — *find me everything about this* — is answered by P6's Postgres full-text search instead. |
 | B-e · Subscriptions and delivery | **Landed.** Migrations 024–025. A subscription is a destination, a filter and a cadence. SMS added with consent and a per-day cap. |
 | B-d · Records requests | **Landed.** Migrations 026–027. A hand-obtained document takes the identical path as a scraped one, and records-derived flags are held, never published. |
 
@@ -147,6 +147,57 @@ purpose — a version row losing its evidence silently would leave a citation po
 So a fixture teardown must drop meetings *before* artifacts, since the meeting cascade is what
 releases them. `ingestion-handlers.test.ts` had the opposite order and failed loudly, which is the
 constraint working.
+
+## P6 — full-text search has landed
+
+Working from `docs/superpowers/specs/2026-08-09-phase-2-design.md` § P6 and
+`docs/superpowers/plans/2026-08-10-full-text-search.md`. Migration 035.
+
+**This is the honest replacement for the withdrawn embedding work**, not a step towards it.
+PostgreSQL answers *find me everything about this* with no vendor, no API key, no per-call cost and
+no dimension decision. `document_embeddings` and `vector(1536)` are untouched, and if
+exact-and-stemmed search proves insufficient in practice, *that* is the evidence that would justify
+revisiting embeddings — with a requirement attached.
+
+`GET /api/search?q=` is public and unauthenticated, paginated, and returns results discriminated by
+`kind`: `agenda_item`, `meeting`, `member`, `document`. `websearch_to_tsquery` takes quoted phrases
+and `-exclusions`; `ts_headline` returns the matching sentence.
+
+**Search is the only public surface that could walk straight through the publication wall.** Every
+other path takes a meeting id, so a reader who cannot guess one cannot reach a withheld record.
+Search takes a *word*. Every meeting-derived query goes through `whereMeetingPublished` — which
+gained an optional column argument so a joined query can name `m.published_at` rather than leave
+`published_at` to become ambiguous — and `search.test.ts` asserts the wall **in both directions**:
+an unpublished meeting, its agenda items and its document text are absent, and publishing the
+meeting makes all three appear. Absence alone also holds for a search that returns nothing at all.
+
+**Two schema facts the spec did not have.** `meetings` has no `title` — its only free text is
+`location`, which is a venue and not a title, so it takes weight `B` and nothing in that table earns
+`A`. The name a reader calls the sitting is `commissions.name`, and a `GENERATED ALWAYS` column may
+not reference another table; the commission name heads the *result* instead, which is display and
+not the index. And **nothing held the extracted text of an artifact**: the parse stage discarded it
+once agenda items had been read out, so the body of every document — where most terms appear — had
+no column to index. `artifact_texts` holds the text and its vector in the same row, which is what
+makes the generated column legal at all.
+
+**Only agendas are searchable by body.** `parse` returns early for minutes and packets, so their
+contents are stored and citable but not extracted. The search page says so rather than letting a
+reader who finds nothing wonder whether that is the record or the pipeline.
+
+`ts_headline` marks matches with **control characters, never `<b>`**. The text being highlighted came
+out of third-party PDFs and HTML; returning markup for the page to inject would be an XSS hole
+opened for a typographic effect. `SearchPage` splits on the delimiters and builds `<mark>` elements.
+
+**Deliberately not built**, and named in the plan rather than silently omitted: fuzzy matching,
+synonym expansion, semantic similarity, and per-user search history. One known limitation is
+recorded too — concatenating weighted vectors with `||` shifts positions, so a phrase query can
+match across a title/description boundary. It is an occasional over-broad hit, never a leak.
+
+An empty or stopword-only query answers **200 with an empty list**, as does an empty database. With
+production holding zero rows, that is the ordinary case here rather than the edge one.
+
+Counts after P6: backend **721 tests / 177 suites**, frontend **211 / 27**, both green, zero lint
+errors. `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
 ## Live state
 
