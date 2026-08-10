@@ -361,7 +361,54 @@ entity, politely, and store what it gets. That is the honest reading.
 
 ---
 
-## 9. Reproduction
+## 9. Corrections and additions, from writing the adapter — 2026-08-10
+
+The access findings above all held. Three things the manual probe could not have found, because
+`curl` and Python's `urllib` both hide them behind a cookie jar that does the right thing:
+
+**`JSESSIONID` is set on the 302, not on the 200.** `GET /public/search/candidateSearch` answers
+`302` with three `Set-Cookie` headers and a `Location` carrying a rewritten `;jsessionid=…`. A
+client that lets `fetch` follow the redirect sees only the final response's headers and never
+receives the session. The consequence is not an error: every subsequent search runs in a fresh
+session and answers **`iTotalRecords: 0` under HTTP 200**. A silent zero is the worst failure mode
+a transparency source can have, and it is the reason the adapter walks redirect hops itself.
+
+**A response can set three cookies at once.** `JSESSIONID`, `TS019606d9` and `TS01d6b3be` arrive
+together. Any client that flattens headers into a string map keeps one of them, and it is not the
+session.
+
+**CERS answers 200 with a zero-byte body** — not `[]` — for a schedule that does not apply, e.g.
+`expendIndependent` on an ordinary candidate C-5. Distinguishing "nothing to parse" from "something
+unparseable" matters, because the second is what a WAF interstitial looks like.
+
+One count in §5 was incomplete rather than wrong: the roster endpoint pages, and a single 100-row
+request against the 342-record city target returns 100. The first real sweep wrote 142 filers where
+384 exist, with `iTotalRecords` saying so in the same response.
+
+### The first real sweep — 2026-08-10
+
+Rate-limited, one request every two seconds, never concurrent, honest user agent, against the live
+host. Run status **`succeeded`**.
+
+| | |
+|---|---|
+| `cf_filers` | **384** — 42 Gallatin County Commissioner candidacies + 342 city candidacies resident in Gallatin |
+| `cf_reports` | **35** filed reports |
+| `cf_transactions` | **127** — 70 contributions totalling **$18,910.00**, 57 expenditures totalling $18,948.00 |
+| `artifacts` | **45**, content-addressed, 2,161,386 bytes, bytes in MinIO |
+| `ingestion_jobs` | 137, all terminal |
+| `meetings` | **0**, and `commissions` under *State of Montana* is **0** — no body was invented to make a filing fit |
+| `derived_jurisdiction` | **0 of 384 set** — nothing inferred was stored |
+| Citations | all 127 transactions cite one of 30 stored artifacts |
+
+Largest single contribution landed: **Gallatin County Republican Central Committee, $2,250.00,
+2025-08-22**. This is the kind of row the project could not previously hold for any official it
+watches, and it came from a local county filing that has no federal counterpart.
+
+`residence_city` was read for 381 of 384; the other three addresses did not match the
+`…, City, ST ZIP` shape and were left NULL rather than guessed at.
+
+## 10. Reproduction
 
 Every request in this document was issued by an ad-hoc scripted client holding a cookie jar, with a
 3-second floor between requests and no concurrency. The responses the adapter is tested against are

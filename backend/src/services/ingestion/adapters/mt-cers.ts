@@ -255,6 +255,22 @@ function requiredNumber(value: unknown, field: string): number {
  * the answer is to read what the body says and stop — not to teach the adapter
  * to parse it. See the hard-line note at the top of this file.
  */
+/**
+ * True when CERS answered 200 with nothing at all.
+ *
+ * Observed on the first real sweep: `financeRepDetailList` for
+ * `expendIndependent` on a candidate C-5 returns a **zero-byte** body rather
+ * than `[]`. There is genuinely nothing to parse, and failing the job made the
+ * whole run `partial` forever over a schedule that simply does not apply.
+ *
+ * It is narrower than "falsy body" on purpose: an empty body is nothing to
+ * parse, whereas a short *non-empty* body that is not JSON is a signal — a WAF
+ * interstitial arrives looking exactly like that — and must still throw.
+ */
+export function isEmptyBody(bytes: Uint8Array): boolean {
+  return new TextDecoder('utf-8').decode(bytes).trim() === '';
+}
+
 export function expectJson(bytes: Uint8Array, url: string): unknown {
   const text = new TextDecoder('utf-8').decode(bytes);
   try {
@@ -456,11 +472,25 @@ export function advanceSession(
 }
 
 /**
- * A stable identity for one exchange: where the session was, plus the request.
+ * A stable identity for one exchange: the request, plus **only** the session
+ * state that determines its response.
  *
- * DataTables paging parameters are dropped from the URL because they are noise
- * — `sEcho` in particular is a browser cache-buster and would make every
- * recording unique.
+ * The "only" is load-bearing and was learned by getting it wrong. Keying on the
+ * whole position made the tape depend on the order the recorder happened to
+ * walk in: fetching the same roster twice, or opening candidate B's report
+ * before candidate A's, produced keys that had never been recorded even though
+ * the responses were identical. The fix is to say per endpoint what the server
+ * actually reads:
+ *
+ *  - `listCandidateResults`  — the search last run
+ *  - `publicReportList`, `listFinanceReports` — the candidate selected
+ *  - `financeRepDetailList`  — the candidate and the report opened
+ *  - everything else (the POSTs that *set* that state, the session page) —
+ *    nothing but the request itself
+ *
+ * DataTables paging parameters are dropped, because `sEcho` is a browser
+ * cache-buster and would make every recording unique, and `;jsessionid=…` is
+ * dropped because it is per-session by definition.
  */
 export function cersExchangeKey(
   position: CersSessionPosition,
@@ -468,17 +498,21 @@ export function cersExchangeKey(
 ): string {
   const url = new URL(request.url);
   const page = url.searchParams.get('iDisplayStart') ?? '';
-  // `;jsessionid=…` is per-session and must not enter the key.
   const path = url.pathname.replace(/;jsessionid=[^/;?]*/gi, '');
-  return [
-    position.search,
-    position.candidateId,
-    position.reportId,
-    request.method,
-    path,
-    page,
-    request.body ?? '',
-  ].join('|');
+
+  let context = '';
+  if (path.endsWith('/searchResults/listCandidateResults')) {
+    context = position.search;
+  } else if (
+    path.endsWith('/publicReportList') ||
+    path.endsWith('/publicReportList/listFinanceReports')
+  ) {
+    context = position.candidateId;
+  } else if (path.endsWith('/viewFinanceReport/financeRepDetailList')) {
+    context = `${position.candidateId}/${position.reportId}`;
+  }
+
+  return [context, request.method, path, page, request.body ?? ''].join('|');
 }
 
 // ---------------------------------------------------------------------------
@@ -503,8 +537,27 @@ export interface CersAdapterOptions {
   now?: () => Date;
 }
 
-const DEFAULT_MAX_CANDIDATES = 25;
-const DEFAULT_MAX_REPORTS = 12;
+/**
+ * The caps, and why they are this small.
+ *
+ * At one request every two seconds a sweep's duration is arithmetic, not a
+ * guess: a report costs five requests (open it, then one per schedule), a
+ * candidate costs two plus its reports, and a target costs two plus its
+ * candidates. Five candidates × three reports × four schedules across two
+ * targets is roughly 300 requests, about ten minutes — which fits inside the
+ * scheduler's sweep timeout. Twenty-five × twelve, the first draft, is over
+ * three thousand requests and close to two hours: it would have timed out every
+ * night, left its jobs queued, and looked like a broken scraper rather than an
+ * unreasonable setting.
+ *
+ * **Known limitation.** The cap slices the roster in the order CERS returns it,
+ * which is alphabetical, so a target with more candidates than the cap always
+ * sweeps the same ones and never reaches the rest. That is a real gap and it is
+ * recorded here rather than hidden behind a comfortable default; closing it
+ * needs a cursor in `ingestion_sources.config`, which is separate work.
+ */
+const DEFAULT_MAX_CANDIDATES = 5;
+const DEFAULT_MAX_REPORTS = 3;
 const DEFAULT_PAGE_SIZE = 100;
 
 /** 2 seconds between requests, one at a time. Never concurrent. */
@@ -512,6 +565,9 @@ const MIN_DELAY_MS = 2000;
 
 /** Redirect hops followed before giving up. CERS uses one; a loop is a defect. */
 const MAX_REDIRECTS = 5;
+
+/** Upper bound on roster pages walked, so a bad `iTotalRecords` cannot spin. */
+const MAX_ROSTER_PAGES = 20;
 
 const NOTES =
   'Montana campaign finance (CERS, cers-ext.mt.gov/CampaignTracker). The host publishes no ' +
@@ -624,10 +680,25 @@ export class CersAdapter implements SourceAdapter {
     const refs: DocumentRef[] = [];
 
     for (const target of this.targets) {
-      const roster = await this.loadRoster(target);
-      refs.push(this.rosterRef(target, roster.iTotalRecords));
+      // Every page, not just the first. The first real sweep wrote 142 filers
+      // against 384 that exist, because a single 100-row page was read and the
+      // shortfall was invisible — `iTotalRecords` was right there saying so.
+      const roster: CersCandidate[] = [];
+      for (let start = 0; start < MAX_ROSTER_PAGES * this.pageSize; start += this.pageSize) {
+        const page = await this.loadRoster(target, start);
+        // The first page is always recorded, even when empty: "this target has
+        // no candidates" is a fact about the record and needs an artifact
+        // behind it like any other.
+        if (start === 0 || page.aaData.length > 0) {
+          refs.push(this.rosterRef(target, page.iTotalRecords, start));
+        }
+        roster.push(...page.aaData);
+        // A short page ends the walk as well as the count does, so a source
+        // that misreports its own total cannot make this spin.
+        if (page.aaData.length === 0 || roster.length >= page.iTotalRecords) break;
+      }
 
-      const candidates = roster.aaData
+      const candidates = roster
         .filter((candidate) => this.isWithin(candidate, minimumYear))
         .slice(0, this.maxCandidates);
 
@@ -655,16 +726,21 @@ export class CersAdapter implements SourceAdapter {
     return year >= minimumYear;
   }
 
-  private rosterRef(target: CersSweepTarget, total: number): DocumentRef {
+  private rosterRef(target: CersSweepTarget, total: number, start: number): DocumentRef {
     const params = {
       campaignType: target.campaignType,
       countyCode: target.countyCode,
       ...(target.officeCode === undefined ? {} : { officeCode: target.officeCode }),
+      // Part of the identity, not decoration: two pages of the same roster are
+      // two different documents and must not share a URL.
+      start: String(start),
+      length: String(this.pageSize),
     };
+    const page = Math.floor(start / this.pageSize) + 1;
     return {
       sourceKey: this.key,
       kind: 'other',
-      title: `CERS candidate roster — ${target.label} (${total} records)`,
+      title: `CERS candidate roster — ${target.label}, page ${page} of ${total} records`,
       url: recordUrl('public/searchResults/listCandidateResults', params),
       expectedContentType: 'application/json',
       metadata: {
@@ -811,8 +887,14 @@ export class CersAdapter implements SourceAdapter {
       key: metadata.target ?? 'target',
       label: metadata.targetLabel ?? 'target',
     });
+    const start = Number(metadata.start ?? '0');
+    const length = Number(metadata.length ?? String(this.pageSize));
     return this.getBytes(
-      `${BASE_URL}/public/searchResults/listCandidateResults?${dataTablesQuery(0, this.pageSize, 9)}`,
+      `${BASE_URL}/public/searchResults/listCandidateResults?${dataTablesQuery(
+        Number.isFinite(start) ? start : 0,
+        Number.isFinite(length) && length > 0 ? length : this.pageSize,
+        9,
+      )}`,
     );
   }
 
@@ -896,9 +978,10 @@ export class CersAdapter implements SourceAdapter {
 
   private async loadRoster(
     target: CersSweepTarget,
+    start: number,
   ): Promise<DataTablesEnvelope<CersCandidate>> {
     await this.runCandidateSearch(target);
-    const url = `${BASE_URL}/public/searchResults/listCandidateResults?${dataTablesQuery(0, this.pageSize, 9)}`;
+    const url = `${BASE_URL}/public/searchResults/listCandidateResults?${dataTablesQuery(start, this.pageSize, 9)}`;
     return parseEnvelope(expectJson(await this.getBytes(url), url), url, toCandidate);
   }
 

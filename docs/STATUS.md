@@ -517,6 +517,93 @@ Counts after B3: backend **867 tests / 221 suites**, frontend **330 / 36**, both
 lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
 `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## MT CERS — Montana campaign finance has landed, and it has swept
+
+Working from `docs/exploration/mt-cers-spike.md` and
+`docs/superpowers/plans/2026-08-10-mt-cers.md`. Migrations 041–042.
+
+**This is the money source for local office.** OpenFEC covers *federal* candidates; a Gallatin
+County Commissioner and a Bozeman City Commissioner have no federal filings at all, so until now
+"follow the money" could say nothing about the officials this project exists to watch.
+
+**Nobody had ever looked at CERS, and the one data point we had was misleading.** A guessed path
+returned 404 with a 26 KB body, which reads like a wall. It is not one: the search forms POST to a
+*relative* action resolved against `/CampaignTracker/public/search`, so `searchResults/…` lands one
+level **up**, and the guess put it one level down. The host publishes **no `robots.txt` at all**
+(`/robots.txt` is a Tomcat 404, not a `Disallow`), there is no login, no CAPTCHA and no user-agent
+discrimination. **No access exception is claimed for this source and none is needed** — this is the
+cleanest posture of any source in the project, cleaner than Gallatin and far cleaner than Granicus.
+
+**"A structured system, not PDF scraping" is confirmed as to structure and refuted as to bulk.**
+CERS is a server-side DataTables JSON API. There is **no CSV, no export, no bulk file and no
+documented API** — the only export affordance in the whole application is a `window.print()` button.
+Records are walked entity by entity at one request every two seconds.
+
+**A real sweep ran on 2026-08-10 and reported `succeeded`.** What landed locally:
+
+| | |
+|---|---|
+| `cf_filers` | **384** — 42 Gallatin County Commissioner candidacies, 342 city candidacies resident in Gallatin |
+| `cf_reports` | **35** filed reports (C-5, C-7, amendments) |
+| `cf_transactions` | **127** — 70 contributions totalling **$18,910.00**, 57 expenditures |
+| `artifacts` | **45**, content-addressed, 2.16 MB, bytes in MinIO |
+| `meetings` / `commissions` under *State of Montana* | **0 and 0** |
+
+**A CERS record has no URL, and that shaped the design.** Its criteria live in an HTTP session, so
+obtaining one contribution schedule means replaying four requests in order. `DocumentRef.metadata`
+carries that chain and `fetchDocument` replays it; `ref.url` is the endpoint plus those parameters —
+a stable, unique, readable identity that is deliberately **not** dereferenceable. `advanceSession`
+writes the protocol down once and both the adapter and the fixture harness use it, because a fixture
+keyed on the request alone would serve one candidate's contributions for every candidate and every
+test would pass.
+
+**CERS publishes no meetings, so the adapter invents none.** The `discover` handler is entirely
+meeting-shaped, and the alternative to changing it was to manufacture a meeting per filing period —
+a fabricated public record in `meetings`, written to reuse a function. `SourceAdapter` gained an
+optional `discoverDocuments`, whose refs are enqueued for `fetch` with no meeting id and routed in
+`parse` on the record kind their own adapter stamped. **Nothing sniffs bytes**: a stored artifact's
+meaning comes from the ref that asked for it. The contract suite now asserts the invariant in both
+directions — an adapter declares bodies **exactly when** it discovers meetings.
+
+**Every transaction cites a stored artifact**, in a `NOT NULL` column with no `ON DELETE CASCADE`.
+An unsourced contribution cannot be inserted and deleting the evidence under a stored one fails
+loudly; both are tested. Idempotency is `(artifact_id, row_index)` — an amendment is different
+bytes, therefore its own artifact and its own rows, which is right, because an amendment is a second
+thing the filer said rather than a correction to the first.
+
+**Two shared-transport bugs surfaced while recording fixtures**, and both produced *silent wrong
+answers* rather than errors. `fetch` exposes only the final response's headers and CERS mints
+`JSESSIONID` on a **302**, so following redirects in the transport made every search run in a fresh
+session and return `iTotalRecords: 0` **under HTTP 200**. And `HttpResponse.headers` is a flat map
+while CERS sets three cookies at once, so exactly one survived and it was not the session.
+`HttpRequest.redirect` and `HttpResponse.setCookies` exist because of those; `setCookies` is
+optional so every existing fixture double stays valid.
+
+**Two things the first live sweep taught, both now covered by tests.** CERS answers 200 with a
+**zero-byte** body — not `[]` — for a schedule that does not apply, which is counted as
+`cf_empty_body` rather than folded into "0 rows", because "they published nothing here" and "they
+published an empty list" are different statements. And the roster **pages**: the first sweep wrote
+142 filers where 384 exist, with `iTotalRecords` saying so in the same response. Each page is now
+its own record, with the offset in its identity.
+
+**Known limitation, recorded rather than hidden.** The per-target candidate cap slices the roster in
+CERS's own alphabetical order, so a target with more candidates than the cap always sweeps the same
+ones. Closing it needs a cursor in `ingestion_sources.config`. The caps themselves are small on
+purpose: at 2 s per request the first draft's 25×12 would have been over 3,000 requests and nearly
+two hours, timing out every night and looking like a broken scraper.
+
+**Deliberately not built:** no public route, no frontend, no donor-to-vote join, no committee sweep.
+Candidates' home addresses, personal emails and telephone numbers are in these filings; they are
+**stored and never surfaced**, and publishing them is an operator decision, not a default.
+
+The source stays **disabled**. Migration 042 rewrites 037's `disabled_reason`, which said "No
+adapter has been written for this source yet" and is published verbatim on the **public** status
+page — leaving it would put a false statement about our own ingestion on the page whose purpose is
+that absences are honest.
+
+Counts after MT CERS: backend **989 tests / 247 suites**, green. Backend lint: 2 warnings, 0
+errors — the same two deliberate ones.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
@@ -689,7 +776,11 @@ Ordered by how much each blocks the product being real.
    operator approval as the only thing that makes a finding public. What remains of this item is
    the *generated narrative* — a finding today is the detector's own sentence, not composed prose.
 3. ~~**Bozeman adapter.**~~ Closed 2026-08-09 by P4. `backend/src/services/ingestion/adapters/bozeman-granicus.ts`, registered **disabled**, swept for real (below). `bozemanmt.gov` is still a blanket Akamai deny and is never fetched. ~~Outstanding from the same backlog item: the **public-records-request page**~~ — closed 2026-08-10 by P7, though it can draft nothing until `jurisdiction_records_law` is populated. See above.
-4. **MT CERS campaign finance** (`cers-ext.mt.gov/CampaignTracker`). Not started.
+4. ~~**MT CERS campaign finance**~~ (`cers-ext.mt.gov/CampaignTracker`). Closed 2026-08-10 — the
+   adapter is written, registered **disabled**, and a real rate-limited sweep landed 384 filers,
+   35 filed reports and 127 itemised transactions. See above. Outstanding from the same item: no
+   public route and no frontend yet, no committee sweep, and the roster cursor named as a known
+   limitation.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.
 6. ~~**W7 delivery channels.**~~ Built. Channels, routes, encryption, the Discord transport, and — as of B-e — cadence, SMS, and a self-serve subscriber surface on the same substrate. Nothing dispatches product events yet, because nothing ingests.
 7. **Launch readiness**: ~~corrections and dispute policy~~ — **closed 2026-08-10 by B3**, see

@@ -67,6 +67,24 @@ export interface AdapterContractFixtures {
   /** How many refs the fixture set must yield. Default 1. */
   minMeetings?: number;
   /**
+   * False for a source that publishes no meetings at all.
+   *
+   * "At least one body, at least one meeting" was written when every source in
+   * this project was a meeting archive, and it encodes a real invariant: a
+   * meeting must be attributable to a body somebody configured. Campaign
+   * finance publishes filings, not sittings — a filed C-5 belongs to a
+   * candidacy and a reporting period and there is no meeting anywhere in it.
+   *
+   * So the invariant is expressed rather than relaxed. With this false the
+   * suite asserts the adapter declares no bodies **and** discovers no meetings
+   * — which is stricter than the meeting case, not weaker — and requires it to
+   * implement `discoverDocuments` and return something from it. An adapter that
+   * quietly discovered nothing at all would fail here.
+   */
+  emitsMeetings?: boolean;
+  /** The `since` handed to `discoverDocuments`, when the adapter has one. */
+  documentsSince?: Date;
+  /**
    * The document fetched twice to prove the content address is stable. Defaults
    * to the first document of the first discovered meeting.
    */
@@ -81,15 +99,21 @@ export function runAdapterContract(
   adapter: SourceAdapter,
   fixtures: AdapterContractFixtures,
 ): void {
-  const minMeetings = fixtures.minMeetings ?? 1;
+  const emitsMeetings = fixtures.emitsMeetings ?? true;
+  const minMeetings = emitsMeetings ? (fixtures.minMeetings ?? 1) : 0;
 
   describe(`SourceAdapter contract: ${adapter.key}`, () => {
     let descriptor: SourceDescriptor;
     let meetings: MeetingRef[];
+    let documents: DocumentRef[];
 
     beforeAll(async () => {
       descriptor = adapter.describeSource();
       meetings = await adapter.discoverMeetings(fixtures.since);
+      documents =
+        adapter.discoverDocuments === undefined
+          ? []
+          : await adapter.discoverDocuments(fixtures.documentsSince ?? fixtures.since);
     });
 
     describe('describeSource', () => {
@@ -102,14 +126,21 @@ export function runAdapterContract(
         expect(descriptor.jurisdiction.name.trim().length).toBeGreaterThan(0);
         // jurisdictions.state is varchar(2).
         expect(descriptor.jurisdiction.state).toMatch(/^[A-Z]{2}$/);
-        expect(['city', 'county']).toContain(descriptor.jurisdiction.type);
+        // 'state' has been in the jurisdiction_type enum since migration 037.
+        expect(['city', 'county', 'state']).toContain(descriptor.jurisdiction.type);
         if (descriptor.jurisdiction.websiteUrl !== undefined) {
           expect(isAbsoluteHttpUrl(descriptor.jurisdiction.websiteUrl)).toBe(true);
         }
       });
 
-      it('declares at least one body, each with a listing URL', () => {
-        expect(descriptor.bodies.length).toBeGreaterThan(0);
+      it('declares bodies exactly when it discovers meetings', () => {
+        // Both directions. A meeting source with no bodies cannot attribute its
+        // meetings; a document-only source with bodies would create commission
+        // rows for bodies that never sit.
+        expect(descriptor.bodies.length > 0).toBe(emitsMeetings);
+      });
+
+      it('gives every declared body a listing URL', () => {
         for (const body of descriptor.bodies) {
           expect(body.key).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
           expect(body.name.trim().length).toBeGreaterThan(0);
@@ -233,12 +264,56 @@ export function runAdapterContract(
       });
     });
 
+    describe('discoverDocuments', () => {
+      it('is implemented exactly when the adapter publishes no meetings', () => {
+        // A source that discovers neither meetings nor documents discovers
+        // nothing, and would sweep green forever while ingesting zero rows.
+        expect(adapter.discoverDocuments !== undefined).toBe(!emitsMeetings);
+      });
+
+      it('emits well-formed refs attributed to this adapter', () => {
+        if (adapter.discoverDocuments === undefined) return;
+        expect(documents.length).toBeGreaterThan(0);
+        for (const ref of documents) {
+          expect(ref.sourceKey).toBe(adapter.key);
+          expect(DOCUMENT_KINDS).toContain(ref.kind);
+          expect(ref.title.trim().length).toBeGreaterThan(0);
+          expect(isAbsoluteHttpUrl(ref.url)).toBe(true);
+        }
+      });
+
+      it('gives every ref a distinct identity within one sweep', () => {
+        // Two refs sharing a URL would collide in `meeting_documents` and, for
+        // a source whose URL *is* its chain parameters, would mean two
+        // different records were addressed the same way.
+        const urls = documents.map((ref) => ref.url);
+        expect(new Set(urls).size).toBe(urls.length);
+      });
+
+      it('keeps ref metadata a flat map of strings', () => {
+        // It round-trips through a jsonb column and is read back out narrowed
+        // to strings; anything nested would be silently dropped there.
+        for (const ref of documents) {
+          for (const value of Object.values(ref.metadata ?? {})) {
+            expect(typeof value).toBe('string');
+          }
+        }
+      });
+
+      it('declares every ref URL inside the declared surface', () => {
+        const declaredOrigins = new Set(descriptor.baseUrls.map((url) => new URL(url).origin));
+        for (const ref of documents) {
+          expect(declaredOrigins).toContain(new URL(ref.url).origin);
+        }
+      });
+    });
+
     describe('fetchDocument', () => {
       let ref: DocumentRef;
       let artifact: FetchedArtifact;
 
       beforeAll(async () => {
-        const fallback = meetings.flatMap((meeting) => meeting.documents)[0];
+        const fallback = meetings.flatMap((meeting) => meeting.documents)[0] ?? documents[0];
         const chosen = fixtures.documentRef ?? fallback;
         if (!chosen) {
           throw new Error(

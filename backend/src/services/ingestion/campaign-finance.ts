@@ -5,6 +5,7 @@ import {
   RECORD_KIND_REPORT_INDEX,
   RECORD_KIND_REPORT_SCHEDULE,
   expectJson,
+  isEmptyBody,
   parseEnvelope,
   parseLineItems,
   toCandidate,
@@ -295,6 +296,18 @@ export async function recordCampaignFinance(
   const { db, sourceId, artifactId, metadata } = context;
   const kind = requireMetadata(metadata, "recordKind");
   const url = metadataString(metadata, "sourceUrl") ?? kind;
+
+  // CERS answers 200 with a **zero-byte** body for a schedule that does not
+  // apply — `expendIndependent` on an ordinary candidate C-5, observed on the
+  // first real sweep. There is nothing to parse, so parsing is not attempted;
+  // and the outcome is counted under its own key rather than folded into
+  // "0 rows written", because "they published nothing here" and "they published
+  // an empty list" are different statements about the record. The bytes are
+  // stored either way, so the claim is checkable.
+  if (isEmptyBody(content)) {
+    return { cf_empty_body: 1 };
+  }
+
   const payload = expectJson(content, url);
 
   if (kind === RECORD_KIND_CANDIDATE_ROSTER) {
