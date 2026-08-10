@@ -18,18 +18,44 @@ name: External monitor
 #   docs/superpowers/plans/2026-08-10-external-monitoring.md
 
 on:
-  # Gitea has supported scheduled workflows since 1.20; this instance is 1.25.5
-  # (confirmed via GET /api/v1/version). Gitea registers a schedule from the
-  # workflow file on the DEFAULT BRANCH only, so this fires from main and from
-  # nowhere else.
+  # ⚠ THE SCHEDULE DOES NOT FIRE ON THIS GITEA. Measured, not assumed.
   #
-  # Fifteen minutes is four requests a run against our own host, sixteen times
-  # an hour. Last night's outage lasted four hours; this shortens the worst case
-  # to fifteen minutes.
+  # The instance is 1.25.5, which is well past the 1.20 that introduced
+  # scheduled workflows, so the feature exists in the software. It does not
+  # execute here. What was checked, on 2026-08-10:
+  #
+  #   · This workflow landed on the default branch at 04:16 UTC and shows
+  #     `state: active` in GET /actions/workflows. The 04:30 and 04:45 ticks
+  #     both passed with no run.
+  #   · Across all 82 repositories on gitea.example.invalid, EIGHT workflows declare
+  #     a cron schedule and the number of runs ever triggered by `schedule` is
+  #     ZERO. `na/minobi`'s watchdog asks for `*/5 * * * *` and has 20,493 runs,
+  #     every one of them a push.
+  #   · `workflow_dispatch` and `workflow_run` both fire normally, so this is
+  #     the scheduler specifically, not Actions.
+  #
+  # The likely cause is the instance's cron being off in app.ini, which is an
+  # operator change on the Gitea host and not something this repository can
+  # make. It is worth making: it would light up eight workflows at once,
+  # including a watchdog somebody believes is already watching.
+  #
+  # The declaration stays because it is correct, costs nothing, and starts
+  # working the day the instance does. It is NOT what this monitor currently
+  # relies on — see below.
   schedule:
     - cron: "*/15 * * * *"
-  # So the monitor can be exercised on demand instead of by waiting for a tick —
-  # which is also how the schedule support itself was confirmed to fire here.
+  # This is the trigger that works, and it is proven: run 26478 on 2026-08-10
+  # probed production green from a dispatch. Anything that can hold a token can
+  # drive it on whatever interval the operator trusts —
+  #
+  #   curl -X POST -H "Authorization: token $GITEA_TOKEN" \
+  #        -H "Content-Type: application/json" -d '{"ref":"main"}' \
+  #        "$GITEA_URL/api/v1/repos/your-org/commissionwatch/actions/workflows/monitor.yml/dispatches"
+  #
+  # — which answers 204. A Tracker routine is the established pattern for
+  # exactly this in this environment; `na/minobi`'s watchdog names it as its own
+  # fallback. Until something drives it, deploy.yml runs the identical probe
+  # after every deploy, which is the failure that actually happened.
   workflow_dispatch:
 
 jobs:

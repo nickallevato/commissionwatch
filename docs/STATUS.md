@@ -517,6 +517,75 @@ Counts after B3: backend **867 tests / 221 suites**, frontend **330 / 36**, both
 lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
 `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## The external monitor has landed, and the Gitea scheduler does not fire
+
+Working from `docs/superpowers/plans/2026-08-10-external-monitoring.md`. No migration, no
+dependency, no new runtime code in the application.
+
+**Why it is outside the application.** On 2026-08-09 production returned 502 on every `/api/*`
+route for about four hours and the only reason anyone found out was a person opening the site.
+Every account this codebase gives of its own health — the masthead's sweep clock, `/admin/sources`,
+`/status` — is served by the process that was down. A watch inside the process can only report
+while the process is alive, which is exactly when it has nothing to report.
+
+`backend/src/scripts/external-monitor.ts` probes the live site and exits non-zero on any failure:
+`/api/health` must be 200 with `database: connected`; `/api/version` and `/version.json` must both
+be 200 and **must serve the same sha**; and no *enabled* ingestion source may be past its
+`expected_interval_hours`. It never POSTs to `/api/internal/events` — when `DISCORD_WEBHOOK_URL` is
+configured it posts **straight to the webhook** and says in the message that it bypassed the
+application's routing, which is the W7 fallback reasoning taken to its conclusion: a deploy that
+broke the backend is exactly when the backend cannot be trusted to say so. With no webhook, the
+failed run is the alert and nothing else is invented.
+
+**⛔ SCHEDULED WORKFLOWS DO NOT RUN ON `gitea.example.invalid`.** Measured on 2026-08-10, not assumed.
+The instance is 1.25.5 — five minor versions past the release that added the feature — and
+`monitor.yml` registered `active` on the default branch and then sat through the 04:30 and 04:45
+ticks without a run. So every repository on the instance was checked: **eight workflows across 82
+repositories declare a cron schedule, and the number of `schedule`-triggered runs that have ever
+existed is zero.** `na/minobi`'s `watchdog.yml` asks for `*/5 * * * *` and has 20,493 runs, every
+one of them a push. Somebody already believes they have a watchdog and they do not.
+`workflow_dispatch` and `workflow_run` both fire normally, so this is the scheduler specifically
+and not Actions. The likely cause is the instance's cron being off in `app.ini`, which is an
+operator change on the Gitea host — **and it would light up eight workflows at once.**
+
+**What runs today, given that.** The `schedule:` block stays, because it is correct and starts
+working the day the instance does. `workflow_dispatch` is proven: run 26478 probed production green
+from a `POST …/actions/workflows/monitor.yml/dispatches` that answers 204, and the exact request is
+in the workflow's header comment, so a Tracker routine or anything else holding a token can drive
+it. And `deploy.yml` now runs the identical probe as its last step — not a substitute for a
+periodic check and not offered as one, but aimed at the failure that actually happened, because the
+existing "Verify the site responds" step proves only that `/api/health` answers 200 while the images
+roll independently.
+
+**A disabled source is not a stale source, and a never-run one is not either.** All three
+registered sources are disabled, so the monitor reports three skips and passes — correct rather
+than lucky: its subject is whether what we turned on is running, and nothing is turned on. An
+enabled source with a stated interval that has **never** swept is a *warning*, not a failure,
+because the public feed does not record when a source was enabled and the first minute after an
+operator enables Gallatin is exactly that state. Only an enabled source with an interval and a
+successful sweep older than that interval fails the run. The arithmetic is recomputed from the raw
+figures against the monitor's own clock rather than read from the feed's `silence.verdict`: an
+external monitor does not ask its subject how it is doing.
+
+**No `npm install` anywhere on the path.** Node 22 strips TypeScript types natively (v22.23.2 in
+`node:22-bookworm`), so the workflow is one `docker run` of a stock image over a single
+dependency-free file. A monitor whose green run depends on the npm registry goes red for reasons
+that have nothing to do with the site. That is also why the file has no local imports — one
+`import "./x"` would buy back the whole build step.
+
+The judgement is a tested module and not shell `if` statements, which is the difference between a
+monitor and a monitor-shaped thing: 27 tests over healthy, database disconnected, 502, 403 at the
+Caddy allowlist, nothing answering at all, version skew, two `unknown` shas, stale, never-run,
+disabled, an empty registry and three shapes of malformed response.
+
+**The runner label is load-bearing.** `dh1` only. The live site is IP-gated at Caddy and `dh1` is
+the only runner proven to get through it; `ubuntu-latest` has never made an outbound request to the
+site, so its egress address is unproven and a monitor red because of its own network position is a
+monitor people mute.
+
+Counts after the external monitor: backend **894 tests / 226 suites**, frontend **383 / 39**, both
+green. Backend lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+
 ## Donor-to-vote correlation and the officials page have landed
 
 Tier C of `docs/superpowers/specs/2026-08-09-archive-salvage-design.md`, rebuilt rather than
@@ -779,8 +848,10 @@ Ordered by how much each blocks the product being real.
    **Outstanding:** `BACKUP_S3_URI` is unset, so an archive currently never leaves the instance —
    that is a copy, not a backup. Setting it needs a bucket, which costs money and is the operator's
    call. The cron entry also still has to be installed on the host.
-9. **No monitoring.** Nothing alerts if the site goes down or ingestion silently stops. P2's
-   console makes a stalled scraper *visible to an operator who looks*; it does not page anyone.
+9. **No monitoring** — **mostly closed 2026-08-10 by the external monitor, with one operator task
+   left.** See the section below. The probe is built, tested and green against production; what is
+   missing is a periodic trigger, because **scheduled workflows do not fire on this Gitea
+   instance** and that is measured, not suspected.
 10. ~~**No admin authentication.**~~ Closed 2026-08-09 by A1. One operator class, `scrypt` from
     `node:crypto`, revocable server-side sessions in an httpOnly cookie, no public registration.
     The review queue is no longer blocked on it.
