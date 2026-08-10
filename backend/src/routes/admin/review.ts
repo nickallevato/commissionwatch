@@ -7,6 +7,10 @@ import {
   listDisputes,
   type DisputeStatus,
 } from "../../services/disputes";
+import {
+  EntityResolutionError,
+  isEntityDecision,
+} from "../../services/finance/entity-resolution";
 import { CorrectionError } from "../../services/pressroom/corrections";
 import {
   isSeverity,
@@ -17,13 +21,18 @@ import {
 } from "../../services/review/policy";
 import {
   approveFinding,
+  decideEntityResolution,
   editFinding,
   getQueueItem,
+  isMatchBand,
+  isQueueSort,
   listQueue,
   rejectFinding,
   ReviewError,
+  type QueueSort,
   type RequestStatus,
 } from "../../services/review/queue";
+import type { MatchBand } from "../../services/finance/name-match";
 
 /**
  * `/api/admin/review` — the operator queue.
@@ -68,6 +77,7 @@ function fail(res: Response, err: unknown, next: (e?: unknown) => void): void {
     err instanceof ReviewError ||
     err instanceof ReviewPolicyError ||
     err instanceof DisputeError ||
+    err instanceof EntityResolutionError ||
     err instanceof CorrectionError
   ) {
     res.status(err.statusCode).json({ error: err.message, statusCode: err.statusCode });
@@ -87,13 +97,15 @@ function badId(res: Response): void {
 interface QueueQuery {
   status?: string;
   severity?: string;
+  band?: string;
+  sort?: string;
   limit?: string;
   offset?: string;
 }
 
 router.get("/queue", async (req: Request<unknown, unknown, unknown, QueueQuery>, res, next) => {
   try {
-    const { status, severity, limit, offset } = req.query;
+    const { status, severity, band, sort, limit, offset } = req.query;
     if (status !== undefined && !(REQUEST_STATUSES as readonly string[]).includes(status)) {
       res.status(400).json({ error: "Invalid status", statusCode: 400 });
       return;
@@ -102,10 +114,20 @@ router.get("/queue", async (req: Request<unknown, unknown, unknown, QueueQuery>,
       res.status(400).json({ error: "Invalid severity", statusCode: 400 });
       return;
     }
+    if (band !== undefined && !isMatchBand(band)) {
+      res.status(400).json({ error: "Invalid match band", statusCode: 400 });
+      return;
+    }
+    if (sort !== undefined && !isQueueSort(sort)) {
+      res.status(400).json({ error: "Invalid sort", statusCode: 400 });
+      return;
+    }
 
     const listing = await listQueue(db, {
       ...(status === undefined ? {} : { status: status as RequestStatus }),
       ...(severity === undefined ? {} : { severity: severity as Severity }),
+      ...(band === undefined ? {} : { band: band as MatchBand }),
+      ...(sort === undefined ? {} : { sort: sort as QueueSort }),
       ...(limit === undefined ? {} : { limit: Number.parseInt(limit, 10) || 50 }),
       ...(offset === undefined ? {} : { offset: Number.parseInt(offset, 10) || 0 }),
     });
@@ -166,6 +188,51 @@ router.post(
       const item = await rejectFinding(db, {
         flagId: id,
         reason: reasonOf(req.body),
+        actor: actorOf(req),
+      });
+      res.json(item);
+    } catch (err) {
+      fail(res, err, next);
+    }
+  },
+);
+
+interface EntityResolutionBody extends DecisionBody {
+  decision?: unknown;
+}
+
+/**
+ * The operator's answer to the one question the matcher cannot answer: are these
+ * two names the same entity?
+ *
+ * Deliberately **not** an approve or a reject. Recording that a donor and an
+ * agenda subject are the same entity does not publish the finding — approval is
+ * still a separate act on the same screen, with its own stated reason and its
+ * own audit row. Recording that they are different entities does not reject it
+ * either; it stops the pair being raised again, and the operator should still
+ * reject the finding in front of them so the log holds both facts.
+ *
+ * The pair is derived from the finding's stored evidence, never from the body.
+ */
+router.post(
+  "/queue/:id/entity-resolution",
+  async (req: Request<{ id: string }, unknown, EntityResolutionBody>, res, next) => {
+    try {
+      const { id } = req.params;
+      if (!UUID_RE.test(id)) return badId(res);
+      const body = req.body ?? {};
+      if (!isEntityDecision(body.decision)) {
+        res.status(400).json({
+          error: "decision must be one of same_entity, different_entity",
+          statusCode: 400,
+        });
+        return;
+      }
+
+      const item = await decideEntityResolution(db, {
+        flagId: id,
+        decision: body.decision,
+        reason: reasonOf(body),
         actor: actorOf(req),
       });
       res.json(item);

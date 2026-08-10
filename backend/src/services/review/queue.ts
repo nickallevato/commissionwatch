@@ -1,4 +1,15 @@
 import type { Knex } from "knex";
+import { MATCH_POLICY, type MatchPolicy } from "../finance/correlation";
+import {
+  loadEntityDecisions,
+  pairForEvidence,
+  pairKey,
+  recordEntityDecision,
+  type EntityDecision,
+  type StoredEntityDecision,
+} from "../finance/entity-resolution";
+import { parseVoteDonorEvidence, type VoteDonorEvidence } from "../finance/evidence";
+import { MATCH_BANDS, type MatchBand } from "../finance/name-match";
 import { appendCorrectionRow } from "../pressroom/corrections";
 import { resolveCitations, type Citation } from "./evidence";
 import { motiveTerms } from "./language";
@@ -84,14 +95,69 @@ export interface QueueItem {
   };
   /** What the claim rests on. Empty means it cannot be approved. */
   citations: Citation[];
+  /**
+   * The stored name match and its evidence, parsed — `null` for a finding that
+   * is not a `vote_donor_conflict`, or whose metadata does not parse.
+   *
+   * Parsed here rather than in the browser on purpose. `evidence.ts` says every
+   * reader comes back through `parseVoteDonorEvidence`, and the operator console
+   * is not the reader that gets to be the exception: a second parser written
+   * against `jsonb` in a component is a second thing that can disagree about
+   * what a stored finding says, on the one screen where that matters most.
+   */
+  evidence: VoteDonorEvidence | null;
+  /**
+   * The operator judgement in force on this finding's donor/subject pair **now**
+   * — which is not necessarily the one the finding was raised under. The one it
+   * was raised under is inside `evidence`, frozen. The difference is the point:
+   * an operator who has changed their mind should be able to see both.
+   */
+  entity_decision: StoredEntityDecision | null;
+}
+
+/**
+ * How the queue is ordered.
+ *
+ * `default` is overdue first then oldest first — the two orderings an operator
+ * working a backlog wants, and deliberately not severity, which would bury the
+ * low-severity findings forever.
+ *
+ * `weakest_first` is for working the queue by how much the claim rests on. It
+ * puts the most ambiguous name matches at the top so they can be read
+ * deliberately rather than met at random halfway down a list. Findings with no
+ * band at all sort last under it — they are not "least ambiguous", they are a
+ * different kind of thing, and putting them first would hide the findings this
+ * sort exists to surface.
+ */
+export type QueueSort = "default" | "weakest_first";
+
+export const QUEUE_SORTS: readonly QueueSort[] = ["default", "weakest_first"];
+
+export function isQueueSort(value: unknown): value is QueueSort {
+  return typeof value === "string" && (QUEUE_SORTS as readonly string[]).includes(value);
+}
+
+export function isMatchBand(value: unknown): value is MatchBand {
+  return typeof value === "string" && (MATCH_BANDS as readonly string[]).includes(value);
 }
 
 export interface QueueFilters {
   status?: RequestStatus;
   severity?: Severity;
+  /**
+   * The stored donor-match band, read straight out of `metadata` in SQL. Not
+   * recomputed: the band on a finding is the band it was raised under, and
+   * filtering on today's answer would show an operator a different queue from
+   * the one the findings actually describe.
+   */
+  band?: MatchBand;
+  sort?: QueueSort;
   limit?: number;
   offset?: number;
 }
+
+/** Where the stored band lives in `anomaly_flags.metadata`. */
+const BAND_EXPR = "anomaly_flags.metadata #>> '{donorMatch,band}'";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -160,9 +226,16 @@ interface JoinedRow extends Record<string, unknown> {
   request_id: string;
 }
 
-function toQueueItem(row: JoinedRow, citations: Citation[], now: Date): QueueItem {
+function toQueueItem(
+  row: JoinedRow,
+  citations: Citation[],
+  now: Date,
+  entityDecisions: ReadonlyMap<string, StoredEntityDecision>,
+): QueueItem {
   const expiresAt = asIso(row.expires_at);
   const status = asRequestStatus(row.status);
+  const evidence = parseVoteDonorEvidence(row.metadata);
+  const pair = evidence === null ? null : pairForEvidence(evidence);
   return {
     request: {
       id: row.request_id,
@@ -198,6 +271,8 @@ function toQueueItem(row: JoinedRow, citations: Citation[], now: Date): QueueIte
       jurisdiction_name: textOrNull(row.jurisdiction_name),
     },
     citations,
+    evidence,
+    entity_decision: pair === null ? null : (entityDecisions.get(pairKey(pair)) ?? null),
   };
 }
 
@@ -241,6 +316,17 @@ export interface QueueListing {
   total: number;
   policy: ReviewPolicy;
   counts: { pending: number; overdue: number; approved: number; rejected: number };
+  /**
+   * The name-match policy, served so the console renders the project's own
+   * words rather than its own paraphrase of them. See `MATCH_POLICY`.
+   */
+  match_policy: MatchPolicy;
+  /**
+   * Pending findings by stored donor-match band, so an operator can see how much
+   * of the queue rests on an ambiguous match before opening any of it.
+   * `unbanded` is every pending finding that is not a name-match finding at all.
+   */
+  band_counts: Record<MatchBand | "unbanded", number>;
 }
 
 /**
@@ -259,19 +345,34 @@ export async function listQueue(db: Knex, filters: QueueFilters = {}): Promise<Q
   const base = queueQuery(db);
   if (filters.status !== undefined) base.where("approval_requests.status", filters.status);
   if (filters.severity !== undefined) base.where("anomaly_flags.severity", filters.severity);
+  if (filters.band !== undefined) base.whereRaw(`${BAND_EXPR} = ?`, [filters.band]);
 
   const countRow = await base.clone().count("* as total").first<{ total?: string } | undefined>();
   const total = Number(countRow?.total ?? 0);
 
-  const rows = await base
-    .clone()
-    .select<JoinedRow[]>(QUEUE_COLUMNS)
-    .orderByRaw(
+  const listQuery = base.clone().select<JoinedRow[]>(QUEUE_COLUMNS);
+  if (filters.sort === "weakest_first") {
+    // Weakest band first; findings with no band last. `array_position` over the
+    // band list is what makes this an ordering rather than an alphabetisation —
+    // "moderate" < "strong" < "weak" alphabetically, which is close to exactly
+    // wrong.
+    listQuery.orderByRaw(
+      `COALESCE(array_position(ARRAY[${MATCH_BANDS.map(() => "?").join(", ")}]::text[], ${BAND_EXPR}), ${
+        MATCH_BANDS.length + 1
+      }) ASC`,
+      [...MATCH_BANDS],
+    );
+  } else {
+    listQuery.orderByRaw(
       "(approval_requests.status = 'pending_review' AND approval_requests.expires_at < now()) DESC",
-    )
+    );
+  }
+  const rows = await listQuery
     .orderBy("approval_requests.created_at", "asc")
     .limit(limit)
     .offset(offset);
+
+  const entityDecisions = await loadEntityDecisions(db);
 
   const data: QueueItem[] = [];
   for (const row of rows) {
@@ -281,7 +382,7 @@ export async function listQueue(db: Knex, filters: QueueFilters = {}): Promise<Q
       artifact_id: textOrNull(row.artifact_id),
       metadata: row.metadata,
     });
-    data.push(toQueueItem(row, citations, now));
+    data.push(toQueueItem(row, citations, now, entityDecisions));
   }
 
   const tallies = await queueQuery(db)
@@ -305,7 +406,31 @@ export async function listQueue(db: Knex, filters: QueueFilters = {}): Promise<Q
     }
   }
 
-  return { data, total, policy, counts };
+  // Band tallies over the pending queue, unfiltered by whatever band the
+  // operator is currently looking at — the point of the row is to say what is
+  // waiting, and a count that changed when you filtered would answer a question
+  // nobody asked.
+  const bandRows = await queueQuery(db)
+    .where("approval_requests.status", "pending_review")
+    .select<Array<{ band: string | null; count: string }>>([
+      db.raw(`${BAND_EXPR} as band`),
+      db.raw("count(*) as count"),
+    ])
+    .groupByRaw(BAND_EXPR);
+
+  const band_counts: Record<MatchBand | "unbanded", number> = {
+    weak: 0,
+    moderate: 0,
+    strong: 0,
+    unbanded: 0,
+  };
+  for (const row of bandRows) {
+    const n = Number(row.count);
+    if (isMatchBand(row.band)) band_counts[row.band] += n;
+    else band_counts.unbanded += n;
+  }
+
+  return { data, total, policy, counts, match_policy: MATCH_POLICY, band_counts };
 }
 
 /** One queue item by the finding's id, or `null`. */
@@ -322,7 +447,54 @@ export async function getQueueItem(db: Knex, flagId: string): Promise<QueueItem 
     artifact_id: textOrNull(row.artifact_id),
     metadata: row.metadata,
   });
-  return toQueueItem(row, citations, new Date());
+  return toQueueItem(row, citations, new Date(), await loadEntityDecisions(db));
+}
+
+/**
+ * Record an operator's entity-resolution judgement from the queue.
+ *
+ * The pair is derived from the finding's own stored evidence rather than taken
+ * from the request body: an operator judges what is on the card in front of
+ * them, and letting a caller name an arbitrary pair would make the judgement
+ * separable from the thing that prompted it.
+ *
+ * **This publishes nothing, in either direction.** `same_entity` annotates the
+ * pair and leaves the finding exactly as held as it was; approval is still a
+ * separate, explicit, reasoned act on the same screen. `different_entity` stops
+ * the pair being raised on later sweeps and leaves *this* finding held too — an
+ * operator who thinks it is a coincidence should still reject it, and say so,
+ * so the log holds both facts.
+ */
+export async function decideEntityResolution(
+  db: Knex,
+  input: { flagId: string; decision: EntityDecision; reason: string; actor: ReviewActor },
+): Promise<QueueItem> {
+  const item = await getQueueItem(db, input.flagId);
+  if (item === null) throw new ReviewError("No finding with that id", 404);
+  if (item.evidence === null) {
+    throw new ReviewError(
+      "That finding carries no name match, so there is no pair of names to judge",
+      409,
+    );
+  }
+  const pair = pairForEvidence(item.evidence);
+  if (pair === null) {
+    throw new ReviewError(
+      "That finding's stored match names no distinctive term, so there is no pair to judge",
+      409,
+    );
+  }
+
+  await recordEntityDecision(db, {
+    pair,
+    decision: input.decision,
+    reason: input.reason,
+    actor: input.actor,
+  });
+
+  const updated = await getQueueItem(db, input.flagId);
+  if (updated === null) throw new ReviewError("No finding with that id", 404);
+  return updated;
 }
 
 interface DecisionInput {
