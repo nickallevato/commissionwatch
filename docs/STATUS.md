@@ -87,6 +87,67 @@ answer 503**, which is why the test suite sees 503 rather than a constructed Min
 Counts after P2: backend **660 tests / 168 suites**, frontend **180 / 25**, both green, zero
 lint errors.
 
+## P5 — the agenda diff timeline has landed
+
+Working from `docs/superpowers/specs/2026-08-09-phase-2-design.md` § P5 and
+`docs/superpowers/plans/2026-08-10-agenda-diff-timeline.md`. Migration 034.
+
+**`meeting_documents` and `artifacts` are joined at last.** `document_versions` carries
+`(meeting_document_id, artifact_id, version_no, first_seen_at, item_snapshot)` with a unique
+constraint on each of the first two pairings. The fetch stage writes a row on **every** successful
+fetch and lets the constraints decide: unchanged bytes resolve to the same artifact and collide,
+changed bytes create exactly one version. There is deliberately no "have I seen this before?"
+branch anywhere — that question and the content address can disagree, and then only one of them is
+the record.
+
+**The backfill produced 19 version rows for the 19 existing artifacts** — 11 Gallatin, 8 Bozeman —
+all version 1, no artifact left unattached. It takes two passes, and the second one is the point:
+matching `artifacts.source_url` to `meeting_documents.url` covers Gallatin and **misses Bozeman
+entirely**, because Granicus redirects `AgendaViewer.php` to an S3 attachment and `source_url`
+records where the bytes actually came from. The second pass goes through the `parse` job the fetch
+stage enqueued, whose target carries the sha256, the meeting and the document type. A URL join
+alone would have backfilled two thirds of the record and reported success.
+
+**The diff is over extracted agenda items, never bytes.** Two renderings of an identical agenda
+differ in their creation timestamp and generator string. `document_versions.item_snapshot` holds
+what was extracted from *that* artifact, because `agenda_items` cannot answer for a superseded
+version — it is merged on `(meeting_id, item_number)`, so parsing version 2 overwrites version 1.
+A NULL snapshot means "not extracted" and renders as that, never as an empty agenda.
+
+**`last_minute_agenda_change` can finally be substantiated, and the heuristic that faked it is
+gone.** The old `checkLastMinuteAgendaChange` compared `agenda_items.created_at` — the moment *we*
+ingested a row — against the meeting date, so any meeting swept the day before it convened flagged
+every item on its agenda as added within 24 hours. That was a statement about our own database
+published as a statement about the public record. It now compares two published documents, and the
+evidence carries **both artifact hashes** and the changed item list. `RULES_VERSION` is `3.0.0`.
+
+**Two schema facts the spec did not have.** `meetings` has no `scheduled_at`: it has a `DATE` and a
+nullable `TIME`, and a meeting with no published time raises nothing rather than being assumed to
+convene at midnight. And the wall time needs a zone — `jurisdictions.timezone` (default
+`America/Denver`) was added with `agenda_change_window_hours` (default 48), because composing the
+instant in the server's zone would make a published "19 hours before" quietly wrong by six or seven.
+`MeetingRef.timezone` has been in the adapter contract since P1 and was discarded on the way to the
+database.
+
+**A flag whose changed items name someone on the roster is written `held`.** The public API already
+filters `review_state`.
+
+`GET /api/meetings/:id/agenda-diff` is behind `findPublishedMeeting` and is now the eighth public
+meeting path `meeting-publication.test.ts` walks. On the meeting page,
+`AgendaDiffTimeline.tsx` renders a two-column diff, each side labelled with its version's
+`first_seen_at` and short hash. **The one-version case — the common one — renders as a single calm
+sentence**, not an empty comparison and not a "no changes" badge, which would assert the result of
+a comparison that never happened.
+
+Counts after P5: backend **703 tests / 176 suites**, frontend **196 / 26**, both green, zero lint
+errors. `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
+
+**One trap this introduced.** `document_versions.artifact_id` has no `ON DELETE CASCADE`, on
+purpose — a version row losing its evidence silently would leave a citation pointing at nothing.
+So a fixture teardown must drop meetings *before* artifacts, since the meeting cascade is what
+releases them. `ingestion-handlers.test.ts` had the opposite order and failed loudly, which is the
+constraint working.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
