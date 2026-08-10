@@ -33,6 +33,12 @@ import type {
 const TS = "2024-12-01T00:00:00Z";
 const stamps = { created_at: TS, updated_at: TS };
 
+/**
+ * Every meeting the public API can return has been published — the routes
+ * filter on the column — so the fixtures say so rather than leaving it out.
+ */
+const publishedStamps = { ...stamps, published_at: TS };
+
 const boulder: Jurisdiction = {
   id: "j-boulder",
   name: "Boulder County",
@@ -79,7 +85,7 @@ const lastMeeting: Meeting = {
   status: "completed",
   agenda_url: null,
   minutes_url: null,
-  ...stamps,
+  ...publishedStamps,
   commission: { ...bocc, jurisdiction: boulder },
 };
 
@@ -92,7 +98,7 @@ const olderMeeting: Meeting = {
   status: "completed",
   agenda_url: null,
   minutes_url: null,
-  ...stamps,
+  ...publishedStamps,
   commission: { ...pz, jurisdiction: denver },
 };
 
@@ -105,7 +111,7 @@ const cancelledMeeting: Meeting = {
   status: "cancelled",
   agenda_url: null,
   minutes_url: null,
-  ...stamps,
+  ...publishedStamps,
   commission: { ...pz, jurisdiction: denver },
 };
 
@@ -118,7 +124,7 @@ const nextMeeting: Meeting = {
   status: "scheduled",
   agenda_url: "https://example.gov/agenda.pdf",
   minutes_url: null,
-  ...stamps,
+  ...publishedStamps,
   commission: { ...pz, jurisdiction: denver },
 };
 
@@ -131,7 +137,7 @@ const laterMeeting: Meeting = {
   status: "scheduled",
   agenda_url: null,
   minutes_url: null,
-  ...stamps,
+  ...publishedStamps,
   commission: { ...bocc, jurisdiction: boulder },
 };
 
@@ -152,6 +158,7 @@ const agendaItem = (
   meeting_id: lastMeeting.id,
   item_number,
   title,
+  field_confidence: {},
   description: null,
   category: null,
   ...stamps,

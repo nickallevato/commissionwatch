@@ -95,6 +95,7 @@ export const meetings: Meeting[] = [
     minutes_url: "https://example.com/minutes1.pdf",
     created_at: "2024-11-20T00:00:00Z",
     updated_at: "2024-12-04T00:00:00Z",
+    published_at: "2024-12-04T00:00:00Z",
     commission: { ...commissions[0], jurisdiction: jurisdictions[0] },
   },
   {
@@ -108,6 +109,7 @@ export const meetings: Meeting[] = [
     minutes_url: null,
     created_at: "2024-12-01T00:00:00Z",
     updated_at: "2024-12-01T00:00:00Z",
+    published_at: "2024-12-01T00:00:00Z",
     commission: { ...commissions[0], jurisdiction: jurisdictions[0] },
   },
   {
@@ -121,6 +123,7 @@ export const meetings: Meeting[] = [
     minutes_url: "https://example.com/minutes3.pdf",
     created_at: "2024-12-01T00:00:00Z",
     updated_at: "2024-12-11T00:00:00Z",
+    published_at: "2024-12-11T00:00:00Z",
     commission: { ...commissions[1], jurisdiction: jurisdictions[1] },
   },
   {
@@ -134,6 +137,7 @@ export const meetings: Meeting[] = [
     minutes_url: null,
     created_at: "2024-12-01T00:00:00Z",
     updated_at: "2024-12-10T00:00:00Z",
+    published_at: "2024-12-10T00:00:00Z",
     commission: { ...commissions[2], jurisdiction: jurisdictions[2] },
   },
   {
@@ -147,6 +151,7 @@ export const meetings: Meeting[] = [
     minutes_url: null,
     created_at: "2024-12-15T00:00:00Z",
     updated_at: "2024-12-15T00:00:00Z",
+    published_at: "2024-12-15T00:00:00Z",
     commission: { ...commissions[1], jurisdiction: jurisdictions[1] },
   },
 ];
@@ -159,6 +164,8 @@ export const agendaItems: AgendaItem[] = [
     title: "Call to Order and Roll Call",
     description: null,
     category: "procedural",
+    // No mark: the fixture asserts nothing about how the text was extracted.
+    field_confidence: {},
     created_at: "2024-11-20T00:00:00Z",
     updated_at: "2024-11-20T00:00:00Z",
   },
@@ -170,6 +177,8 @@ export const agendaItems: AgendaItem[] = [
     description:
       "Request to rezone from R-2 to MU-3 for mixed-use development. Applicant proposes 120-unit residential with ground-floor retail.",
     category: "zoning",
+    // No mark: the fixture asserts nothing about how the text was extracted.
+    field_confidence: {},
     created_at: "2024-11-20T00:00:00Z",
     updated_at: "2024-11-20T00:00:00Z",
   },
@@ -181,6 +190,8 @@ export const agendaItems: AgendaItem[] = [
     description:
       "Review of site plan for 50,000 sqft commercial development at Riverside Dr and 5th Ave.",
     category: "development",
+    // No mark: the fixture asserts nothing about how the text was extracted.
+    field_confidence: {},
     created_at: "2024-11-20T00:00:00Z",
     updated_at: "2024-11-20T00:00:00Z",
   },
@@ -191,6 +202,8 @@ export const agendaItems: AgendaItem[] = [
     title: "Public Comment Period",
     description: null,
     category: "procedural",
+    // No mark: the fixture asserts nothing about how the text was extracted.
+    field_confidence: {},
     created_at: "2024-11-20T00:00:00Z",
     updated_at: "2024-11-20T00:00:00Z",
   },
@@ -201,6 +214,8 @@ export const agendaItems: AgendaItem[] = [
     title: "Adjournment",
     description: null,
     category: "procedural",
+    // No mark: the fixture asserts nothing about how the text was extracted.
+    field_confidence: {},
     created_at: "2024-11-20T00:00:00Z",
     updated_at: "2024-11-20T00:00:00Z",
   },
@@ -211,6 +226,8 @@ export const agendaItems: AgendaItem[] = [
     title: "Approval of Minutes",
     description: "Approval of minutes from November 26, 2024 meeting",
     category: "procedural",
+    // No mark: the fixture asserts nothing about how the text was extracted.
+    field_confidence: {},
     created_at: "2024-12-01T00:00:00Z",
     updated_at: "2024-12-01T00:00:00Z",
   },
@@ -222,6 +239,8 @@ export const agendaItems: AgendaItem[] = [
     description:
       "Consideration of land use designation change from Agricultural to Rural Residential for 45-acre parcel.",
     category: "land-use",
+    // No mark: the fixture asserts nothing about how the text was extracted.
+    field_confidence: {},
     created_at: "2024-12-01T00:00:00Z",
     updated_at: "2024-12-01T00:00:00Z",
   },

@@ -14,6 +14,9 @@ import { LoginPage } from "./pages/LoginPage";
 import { AdminHomePage } from "./pages/AdminHomePage";
 import { AdminChannelsPage } from "./pages/AdminChannelsPage";
 import { AdminRecordsPage } from "./pages/AdminRecordsPage";
+import { AdminSourcesPage } from "./pages/AdminSourcesPage";
+import { AdminRunDetailPage } from "./pages/AdminRunDetailPage";
+import { AdminMeetingDetailPage } from "./pages/AdminMeetingDetailPage";
 import { SubscribePage } from "./pages/SubscribePage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -76,6 +79,34 @@ export function App() {
             element={
               <ProtectedRoute>
                 <AdminRecordsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* The pressroom console. `/admin/sources` is the way in; the two
+            detail routes are reached from a source row and from a meeting,
+            which is why they carry an id rather than sitting in a nav. */}
+          <Route
+            path="admin/sources"
+            element={
+              <ProtectedRoute>
+                <AdminSourcesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/runs/:id"
+            element={
+              <ProtectedRoute>
+                <AdminRunDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/meetings/:id"
+            element={
+              <ProtectedRoute>
+                <AdminMeetingDetailPage />
               </ProtectedRoute>
             }
           />

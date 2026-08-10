@@ -15,7 +15,12 @@ const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
 interface ConsoleSurface {
-  readonly to: string;
+  /**
+   * `null` for a surface that only exists against a specific record — a run or
+   * a meeting. Listing it as a dead link would be worse than saying plainly
+   * where it is reached from, so those entries render as text.
+   */
+  readonly to: string | null;
   readonly title: string;
   readonly detail: string;
 }
@@ -32,6 +37,24 @@ const SURFACES: readonly ConsoleSurface[] = [
     title: "Records requests",
     detail:
       "Public-records requests, and documents obtained by hand entering the same pipeline as scraped ones.",
+  },
+  {
+    to: "/admin/sources",
+    title: "Ingestion sources",
+    detail:
+      "Every source, including the disabled ones and their reasons. A lifetime count of zero is shown as a failure, and a source past its expected interval is shown as suspect.",
+  },
+  {
+    to: null,
+    title: "Ingestion run",
+    detail:
+      "One run, its job tallies, and every failed job with its error verbatim. Reached from a source row on the sources screen.",
+  },
+  {
+    to: null,
+    title: "Meeting record",
+    detail:
+      "Publication state, per-field extraction confidence, and the append-only correction log. Reached from a meeting id.",
   },
 ];
 
@@ -92,13 +115,17 @@ export function AdminHomePage() {
       <h2 className="mt-12 font-display text-xl font-semibold text-ink">Surfaces</h2>
       <ul className="mt-4 divide-y divide-rule border-y border-rule">
         {SURFACES.map((surface) => (
-          <li key={surface.to} className="py-4">
-            <Link
-              to={surface.to}
-              className={`text-sm font-semibold text-ink underline decoration-rule underline-offset-4 hover:decoration-accent ${focusRing}`}
-            >
-              {surface.title}
-            </Link>
+          <li key={surface.title} className="py-4">
+            {surface.to === null ? (
+              <span className="text-sm font-semibold text-muted">{surface.title}</span>
+            ) : (
+              <Link
+                to={surface.to}
+                className={`text-sm font-semibold text-ink underline decoration-rule underline-offset-4 hover:decoration-accent ${focusRing}`}
+              >
+                {surface.title}
+              </Link>
+            )}
             <p className="mt-1 max-w-prose text-sm leading-relaxed text-muted">
               {surface.detail}
             </p>
