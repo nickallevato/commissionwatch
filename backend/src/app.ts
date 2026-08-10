@@ -6,6 +6,7 @@ import versionRouter from "./routes/version";
 import jurisdictionsRouter from "./routes/jurisdictions";
 import meetingsRouter from "./routes/meetings";
 import membersRouter from "./routes/members";
+import officialsRouter from "./routes/officials";
 import votesRouter from "./routes/votes";
 import anomaliesRouter from "./routes/anomalies";
 import ingestionRouter from "./routes/ingestion";
@@ -76,6 +77,9 @@ app.use("/api/version", versionRouter);
 app.use("/api/jurisdictions", jurisdictionsRouter);
 app.use("/api/meetings", meetingsRouter);
 app.use("/api/members", membersRouter);
+// The reader's view of one official: voting record, attendance, patterns and
+// the donor overlay. Published records only, filtered in services/officials.ts.
+app.use("/api/officials", officialsRouter);
 app.use("/api/votes", votesRouter);
 app.use("/api/anomalies", anomaliesRouter);
 // P6 · full-text search. Public and unauthenticated like the rest of the read

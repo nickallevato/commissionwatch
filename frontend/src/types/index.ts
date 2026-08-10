@@ -677,6 +677,160 @@ export interface DisputeListing {
   counts: { received: number; upheld: number; declined: number };
 }
 
+/* ---------------------------------------------------------------------------
+   Officials as first-class subjects — `GET /api/officials/:id`.
+
+   Mirrors `backend/src/services/officials.ts`. Everything here is already
+   filtered to published records on the server; the page does not re-filter and
+   must not be written as though it could.
+   --------------------------------------------------------------------------- */
+
+export interface OfficialVotingRecord {
+  yes: number;
+  no: number;
+  abstain: number;
+  absent: number;
+  total: number;
+}
+
+export interface OfficialAttendance {
+  /** Published meetings where this official has at least one recorded vote. */
+  meetingsWithRollCall: number;
+  present: number;
+  absent: number;
+  /** `null` when there is no roll call. Never render a null as 0. */
+  rate: number | null;
+}
+
+export interface OfficialAlignment {
+  comparableVotes: number;
+  withMajority: number;
+  /** `null` when nothing is comparable — not the same fact as 0. */
+  rate: number | null;
+}
+
+/** `YYYY-MM`. Every month in the window is present, including empty ones. */
+export interface OfficialActivityMonth {
+  month: string;
+  votes: number;
+}
+
+export interface OfficialTimelineEntry {
+  meeting_id: string;
+  /** `YYYY-MM-DD` — narrowed by the service, unlike the raw date columns. */
+  date: string;
+  commission_name: string;
+  location: string | null;
+  record: OfficialVotingRecord;
+  dissents: number;
+}
+
+/**
+ * How confident a name match is. There is deliberately no band above
+ * `strong` — see `backend/src/services/finance/name-match.ts`. A UI that added
+ * one would be asserting an identity the matcher cannot establish.
+ */
+export type NameMatchBand = "weak" | "moderate" | "strong";
+
+export interface StoredNameMatch {
+  method: "distinctive_term_overlap";
+  band: NameMatchBand;
+  score: number;
+  matchedTerms: string[];
+  unmatchedTerms: string[];
+  /** Terms the matcher was blind to — entity class, jurisdiction, procedure. */
+  discardedTerms: string[];
+}
+
+export interface CitedContribution {
+  contributionId: string;
+  sourceSystem: string;
+  donorName: string;
+  recipientName: string;
+  committeeName: string | null;
+  amount: number;
+  contributionDate: string;
+  externalId: string | null;
+  imageNumber: string | null;
+  /** The API request that returned it, credential stripped. */
+  sourceUrl: string;
+  /** A page a reader can open, when the filing system publishes one. */
+  documentUrl: string | null;
+}
+
+export interface VoteDonorEvidence {
+  memberId: string;
+  memberName: string;
+  voteId: string;
+  votePosition: string;
+  agendaItemId: string;
+  agendaItemNumber: number;
+  agendaItemTitle: string;
+  donorName: string;
+  contributionCount: number;
+  totalAmount: number;
+  earliestContributionDate: string;
+  latestContributionDate: string;
+  donorMatch: StoredNameMatch;
+  recipientMatch: StoredNameMatch;
+  contributions: CitedContribution[];
+  coverageNote: string;
+}
+
+export interface OfficialFinding {
+  id: string;
+  meeting_id: string | null;
+  flag_type: string;
+  severity: string;
+  description: string;
+  created_at: string;
+  /** Present only on a `vote_donor_conflict` whose metadata parses. */
+  evidence: VoteDonorEvidence | null;
+}
+
+export interface FinanceSystem {
+  key: string;
+  name: string;
+  scope: string;
+  state: "active" | "planned";
+  url: string;
+}
+
+export interface FinanceCoverage {
+  systems: FinanceSystem[];
+  federalOnly: boolean;
+  /** The sentence. Rendered verbatim — never paraphrased in a component. */
+  caveat: string;
+}
+
+export interface OfficialProfile {
+  /**
+   * The `members` row, plus the narrowed jurisdiction the service selects.
+   *
+   * `Omit` rather than an intersection: `Member.jurisdiction` is the full
+   * `Jurisdiction` the roster endpoint embeds, and `/api/officials/:id`
+   * deliberately selects three columns. Intersecting the two would produce a
+   * type nothing on the wire can satisfy.
+   */
+  official: Omit<Member, "jurisdiction"> & {
+    jurisdiction: { id: string; name: string; state: string } | null;
+    /**
+     * `members.party` is a real, nullable column that `Member` above has never
+     * declared. It is named here rather than added there because widening the
+     * roster type is a change every existing fixture would have to answer for,
+     * and this endpoint is the only one that reads it.
+     */
+    party: string | null;
+  };
+  record: OfficialVotingRecord;
+  attendance: OfficialAttendance;
+  alignment: OfficialAlignment;
+  activity: OfficialActivityMonth[];
+  timeline: OfficialTimelineEntry[];
+  findings: OfficialFinding[];
+  finance: FinanceCoverage;
+}
+
 // ---------------------------------------------------------------------------
 // The bulk export — `GET /api/data`
 // ---------------------------------------------------------------------------
