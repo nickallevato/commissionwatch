@@ -15,10 +15,24 @@ import alertsRouter from "./routes/alerts";
 import smsRouter from "./routes/sms";
 import searchRouter from "./routes/search";
 import publicRecordsRouter from "./routes/public-records";
+import correctionsRouter from "./routes/corrections";
 import adminRouter from "./routes/admin";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
+
+/**
+ * Exactly one proxy: Caddy, on the shared host, in front of this container.
+ *
+ * Without this, `req.ip` is Caddy's address and every reader on the internet
+ * looks like one client — which would make B3's per-client dispute limit a
+ * single shared bucket that the first submitter of the hour empties for
+ * everybody. With it, Express takes the rightmost `X-Forwarded-For` entry,
+ * which is the one Caddy appended, so a client that writes its own header
+ * cannot displace its real address. The number is `1` and not `true` for that
+ * reason: `true` trusts the whole chain, including anything the client wrote.
+ */
+app.set("trust proxy", 1);
 
 /**
  * Origins permitted to make credentialed requests to /api/admin. Comma
@@ -68,6 +82,9 @@ app.use("/api/search", searchRouter);
 // P7 · the public-records request generator, unauthenticated. It drafts letter
 // text and writes nothing — no database row, and nothing is ever transmitted.
 app.use("/api/public-records", publicRecordsRouter);
+// B3 · the public corrections log, and the dispute route. Unauthenticated, and
+// the only unauthenticated write in the product — see routes/corrections.ts.
+app.use("/api/corrections", correctionsRouter);
 app.use("/api/ingestion", ingestionRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/notifications", notificationsRouter);
