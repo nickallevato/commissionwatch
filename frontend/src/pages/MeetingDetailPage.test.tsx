@@ -1,0 +1,773 @@
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { http, HttpResponse, delay } from "msw";
+import { server } from "@/mocks/server";
+import { MeetingDetailPage } from "./MeetingDetailPage";
+import type { MeetingDetail } from "@/hooks/useMeetings";
+import type {
+  AgendaItem,
+  AnomalyFlag,
+  AnomalyFlagType,
+  Commission,
+  Jurisdiction,
+  Member,
+  MeetingDocument,
+  MeetingStatus,
+  Vote,
+  VoteValue,
+} from "@/types";
+
+/**
+ * The meeting record page — the one screen where CommissionWatch stops
+ * summarising and states, item by item, what a body did on a given day.
+ *
+ * What this suite is really guarding is the difference between reporting the
+ * record and reporting our own database. The page used to carry an "Adjourned"
+ * row; `meetings` has no `adjourned_at` column, so that row printed the words
+ * "Not recorded" on every meeting that has ever existed. Read by a member of
+ * the public, "Not recorded" is a statement about the custodian's minutes — it
+ * says the city failed to write something down. What it actually described was
+ * a column we never built. The first test below exists so that row cannot come
+ * back without someone deleting a test that explains why it is a lie.
+ *
+ * The rest of the suite is the same discipline applied to the smaller claims.
+ * A cancelled meeting must not read as an ordinary one. A tied vote must not
+ * read as passed — `outcomeOf` calls a tie `failed`, which is right and is the
+ * case a reader would get wrong. A citation chip must point at the document the
+ * flag was actually drawn from, because a chip pointing at the wrong PDF is
+ * worse than no chip: it invites a reader to check, and the check appears to
+ * confirm. When there are no minutes the page must say so and offer the
+ * records-request route rather than quietly rendering a shorter page; that
+ * nudge is the entire publication-gap path and it must not disappear.
+ *
+ * Every name here is invented. Seed and fixture data in this project never
+ * names a real official — see the comment atop backend/seeds/001_pilot_data.ts
+ * for the audit that made that a rule.
+ */
+
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+/* ------------------------------------------------------------------ render */
+
+const MEETING_ID = "8f1d0c66-1111-4a00-9000-000000000001";
+
+/**
+ * The page reads its id off the route, so it has to be mounted under one. Kept
+ * local: `renderWithProviders` mounts a bare MemoryRouter with no path, which
+ * would leave `useParams` empty and every query disabled.
+ */
+function renderPage(id: string = MEETING_ID) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[`/meetings/${id}`]}>
+        <Routes>
+          <Route path="/meetings/:id" element={<MeetingDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+/* ---------------------------------------------------------------- fixtures */
+
+const JURISDICTION_ID = "8f1d0c66-2222-4a00-9000-000000000001";
+const COMMISSION_ID = "8f1d0c66-3333-4a00-9000-000000000001";
+
+const jurisdiction: Jurisdiction = {
+  id: JURISDICTION_ID,
+  name: "Fictional Springs",
+  state: "ZZ",
+  type: "city",
+  website_url: null,
+  created_at: "2024-01-01T00:00:00.000Z",
+  updated_at: "2024-01-01T00:00:00.000Z",
+};
+
+const commission: Commission & { jurisdiction: Jurisdiction } = {
+  id: COMMISSION_ID,
+  jurisdiction_id: JURISDICTION_ID,
+  name: "Example Commission on Public Works",
+  description: null,
+  meeting_schedule: null,
+  created_at: "2024-01-01T00:00:00.000Z",
+  updated_at: "2024-01-01T00:00:00.000Z",
+  jurisdiction,
+};
+
+function makeMember(id: string, name: string): Member {
+  return {
+    id,
+    jurisdiction_id: JURISDICTION_ID,
+    name,
+    title: "Commissioner",
+    email: null,
+    term_start: "2024-01-01T00:00:00.000Z",
+    term_end: null,
+    created_at: "2024-01-01T00:00:00.000Z",
+    updated_at: "2024-01-01T00:00:00.000Z",
+  };
+}
+
+const roster: Member[] = [
+  makeMember("8f1d0c66-4444-4a00-9000-000000000001", "Avery Sample"),
+  makeMember("8f1d0c66-4444-4a00-9000-000000000002", "Jordan Placeholder"),
+  makeMember("8f1d0c66-4444-4a00-9000-000000000003", "Riley Fixture"),
+  makeMember("8f1d0c66-4444-4a00-9000-000000000004", "Casey Example"),
+  makeMember("8f1d0c66-4444-4a00-9000-000000000005", "Morgan Stand-In"),
+];
+
+function makeMeeting(overrides: Partial<MeetingDetail> = {}): MeetingDetail {
+  const status: MeetingStatus = "completed";
+  return {
+    id: MEETING_ID,
+    commission_id: COMMISSION_ID,
+    date: "2024-12-03",
+    time: "18:00:00",
+    location: "Fictional Springs City Hall, Room 2",
+    status,
+    agenda_url: null,
+    minutes_url: null,
+    published_at: "2024-12-04T00:00:00.000Z",
+    created_at: "2024-11-01T00:00:00.000Z",
+    updated_at: "2024-12-04T00:00:00.000Z",
+    commission,
+    agenda_items: [],
+    documents: [],
+    ...overrides,
+  };
+}
+
+function makeItem(
+  id: string,
+  item_number: number,
+  title: string,
+  overrides: Partial<AgendaItem> = {},
+): AgendaItem {
+  return {
+    id,
+    meeting_id: MEETING_ID,
+    item_number,
+    title,
+    description: null,
+    category: null,
+    field_confidence: {},
+    created_at: "2024-11-01T00:00:00.000Z",
+    updated_at: "2024-11-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+const ITEM_ONE = "8f1d0c66-5555-4a00-9000-000000000001";
+const ITEM_TWO = "8f1d0c66-5555-4a00-9000-000000000002";
+const ITEM_THREE = "8f1d0c66-5555-4a00-9000-000000000003";
+
+function makeDocument(
+  id: string,
+  title: string,
+  document_type: string,
+  url: string,
+): MeetingDocument {
+  return {
+    id,
+    meeting_id: MEETING_ID,
+    title,
+    document_type,
+    url,
+    created_at: "2024-12-04T00:00:00.000Z",
+    updated_at: "2024-12-04T00:00:00.000Z",
+  };
+}
+
+const minutesDoc = makeDocument(
+  "8f1d0c66-6666-4a00-9000-000000000001",
+  "Minutes, December 3",
+  "minutes",
+  "https://records.example.invalid/minutes-2024-12-03.pdf",
+);
+
+const agendaDoc = makeDocument(
+  "8f1d0c66-6666-4a00-9000-000000000002",
+  "Agenda packet, December 3",
+  "agenda",
+  "https://records.example.invalid/agenda-2024-12-03.pdf",
+);
+
+const staffReportDoc = makeDocument(
+  "8f1d0c66-6666-4a00-9000-000000000003",
+  "Staff report on the culvert bid",
+  "staff_report",
+  "https://records.example.invalid/staff-report-culvert.pdf",
+);
+
+let voteSeq = 0;
+function makeVote(
+  memberId: string,
+  value: VoteValue,
+  agendaItemId: string | null,
+): Vote {
+  voteSeq += 1;
+  return {
+    id: `8f1d0c66-7777-4a00-9000-${String(voteSeq).padStart(12, "0")}`,
+    meeting_id: MEETING_ID,
+    agenda_item_id: agendaItemId,
+    member_id: memberId,
+    vote: value,
+    created_at: "2024-12-03T18:30:00.000Z",
+  };
+}
+
+function makeFlag(
+  flag_type: AnomalyFlagType,
+  overrides: Partial<AnomalyFlag> = {},
+): AnomalyFlag {
+  return {
+    id: "8f1d0c66-8888-4a00-9000-000000000001",
+    meeting_id: MEETING_ID,
+    agenda_item_id: null,
+    flag_type,
+    severity: "medium",
+    description: "Recorded for review by a person.",
+    metadata: null,
+    source: "auto",
+    created_at: "2024-12-05T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/* ---------------------------------------------------------------- handlers */
+
+function list<T>(data: T[]) {
+  return HttpResponse.json({ data, total: data.length });
+}
+
+interface Scenario {
+  /** `null` stands for a meeting the API has no row for. */
+  meeting?: MeetingDetail | null;
+  agendaItems?: AgendaItem[];
+  documents?: MeetingDocument[];
+  votes?: Vote[];
+  anomalies?: AnomalyFlag[];
+  members?: Member[];
+}
+
+/** Every endpoint the page fans out to, so no test leans on a shared fixture. */
+function install(scenario: Scenario = {}) {
+  const {
+    meeting = makeMeeting(),
+    agendaItems = [],
+    documents = [],
+    votes = [],
+    anomalies = [],
+    members = roster,
+  } = scenario;
+
+  server.use(
+    http.get("/api/meetings/:id", () =>
+      meeting
+        ? HttpResponse.json(meeting)
+        : new HttpResponse(null, { status: 404, statusText: "Not Found" }),
+    ),
+    http.get("/api/meetings/:id/agenda-items", () => list(agendaItems)),
+    http.get("/api/meetings/:id/documents", () => list(documents)),
+    http.get("/api/meetings/:id/agenda-diff", () => list([])),
+    http.get(
+      "/api/meetings/:id/rundown",
+      () => new HttpResponse(null, { status: 404, statusText: "Not Found" }),
+    ),
+    http.get("/api/votes", () => list(votes)),
+    http.get("/api/anomalies", () => list(anomalies)),
+    http.get("/api/members", () => list(members)),
+  );
+}
+
+/* ----------------------------------------------------------------- lookups */
+
+/** The `<dd>` beside a standing-head `<dt>`. */
+function fieldValue(label: string): string {
+  const term = screen.getByText(label);
+  const value = term.parentElement?.querySelector("dd");
+  if (!value) throw new Error(`no value rendered for the "${label}" field`);
+  return value.textContent ?? "";
+}
+
+/** The figure printed under a stat-band label. */
+function statValue(label: string): string {
+  const figure = screen.getByText(label).parentElement?.querySelector("p");
+  if (!figure) throw new Error(`no figure rendered for the "${label}" stat`);
+  return figure.textContent ?? "";
+}
+
+function itemRow(title: string): HTMLElement {
+  const row = screen.getByText(title).closest("tr");
+  if (!row) throw new Error(`no agenda row rendered for "${title}"`);
+  return row;
+}
+
+/* -------------------------------------------------------------------- tests */
+
+describe("MeetingDetailPage", () => {
+  describe("what the page claims about the record", () => {
+    /**
+     * There is no "Adjourned" row, and restoring one would be restoring an
+     * unsourceable claim. `meetings` stores a date, a nullable time, a location
+     * and a status — there is no `adjourned_at` column and never has been — so
+     * the row could only ever render the literal string "Not recorded", on
+     * every meeting, forever. "Not recorded" reads as a fact about the
+     * custodian's minutes. It would be describing our schema gap instead, in
+     * the city's voice. If an adjournment time is one day extracted from
+     * minutes, it gets a column first, and then it gets a row here.
+     *
+     * `Convened` and `Location` stay, and are asserted present, because
+     * `meetings.time` and `meetings.location` are real nullable columns: their
+     * "Not recorded" is true of the source.
+     */
+    it("carries no Adjourned row, and keeps the fields the schema can source", async () => {
+      install({ meeting: makeMeeting() });
+      renderPage();
+
+      await screen.findByRole("heading", { name: /Meeting of/ });
+
+      expect(screen.queryByText("Adjourned")).toBeNull();
+      expect(screen.queryByText(/adjourn/i)).toBeNull();
+
+      expect(screen.getByText("Convened")).toBeInTheDocument();
+      expect(fieldValue("Convened")).toBe("6:00 p.m.");
+      expect(screen.getByText("Location")).toBeInTheDocument();
+      expect(fieldValue("Location")).toBe(
+        "Fictional Springs City Hall, Room 2",
+      );
+    });
+
+    it('says "Not recorded" only where the column is genuinely null', async () => {
+      install({ meeting: makeMeeting({ time: null, location: null }) });
+      renderPage();
+
+      await screen.findByRole("heading", { name: /Meeting of/ });
+
+      expect(fieldValue("Convened")).toBe("Not recorded");
+      expect(fieldValue("Location")).toBe("Not recorded");
+    });
+  });
+
+  describe("the standing head", () => {
+    it("datelines the meeting with jurisdiction, body, date and status", async () => {
+      install({ meeting: makeMeeting() });
+      renderPage();
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "Meeting of December 3, 2024",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Fictional Springs, ZZ")).toBeInTheDocument();
+      expect(
+        screen.getByText("Example Commission on Public Works"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("completed")).toBeInTheDocument();
+    });
+
+    /** A cancelled meeting reading as an ordinary one is a false statement. */
+    it("names a cancelled meeting as cancelled in the headline and the badge", async () => {
+      install({ meeting: makeMeeting({ status: "cancelled" }) });
+      renderPage();
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "Cancelled meeting of December 3, 2024",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("cancelled")).toBeInTheDocument();
+    });
+  });
+
+  describe("when the record is not there", () => {
+    it("reports a 404 as no meeting on file, rather than an empty page", async () => {
+      install({ meeting: null });
+      renderPage();
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "No meeting on file for this record.",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Not found")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /All meetings/ })).toHaveAttribute(
+        "href",
+        "/meetings",
+      );
+    });
+
+    it("distinguishes a failed request from a missing record, and quotes it", async () => {
+      install();
+      server.use(
+        http.get(
+          "/api/meetings/:id",
+          () =>
+            new HttpResponse(null, {
+              status: 500,
+              statusText: "Internal Server Error",
+            }),
+        ),
+      );
+      renderPage();
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "This meeting record could not be loaded.",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Error")).toBeInTheDocument();
+      expect(
+        screen.getByText("API error: 500 Internal Server Error"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Not found")).toBeNull();
+    });
+
+    it("announces the wait rather than flashing an empty record", () => {
+      install();
+      server.use(
+        http.get("/api/meetings/:id", async () => {
+          await delay("infinite");
+          return HttpResponse.json(makeMeeting());
+        }),
+      );
+      renderPage();
+
+      const status = screen.getByRole("status");
+      expect(status).toHaveTextContent("Loading meeting record…");
+      expect(status).toHaveAttribute("aria-live", "polite");
+    });
+  });
+
+  describe("the agenda and its votes", () => {
+    it("prints one row per item, numbered and titled", async () => {
+      install({
+        agendaItems: [
+          makeItem(ITEM_ONE, 1, "Culvert replacement on Sample Road", {
+            description: "Award of the construction contract.",
+            category: "Public works",
+          }),
+          makeItem(ITEM_TWO, 2, "Fee schedule for placeholder permits"),
+        ],
+      });
+      renderPage();
+
+      await screen.findByText("Fee schedule for placeholder permits");
+      const first = itemRow("Culvert replacement on Sample Road");
+      expect(within(first).getByText("1")).toBeInTheDocument();
+      expect(
+        within(first).getByText("Award of the construction contract."),
+      ).toBeInTheDocument();
+      expect(within(first).getByText("Public works")).toBeInTheDocument();
+      expect(statValue("Agenda items")).toBe("2");
+    });
+
+    it("renders an em dash and no recorded vote where nobody voted", async () => {
+      install({
+        agendaItems: [makeItem(ITEM_ONE, 1, "Culvert replacement on Sample Road")],
+      });
+      renderPage();
+
+      await screen.findByText("Culvert replacement on Sample Road");
+      const row = itemRow("Culvert replacement on Sample Road");
+      expect(within(row).getByText("—")).toBeInTheDocument();
+      const result = within(row).getByText("No recorded vote");
+      expect(result).toHaveClass("text-muted");
+    });
+
+    it("tallies a passing vote as yes–no with an en dash", async () => {
+      install({
+        agendaItems: [makeItem(ITEM_ONE, 1, "Culvert replacement on Sample Road")],
+        votes: [
+          makeVote(roster[0].id, "yes", ITEM_ONE),
+          makeVote(roster[1].id, "yes", ITEM_ONE),
+          makeVote(roster[2].id, "no", ITEM_ONE),
+          makeVote(roster[3].id, "abstain", ITEM_ONE),
+          makeVote(roster[4].id, "absent", ITEM_ONE),
+        ],
+      });
+      renderPage();
+
+      await screen.findByText("Culvert replacement on Sample Road");
+      const row = itemRow("Culvert replacement on Sample Road");
+      // U+2013, the en dash the vote cell composes the tally with.
+      expect(within(row).getByText("2–1")).toBeInTheDocument();
+      expect(within(row).getByText("Passed")).toHaveClass("text-pass");
+      expect(
+        within(row).getByText("1 abstained · 1 absent"),
+      ).toBeInTheDocument();
+    });
+
+    it("calls a vote with more noes than ayes failed", async () => {
+      install({
+        agendaItems: [makeItem(ITEM_TWO, 2, "Fee schedule for placeholder permits")],
+        votes: [
+          makeVote(roster[0].id, "yes", ITEM_TWO),
+          makeVote(roster[1].id, "no", ITEM_TWO),
+          makeVote(roster[2].id, "no", ITEM_TWO),
+        ],
+      });
+      renderPage();
+
+      await screen.findByText("Fee schedule for placeholder permits");
+      const row = itemRow("Fee schedule for placeholder permits");
+      expect(within(row).getByText("1–2")).toBeInTheDocument();
+      expect(within(row).getByText("Failed")).toHaveClass("text-fail");
+    });
+
+    /**
+     * A tie does not carry. `outcomeOf` returns `failed` when the ayes equal
+     * the noes and both are non-zero, and the page must say Failed rather than
+     * leaving a reader to infer that a 2–2 vote passed.
+     */
+    it("calls a tied vote failed, not passed", async () => {
+      install({
+        agendaItems: [makeItem(ITEM_THREE, 3, "Rezoning of the Example parcel")],
+        votes: [
+          makeVote(roster[0].id, "yes", ITEM_THREE),
+          makeVote(roster[1].id, "yes", ITEM_THREE),
+          makeVote(roster[2].id, "no", ITEM_THREE),
+          makeVote(roster[3].id, "no", ITEM_THREE),
+        ],
+      });
+      renderPage();
+
+      await screen.findByText("Rezoning of the Example parcel");
+      const row = itemRow("Rezoning of the Example parcel");
+      expect(within(row).getByText("2–2")).toBeInTheDocument();
+      expect(within(row).getByText("Failed")).toHaveClass("text-fail");
+      expect(within(row).queryByText("Passed")).toBeNull();
+    });
+
+    it("states an empty agenda rather than rendering a bare heading", async () => {
+      install({ agendaItems: [] });
+      renderPage();
+
+      expect(
+        await screen.findByText("No agenda items on file for this meeting."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
+    it("says the agenda failed to load instead of implying there was none", async () => {
+      install();
+      server.use(
+        http.get(
+          "/api/meetings/:id/agenda-items",
+          () =>
+            new HttpResponse(null, {
+              status: 500,
+              statusText: "Internal Server Error",
+            }),
+        ),
+      );
+      renderPage();
+
+      expect(
+        await screen.findByText(
+          "The agenda for this meeting could not be loaded.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("No agenda items on file for this meeting."),
+      ).toBeNull();
+    });
+
+    it("counts a single vote recorded against no agenda item", async () => {
+      install({
+        agendaItems: [makeItem(ITEM_ONE, 1, "Culvert replacement on Sample Road")],
+        votes: [makeVote(roster[0].id, "yes", null)],
+      });
+      renderPage();
+
+      const note = await screen.findByText(/without an agenda item/);
+      expect(note).toHaveTextContent(
+        "1 vote is recorded against this meeting without an agenda item.",
+      );
+    });
+
+    it("pluralises the unlinked-vote line", async () => {
+      install({
+        agendaItems: [makeItem(ITEM_ONE, 1, "Culvert replacement on Sample Road")],
+        votes: [
+          makeVote(roster[0].id, "yes", null),
+          makeVote(roster[1].id, "no", null),
+        ],
+      });
+      renderPage();
+
+      const note = await screen.findByText(/without an agenda item/);
+      expect(note).toHaveTextContent(
+        "2 votes are recorded against this meeting without an agenda item.",
+      );
+    });
+  });
+
+  describe("attendance", () => {
+    it("records no roll rather than an attendance of zero", async () => {
+      install({ votes: [] });
+      renderPage();
+
+      await screen.findByRole("heading", { name: /Meeting of/ });
+      expect(statValue("Attendance")).toBe("—");
+      expect(screen.getByText("No roll recorded")).toBeInTheDocument();
+    });
+
+    it("counts the members who cast anything but an absence, over the seats", async () => {
+      install({
+        agendaItems: [makeItem(ITEM_ONE, 1, "Culvert replacement on Sample Road")],
+        votes: [
+          makeVote(roster[0].id, "yes", ITEM_ONE),
+          makeVote(roster[1].id, "no", ITEM_ONE),
+          makeVote(roster[2].id, "abstain", ITEM_ONE),
+          makeVote(roster[3].id, "absent", ITEM_ONE),
+        ],
+      });
+      renderPage();
+
+      await screen.findByText("Culvert replacement on Sample Road");
+      // Three of the five seats answered the roll; the absence is not presence.
+      expect(statValue("Attendance")).toBe("3/5");
+      expect(screen.getByText("Voting members present")).toBeInTheDocument();
+    });
+
+    it("takes the seat count from the roll when more members voted than the roster knows", async () => {
+      install({
+        agendaItems: [makeItem(ITEM_ONE, 1, "Culvert replacement on Sample Road")],
+        members: roster.slice(0, 2),
+        votes: [
+          makeVote(roster[0].id, "yes", ITEM_ONE),
+          makeVote(roster[1].id, "yes", ITEM_ONE),
+          makeVote(roster[2].id, "yes", ITEM_ONE),
+          makeVote(roster[3].id, "absent", ITEM_ONE),
+        ],
+      });
+      renderPage();
+
+      await screen.findByText("Culvert replacement on Sample Road");
+      expect(statValue("Attendance")).toBe("3/4");
+    });
+  });
+
+  describe("the records-request route", () => {
+    it("offers a request when no minutes are in the record", async () => {
+      install({ meeting: makeMeeting({ minutes_url: null }), documents: [agendaDoc] });
+      renderPage();
+
+      expect(
+        await screen.findByText(/No minutes for this meeting are in the record/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "Request this record" }),
+      ).toHaveAttribute("href", `/public-records?meeting=${MEETING_ID}`);
+    });
+
+    it("stays silent when the minutes are on file", async () => {
+      install({ meeting: makeMeeting(), documents: [minutesDoc] });
+      renderPage();
+
+      await screen.findByRole("heading", { name: /Meeting of/ });
+      expect(
+        screen.queryByRole("link", { name: "Request this record" }),
+      ).toBeNull();
+      expect(
+        screen.queryByText(/No minutes for this meeting are in the record/),
+      ).toBeNull();
+    });
+  });
+
+  describe("citation chips", () => {
+    it("cites the named source document, not the fallback", async () => {
+      install({
+        documents: [minutesDoc, staffReportDoc],
+        anomalies: [
+          makeFlag("quorum_issue", {
+            source: "manual",
+            metadata: { source_document: staffReportDoc.title },
+          }),
+        ],
+      });
+      renderPage();
+
+      const chip = await screen.findByRole("link", {
+        name: `Source: ${staffReportDoc.title}`,
+      });
+      expect(chip).toHaveAttribute("href", staffReportDoc.url);
+      expect(chip).toHaveAttribute("target", "_blank");
+      expect(screen.getByText("Added in review")).toBeInTheDocument();
+    });
+
+    it("says there are no minutes on file, without linking anywhere", async () => {
+      install({
+        meeting: makeMeeting({ minutes_url: null }),
+        documents: [],
+        anomalies: [makeFlag("missing_minutes")],
+      });
+      renderPage();
+
+      const chip = await screen.findByText("Source: no minutes on file");
+      expect(chip.tagName).toBe("SPAN");
+      expect(
+        screen.queryByRole("link", { name: /Source: no minutes on file/ }),
+      ).toBeNull();
+      expect(screen.getByText("Minutes not published")).toBeInTheDocument();
+    });
+
+    it("falls back to the minutes for a flag about what happened in the room", async () => {
+      install({
+        meeting: makeMeeting({
+          minutes_url: "https://records.example.invalid/minutes.pdf",
+          agenda_url: "https://records.example.invalid/agenda.pdf",
+        }),
+        documents: [],
+        anomalies: [makeFlag("quorum_issue")],
+      });
+      renderPage();
+
+      const chip = await screen.findByRole("link", { name: "Source: minutes" });
+      expect(chip).toHaveAttribute(
+        "href",
+        "https://records.example.invalid/minutes.pdf",
+      );
+    });
+
+    it("falls back to the agenda when there are no minutes", async () => {
+      install({
+        meeting: makeMeeting({
+          minutes_url: null,
+          agenda_url: "https://records.example.invalid/agenda.pdf",
+        }),
+        documents: [],
+        anomalies: [makeFlag("quorum_issue")],
+      });
+      renderPage();
+
+      const chip = await screen.findByRole("link", { name: "Source: agenda" });
+      expect(chip).toHaveAttribute(
+        "href",
+        "https://records.example.invalid/agenda.pdf",
+      );
+    });
+
+    it("names the meeting record, unlinked, when nothing is published", async () => {
+      install({
+        meeting: makeMeeting({ minutes_url: null, agenda_url: null }),
+        documents: [],
+        anomalies: [makeFlag("last_minute_agenda_change")],
+      });
+      renderPage();
+
+      const chip = await screen.findByText("Source: meeting record");
+      expect(chip.tagName).toBe("SPAN");
+      expect(screen.getByText("One anomaly on this record")).toBeInTheDocument();
+      expect(statValue("Flags")).toBe("1");
+    });
+  });
+});

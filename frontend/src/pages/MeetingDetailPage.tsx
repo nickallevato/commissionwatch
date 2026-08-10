@@ -13,8 +13,9 @@ import { useMembers } from "@/hooks/useMembers";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RundownViewer } from "@/components/RundownViewer";
 import { AgendaDiffTimeline } from "@/components/AgendaDiffTimeline";
-import { flagTypeLabels } from "@/components/AnomalyCard";
-import { SeverityMark, severityRank } from "@/components/AnomalyBadge";
+import { flagTypeLabels } from "@/components/flag-labels";
+import { SeverityMark } from "@/components/AnomalyBadge";
+import { severityRank } from "@/components/severity";
 import type { AnomalyFlag, Meeting, MeetingDocument, Vote, VoteValue } from "@/types";
 
 /* ---------------------------------------------------------------- formatting */
@@ -290,14 +291,24 @@ export function MeetingDetailPage() {
           </div>
         </div>
 
+        {/* There is no Adjourned row, and there was one until 2026-08-10.
+          `meetings` has no `adjourned_at` — it has a DATE, a nullable TIME,
+          a location and a status, and nothing else about the sitting — so the
+          row rendered the literal string "Not recorded" on every meeting this
+          site has ever held or will hold. "Not recorded" is a claim about the
+          custodian's minutes; what it actually described was a column we never
+          created. A field that can only ever say one thing is not reporting,
+          and a field that reports our own schema gap as the city's is worse
+          than absent. When an adjournment time is extracted from minutes it
+          gets a column, and then it gets a row here.
+
+          `Convened` stays: `meetings.time` is real, is nullable, and its
+          "Not recorded" is true of the source — Granicus publishes a time for
+          upcoming meetings only. */}
         <dl className="mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm text-ink-soft">
           <div className="flex items-baseline gap-2">
             <dt className="label-sm">Convened</dt>
             <dd>{convened ?? "Not recorded"}</dd>
-          </div>
-          <div className="flex items-baseline gap-2">
-            <dt className="label-sm">Adjourned</dt>
-            <dd>Not recorded</dd>
           </div>
           <div className="flex items-baseline gap-2">
             <dt className="label-sm">Location</dt>
