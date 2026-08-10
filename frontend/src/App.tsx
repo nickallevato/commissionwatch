@@ -20,6 +20,7 @@ import { AdminRecordsPage } from "./pages/AdminRecordsPage";
 import { AdminSourcesPage } from "./pages/AdminSourcesPage";
 import { AdminRunDetailPage } from "./pages/AdminRunDetailPage";
 import { AdminMeetingDetailPage } from "./pages/AdminMeetingDetailPage";
+import { AdminReviewPage } from "./pages/AdminReviewPage";
 import { SubscribePage } from "./pages/SubscribePage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -110,6 +111,16 @@ export function App() {
             element={
               <ProtectedRoute>
                 <AdminRunDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* B-a. The only screen from which a generated claim about a named
+            person becomes public. */}
+          <Route
+            path="admin/review"
+            element={
+              <ProtectedRoute>
+                <AdminReviewPage />
               </ProtectedRoute>
             }
           />

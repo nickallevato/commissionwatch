@@ -27,6 +27,12 @@ interface ConsoleSurface {
 
 const SURFACES: readonly ConsoleSurface[] = [
   {
+    to: "/admin/review",
+    title: "Review queue",
+    detail:
+      "Held findings, the stored artifacts each one rests on, and approve / reject / edit-with-reason. Approval is the only thing that makes a finding public; a rejected one stays held.",
+  },
+  {
     to: "/admin/channels",
     title: "Delivery channels",
     detail:

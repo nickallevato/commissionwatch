@@ -388,6 +388,91 @@ export type CorrectionTargetTable =
   | "meeting_documents";
 
 // ---------------------------------------------------------------------------
+// B-a · The findings review queue — `GET /api/admin/review/*`
+// ---------------------------------------------------------------------------
+
+/**
+ * `approval_requests.status` — migration 038.
+ *
+ * There is deliberately no `expired`. A request past its window is overdue and
+ * still pending; the flag stays held and nothing publishes. See the migration's
+ * header for why a status written by a clock was refused.
+ */
+export type ReviewRequestStatus = "pending_review" | "approved" | "rejected";
+
+/** How a citation was resolved. Most specific first, in that order. */
+export type CitationKind = "flag_artifact" | "metadata_sha256" | "meeting_document";
+
+/** One stored artifact a finding rests on. */
+export interface FindingCitation {
+  kind: CitationKind;
+  artifact_id: string;
+  sha256: string;
+  storage_key: string;
+  content_type: string | null;
+  source_url: string | null;
+  byte_size: number;
+  fetched_at: string;
+  document_title: string | null;
+  document_type: string | null;
+  version_no: number | null;
+}
+
+export interface ReviewQueueItem {
+  request: {
+    id: string;
+    status: ReviewRequestStatus;
+    severity: string;
+    reviewer_operator_id: string | null;
+    reviewer_email: string | null;
+    review_comment: string | null;
+    reviewed_at: string | null;
+    expires_at: string;
+    created_at: string;
+    /** Derived at read time from `expires_at`. Never a stored status. */
+    overdue: boolean;
+  };
+  finding: {
+    id: string;
+    flag_type: string;
+    severity: string;
+    description: string;
+    review_state: string;
+    source: string;
+    meeting_id: string | null;
+    agenda_item_id: string | null;
+    artifact_id: string | null;
+    metadata: Record<string, unknown> | null;
+    created_at: string;
+  };
+  context: {
+    meeting_date: string | null;
+    meeting_published_at: string | null;
+    commission_name: string | null;
+    jurisdiction_name: string | null;
+  };
+  /** Empty means the finding cannot be approved. The API enforces it. */
+  citations: FindingCitation[];
+}
+
+/** `review_policy` — B-b's replacement. One row, one threshold. */
+export interface ReviewPolicy {
+  id: string;
+  hold_at_or_above: AnomalySeverity;
+  review_window_hours: number;
+  updated_by: string | null;
+  updated_by_email: string | null;
+  updated_at: string;
+}
+
+export interface ReviewQueueResponse {
+  data: ReviewQueueItem[];
+  total: number;
+  policy: ReviewPolicy;
+  counts: { pending: number; overdue: number; approved: number; rejected: number };
+}
+
+// ---------------------------------------------------------------------------
 // P6 · Full-text search
 // ---------------------------------------------------------------------------
 
