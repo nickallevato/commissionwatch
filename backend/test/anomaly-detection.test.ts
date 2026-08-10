@@ -4,11 +4,16 @@ import {
   checkEmergencySession,
   checkMissingMinutes,
   checkQuorumIssue,
-  checkLastMinuteAgendaChange,
   checkUnanimousControversial,
   checkClosedDoorVote,
   RULES_VERSION,
 } from "../src/services/anomaly-detection";
+import {
+  agendaChangeFlags,
+  diffAgendaItems,
+  type DocumentTimeline,
+  type VersionItem,
+} from "../src/services/agenda-diff";
 
 function makeMeeting(overrides: Record<string, unknown> = {}) {
   return {
@@ -270,55 +275,137 @@ describe("checkQuorumIssue", () => {
   });
 });
 
-describe("checkLastMinuteAgendaChange", () => {
-  it("flags items added less than 24h before meeting", async () => {
-    const meetingDate = "2025-01-15";
-    const meeting = makeMeeting({ date: meetingDate });
-    const db = mockKnex({
-      agenda_items: [
+/**
+ * `checkLastMinuteAgendaChange` used to read `agenda_items.created_at` — the
+ * moment *we* ingested a row — and publish the result as a claim about when the
+ * body added the item. These four cases carry the same intent across to the
+ * evidence that replaced it: version *n* and version *n+1* of a published
+ * document, and when each was first seen.
+ *
+ * They exercise `agendaChangeFlags`, which is pure, so the rule is tested
+ * without a database and without a timezone. The database wiring around it is
+ * covered end to end in `agenda-diff.test.ts`.
+ */
+describe("checkLastMinuteAgendaChange · agendaChangeFlags", () => {
+  const SCHEDULED = new Date("2025-01-15T18:00:00Z");
+
+  function timeline(
+    documentId: string,
+    title: string,
+    toFirstSeen: string,
+    changes: { from: VersionItem[]; to: VersionItem[] },
+  ): DocumentTimeline {
+    const version = (no: number, firstSeen: string, items: VersionItem[]) => ({
+      id: `${documentId}-v${no}`,
+      version_no: no,
+      first_seen_at: firstSeen,
+      sha256: `${no}`.repeat(64),
+      byte_size: 100 + no,
+      item_count: items.length,
+    });
+    const from = version(1, "2025-01-01T00:00:00.000Z", changes.from);
+    const to = version(2, toFirstSeen, changes.to);
+    return {
+      document_id: documentId,
+      title,
+      document_type: "agenda",
+      url: `https://example.invalid/${documentId}`,
+      versions: [from, to],
+      diffs: [
         {
-          id: "ai-1",
-          meeting_id: "m-1",
-          title: "Late item",
-          created_at: "2025-01-14T20:00:00Z",
+          from,
+          to,
+          changes: diffAgendaItems(changes.from, changes.to),
+          from_items: changes.from,
+          to_items: changes.to,
         },
       ],
-    });
-    const result = await checkLastMinuteAgendaChange(db as never, meeting as never);
-    assert.ok(Array.isArray(result));
-    assert.equal(result.length, 1);
-    assert.equal(result[0].flag_type, "last_minute_agenda_change");
-    assert.equal(result[0].agenda_item_id, "ai-1");
-    assert.ok(result[0].description.includes("Late item"));
-  });
+    };
+  }
 
-  it("flags multiple late items individually", async () => {
-    const meeting = makeMeeting({ date: "2025-01-15" });
-    const db = mockKnex({
-      agenda_items: [
-        { id: "ai-1", meeting_id: "m-1", title: "Late 1", created_at: "2025-01-14T20:00:00Z" },
-        { id: "ai-2", meeting_id: "m-1", title: "Late 2", created_at: "2025-01-14T23:00:00Z" },
+  const base = {
+    meetingId: "m-1",
+    scheduledAt: SCHEDULED,
+    windowHours: 48,
+    memberNames: [] as string[],
+  };
+
+  it("flags an agenda republished less than 24h before the meeting", () => {
+    const result = agendaChangeFlags({
+      ...base,
+      timelines: [
+        timeline("doc-1", "Agenda", "2025-01-14T23:00:00.000Z", {
+          from: [{ item_number: 1, title: "Roll call" }],
+          to: [
+            { item_number: 1, title: "Roll call" },
+            { item_number: 2, title: "Late item" },
+          ],
+        }),
       ],
     });
-    const result = await checkLastMinuteAgendaChange(db as never, meeting as never);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].flag_type, "last_minute_agenda_change");
+    assert.equal(result[0].severity, "high");
+    assert.ok(result[0].description.includes("19 hours"));
+    assert.ok(result[0].description.includes("1 item added"));
+    // Both artifact hashes, per the sourcing invariant.
+    assert.equal(result[0].metadata.from_sha256, "1".repeat(64));
+    assert.equal(result[0].metadata.to_sha256, "2".repeat(64));
+  });
+
+  it("flags multiple republished documents individually", () => {
+    const result = agendaChangeFlags({
+      ...base,
+      timelines: [
+        timeline("doc-1", "Agenda", "2025-01-14T23:00:00.000Z", {
+          from: [{ item_number: 1, title: "A" }],
+          to: [{ item_number: 1, title: "A2" }],
+        }),
+        timeline("doc-2", "Amended agenda", "2025-01-14T20:00:00.000Z", {
+          from: [{ item_number: 1, title: "B" }],
+          to: [{ item_number: 1, title: "B2" }],
+        }),
+      ],
+    });
     assert.equal(result.length, 2);
   });
 
-  it("does not flag items added well before meeting", async () => {
-    const meeting = makeMeeting({ date: "2025-01-15" });
-    const db = mockKnex({
-      agenda_items: [
-        { id: "ai-1", meeting_id: "m-1", title: "Early item", created_at: "2025-01-10T10:00:00Z" },
+  it("does not flag a version that appeared well before the meeting", () => {
+    const result = agendaChangeFlags({
+      ...base,
+      timelines: [
+        timeline("doc-1", "Agenda", "2025-01-10T10:00:00.000Z", {
+          from: [{ item_number: 1, title: "Early" }],
+          to: [{ item_number: 2, title: "Also early" }],
+        }),
       ],
     });
-    const result = await checkLastMinuteAgendaChange(db as never, meeting as never);
     assert.equal(result.length, 0);
   });
 
-  it("returns empty array for meetings with no agenda items", async () => {
-    const meeting = makeMeeting();
-    const db = mockKnex({ agenda_items: [] });
-    const result = await checkLastMinuteAgendaChange(db as never, meeting as never);
+  it("returns an empty array for a document with only one version", () => {
+    const result = agendaChangeFlags({
+      ...base,
+      timelines: [
+        {
+          document_id: "doc-1",
+          title: "Agenda",
+          document_type: "agenda",
+          url: "https://example.invalid/doc-1",
+          versions: [
+            {
+              id: "v1",
+              version_no: 1,
+              first_seen_at: "2025-01-14T23:00:00.000Z",
+              sha256: "1".repeat(64),
+              byte_size: 10,
+              item_count: 3,
+            },
+          ],
+          diffs: [],
+        },
+      ],
+    });
     assert.equal(result.length, 0);
   });
 });

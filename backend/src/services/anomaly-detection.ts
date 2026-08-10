@@ -1,11 +1,27 @@
 import type { Knex } from "knex";
+import {
+  agendaChangeFlags,
+  loadAgendaChangeSettings,
+  loadDocumentTimelines,
+  scheduledInstant,
+} from "./agenda-diff";
 import { anomalyEvents } from "./notification";
 
-export const RULES_VERSION = "2.0.0";
+/**
+ * Bumped for P5. `last_minute_agenda_change` no longer means what it meant in
+ * 2.0.0 — it is now derived from document version history rather than from
+ * ingestion timestamps — and a `detection_runs` row recording which rules
+ * produced it is only useful if the version changes when the rules do.
+ */
+export const RULES_VERSION = "3.0.0";
 
 /**
  * The shape the individual `check*` rules produce — an anomaly that has not
- * been persisted yet, so it has no `id`, `created_at`, `metadata` or `source`.
+ * been persisted yet, so it has no `id`, `created_at` or `source`.
+ *
+ * `metadata` and `review_state` are optional and are set by the rules that have
+ * evidence to record. `review_state` defaults to `published` in the database;
+ * a rule whose evidence names a person must set `held` explicitly.
  */
 export interface AnomalyFlag {
   meeting_id: string;
@@ -14,6 +30,8 @@ export interface AnomalyFlag {
   severity: string;
   agenda_item_id?: string | null;
   source?: string;
+  metadata?: Record<string, unknown>;
+  review_state?: "published" | "held";
 }
 
 /**
@@ -21,9 +39,10 @@ export interface AnomalyFlag {
  * This is what the detection endpoints serialize, so every column the API
  * contract declares required must be present here.
  */
-export interface AnomalyFlagRow extends AnomalyFlag {
+export interface AnomalyFlagRow extends Omit<AnomalyFlag, "metadata"> {
   id: string;
   agenda_item_id: string | null;
+  /** `null` on the wire, `undefined` on an unpersisted draft — hence the Omit. */
   metadata: Record<string, unknown> | null;
   source: string;
   created_at: string;
@@ -32,8 +51,10 @@ export interface AnomalyFlagRow extends AnomalyFlag {
 interface Meeting {
   id: string;
   commission_id: string;
-  date: string;
-  time: string;
+  /** `pg` parses a bare `DATE` into a local-midnight `Date`. */
+  date: string | Date;
+  /** Nullable in migration 003. A completed Granicus meeting often has none. */
+  time: string | null;
   status: string;
   agenda_url: string | null;
   minutes_url: string | null;
@@ -88,7 +109,14 @@ export async function detectAnomalies(db: Knex, meetingId: string): Promise<Anom
       .del();
 
     if (flags.length > 0) {
-      const rows = flags.map((f) => ({ ...f, source: "auto" }));
+      // `metadata` is jsonb and is serialised here rather than in each rule, so
+      // no rule can forget and hand Knex an object it will stringify as
+      // `[object Object]`.
+      const rows = flags.map(({ metadata, ...flag }) => ({
+        ...flag,
+        source: "auto",
+        ...(metadata === undefined ? {} : { metadata: JSON.stringify(metadata) }),
+      }));
       inserted = await trx("anomaly_flags").insert(rows).returning("*");
     }
   });
@@ -214,29 +242,34 @@ export async function checkQuorumIssue(db: Knex, meeting: Meeting): Promise<Anom
   return null;
 }
 
+/**
+ * Agendas republished inside the jurisdiction's window before the meeting.
+ *
+ * **This replaced a heuristic that could not be substantiated.** The previous
+ * implementation compared `agenda_items.created_at` — the moment *we* ingested
+ * a row — against the meeting date, and concluded from it that an item had been
+ * "added less than 24 hours before meeting". For any meeting swept the day
+ * before it convened, that flagged every item on the agenda, and published the
+ * claim. It was a statement about our own database wearing the clothes of a
+ * statement about the public record, which is the precise thing the project's
+ * sourcing invariant forbids.
+ *
+ * What replaces it compares two published documents: version *n* of an agenda
+ * and version *n+1*, the items extracted from each, and when each was first
+ * seen. The evidence carries both artifact hashes, so the claim is checkable by
+ * anyone holding the bytes. A meeting with one version of its agenda — the
+ * common case — raises nothing, because nothing changed.
+ */
 export async function checkLastMinuteAgendaChange(db: Knex, meeting: Meeting): Promise<AnomalyFlag[]> {
-  const agendaItems: AgendaItem[] = await db("agenda_items")
-    .where({ meeting_id: meeting.id })
-    .select("id", "title", "created_at");
-
-  const flags: AnomalyFlag[] = [];
-  const meetingDate = new Date(meeting.date);
-
-  for (const item of agendaItems) {
-    const createdAt = new Date(item.created_at);
-    const hoursBeforeMeeting = (meetingDate.getTime() - createdAt.getTime()) / (1000 * 60 * 60);
-    if (hoursBeforeMeeting >= 0 && hoursBeforeMeeting < 24) {
-      flags.push({
-        meeting_id: meeting.id,
-        flag_type: "last_minute_agenda_change",
-        description: `Agenda item "${item.title}" added less than 24 hours before meeting`,
-        severity: "medium",
-        agenda_item_id: item.id,
-      });
-    }
-  }
-
-  return flags;
+  const settings = await loadAgendaChangeSettings(db, meeting.commission_id);
+  const timelines = await loadDocumentTimelines(db, meeting.id);
+  return agendaChangeFlags({
+    meetingId: meeting.id,
+    scheduledAt: scheduledInstant(meeting.date, meeting.time, settings.timezone),
+    windowHours: settings.windowHours,
+    timelines,
+    memberNames: settings.memberNames,
+  });
 }
 
 export async function checkUnanimousControversial(db: Knex, meeting: Meeting): Promise<AnomalyFlag[]> {
