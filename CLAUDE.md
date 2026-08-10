@@ -76,6 +76,7 @@ Backend tests need PostgreSQL: `docker compose up -d db`.
   `ubuntu-latest` for checks, `dh1` for build and deploy.
 - Gitea's `act_runner` runs jobs inside a container, so a `services:` database answers to its
   service name, not `localhost`
+- **CI logs are readable.** Scoped Gitea token at `~/.config/commissionwatch/gitea.env` (never commit it): read `/actions/runs`, `/runs/{id}/jobs`, `/jobs/{id}/logs`. Read the log before theorising.
 - **Deploy over SSM, never SSH.** The shared host's SSH private key is not retrievable from AWS by
   anyone, so an SSH deploy job can never go green. Do not add one back, and do not go looking for
   the key. `deploy/deploy-aws-ssm.sh` is the single deploy path — CI and operator both call it
