@@ -159,6 +159,17 @@ export function Layout() {
             >
               Collection status
             </Link>
+            {/* B3. The corrections policy belongs beside the methodology for
+              the same reason the methodology is here at all: it is the account
+              of how this site behaves, and it has to be reachable from every
+              page rather than from the one a reader happens to be on when
+              they find something wrong. */}
+            <Link
+              to="/corrections"
+              className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
+            >
+              Corrections
+            </Link>
             <Link
               to="/data-license"
               className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}

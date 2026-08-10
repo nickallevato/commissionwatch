@@ -353,6 +353,20 @@ export function MeetingDetailPage() {
             </Link>
           </p>
         )}
+
+        {/* B3. Offered on every meeting, unconditionally — unlike the records
+          link above, which is offered only where the record is short of
+          something. There is no condition under which a person named in a
+          record has no standing to contest it, and putting this behind one
+          would mean deciding in advance which complaints are worth hearing. */}
+        <p className="mt-3 text-sm text-muted">
+          <Link
+            className="cite"
+            to={`/corrections/dispute?table=meetings&id=${meeting.id}`}
+          >
+            Contest this record
+          </Link>
+        </p>
       </header>
 
       {/* Stat band ----------------------------------------------------- */}

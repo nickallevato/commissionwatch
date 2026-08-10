@@ -582,3 +582,97 @@ export interface PublicStatus {
   total: number;
   sources: PublicStatusSource[];
 }
+
+// ---------------------------------------------------------------------------
+// B3 — the public corrections log and the dispute route
+// ---------------------------------------------------------------------------
+
+export type CorrectionRecordKind =
+  | "meeting"
+  | "agenda_item"
+  | "document"
+  | "finding";
+
+/**
+ * One row of `GET /api/corrections`.
+ *
+ * Deliberately narrower than the `record_corrections` row the console reads:
+ * `operator_id` and `operator_email` are not in this shape because they are not
+ * in the response. The accountable editor is named on the Methodology page; a
+ * mailbox reprinted on every row adds nothing the masthead does not carry.
+ *
+ * `dispute_reference` is the reference and never the dispute's text — a dispute
+ * is never published, and migration 039 permits one value of its `review_state`.
+ */
+export interface PublicCorrection {
+  id: string;
+  created_at: string;
+  record_kind: CorrectionRecordKind;
+  record_label: string;
+  meeting_id: string | null;
+  field: string;
+  field_label: string;
+  old_value: string | null;
+  new_value: string | null;
+  reason: string;
+  dispute_reference: string | null;
+  summary: string;
+}
+
+export interface PublicCorrectionResponse {
+  data: PublicCorrection[];
+  total: number;
+}
+
+/** What `POST /api/corrections/disputes` hands back. There is no email. */
+export interface DisputeReceipt {
+  reference: string;
+  status: DisputeStatus;
+  received_at: string;
+}
+
+export type DisputeStatus = "received" | "upheld" | "declined";
+
+export type DisputableTable =
+  | "meetings"
+  | "agenda_items"
+  | "meeting_documents"
+  | "anomaly_flags";
+
+/** The operator's view. There is no public route that returns this shape. */
+export interface DisputeRecord {
+  id: string;
+  reference: string;
+  target_table: string;
+  target_id: string;
+  contested: string;
+  account: string;
+  contact: string;
+  status: DisputeStatus;
+  review_state: string;
+  reviewer_operator_id: string | null;
+  reviewer_email: string | null;
+  review_reason: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DisputeContext {
+  meeting_id: string | null;
+  meeting_date: string | null;
+  commission_name: string | null;
+  jurisdiction_name: string | null;
+  record_summary: string;
+}
+
+export interface DisputeItem {
+  dispute: DisputeRecord;
+  context: DisputeContext;
+}
+
+export interface DisputeListing {
+  data: DisputeItem[];
+  total: number;
+  counts: { received: number; upheld: number; declined: number };
+}

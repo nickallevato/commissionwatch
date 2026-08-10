@@ -11,13 +11,13 @@ import { Link } from "react-router-dom";
  * itself rather than implying a pipeline that does not exist. Nothing here is
  * aspirational prose dressed as fact.
  *
- * Deliberately not linked from this page: `/corrections`, `/corrections/dispute`
- * and the bulk export paths. Those surfaces are not built yet, and a live link
- * to a 404 is exactly the failure this page exists to prevent.
+ * `/corrections` and `/corrections/dispute` **are** linked as of B3 — they were
+ * withheld while they were unbuilt, because a live link to a 404 is exactly the
+ * failure this page exists to prevent. The bulk export paths still are not.
  */
 
-const REVISED = "August 9, 2026";
-const VERSION = "1.1";
+const REVISED = "August 10, 2026";
+const VERSION = "1.2";
 const CORRECTIONS_EMAIL = "corrections@commissionwatch.bmux.sh";
 const REPO_URL = "https://github.com/nickallevato/commissionwatch";
 
@@ -167,23 +167,46 @@ const NOT_DONE: readonly string[] = [
    Correction commitments
    ------------------------------------------------------------------------- */
 
+/**
+ * What is guaranteed, and by what.
+ *
+ * This replaced a table of five response times — "2 business days", "10
+ * business days", "24 hours", "3 business days". **Nothing in this codebase
+ * measured, tracked or alerted on any of them.** Five unenforced clocks, on the
+ * page belonging to the project whose subject is unenforced claims. What is
+ * here instead is what is actually true, and the right-hand column names the
+ * thing that makes it true rather than a number nobody is holding.
+ */
 interface Commitment {
   readonly stage: string;
-  readonly clock: string;
+  readonly guarantee: string;
 }
 
 const COMMITMENTS: readonly Commitment[] = [
-  { stage: "Acknowledgement with a reference number", clock: "Immediate" },
-  { stage: "Dispute read by a person and triaged", clock: "2 business days" },
   {
-    stage: "Substantive response — corrected, upheld with reasoning, or clarified",
-    clock: "10 business days",
+    stage: "You get a reference the moment you file, on screen",
+    guarantee: "In the response",
   },
   {
-    stage: "Item credibly shown to be materially wrong: unpublished pending review",
-    clock: "24 hours",
+    stage: "Your dispute reaches the queue an operator works through",
+    guarantee: "On submission",
   },
-  { stage: "Correction published", clock: "3 business days" },
+  {
+    stage: "It is never published, and no state exists in which it could be",
+    guarantee: "Database constraint",
+  },
+  {
+    stage: "No record changes without an operator's stated reason",
+    guarantee: "Enforced in code",
+  },
+  {
+    stage: "Every decision is appended to a log that cannot be edited or deleted",
+    guarantee: "Database trigger",
+  },
+  {
+    stage: "Every correction to a published record appears on the corrections log",
+    guarantee: "Read from that log",
+  },
 ];
 
 /* ---------------------------------------------------------------------------
@@ -560,26 +583,48 @@ export function MethodologyPage() {
             <Prose>
               A site that cannot itself be corrected has no standing to ask
               anyone else for accountability. If something here is wrong, say
-              so, and it gets fixed on the clock below.
+              so. The full policy — how to contest a record, what happens next,
+              and what this project will and will not do — is on{" "}
+              <Link className="cite" to="/corrections">
+                Corrections and disputes
+              </Link>
+              , alongside every correction that has been made.
             </Prose>
             <Prose>
-              Write to{" "}
+              To contest a record, use{" "}
+              <Link className="cite" to="/corrections/dispute">
+                Contest a record
+              </Link>
+              . It asks for three things — the record, what is wrong, and a
+              contact — and nothing else about you is stored. It goes to a
+              person, it is never published, and it changes no record by itself.
+              You can also write to{" "}
               <a
                 href={`mailto:${CORRECTIONS_EMAIL}`}
                 className="underline underline-offset-2 hover:text-accent"
               >
                 {CORRECTIONS_EMAIL}
               </a>
-              . Include the URL of the item, what specifically is wrong, and — if
+              , with the URL of the item, what specifically is wrong, and — if
               you have it — the document that shows the correct fact. You do not
-              have to say who you are. An anonymous dispute pointing at a
-              document that proves this site wrong is still right.
+              have to say who you are beyond a contact. An anonymous dispute
+              pointing at a document that proves this site wrong is still right.
+            </Prose>
+            <Prose>
+              <strong className="font-semibold text-ink">
+                No response time is promised here
+              </strong>
+              , because nothing in this project measures one, and a clock that
+              nothing enforces is the kind of claim this site exists to find in
+              other people&rsquo;s publications. What is guaranteed is below,
+              and each line names the thing that guarantees it.
             </Prose>
 
             <div className="mt-6 overflow-x-auto">
               <table className="w-full border-collapse text-left">
                 <caption className="sr-only">
-                  Response commitments for a dispute, by stage
+                  What is guaranteed when a record is disputed, and what
+                  guarantees it
                 </caption>
                 <thead>
                   {/* `label-sm` sets `display: inline-block`, which would take a
@@ -592,7 +637,7 @@ export function MethodologyPage() {
                       scope="col"
                       className="w-40 pb-2 text-right align-bottom"
                     >
-                      <span className="label-sm">Commitment</span>
+                      <span className="label-sm">Guaranteed by</span>
                     </th>
                   </tr>
                 </thead>
@@ -605,8 +650,8 @@ export function MethodologyPage() {
                       <td className="py-3 pr-4 text-sm text-ink-soft">
                         {commitment.stage}
                       </td>
-                      <td className="figure py-3 text-right text-sm text-ink">
-                        {commitment.clock}
+                      <td className="py-3 text-right text-sm text-ink">
+                        {commitment.guarantee}
                       </td>
                     </tr>
                   ))}
@@ -630,10 +675,14 @@ export function MethodologyPage() {
               correction.
             </Prose>
             <p className="mt-4 max-w-prose text-sm leading-relaxed text-muted">
-              The public corrections log — every correction, permanently, with
-              the open-dispute clock computed rather than asserted — publishes
-              with the first finding. Until then, corrections are made by email
-              and this page carries the commitment.
+              The public corrections log is live at{" "}
+              <Link className="cite" to="/corrections">
+                Corrections and disputes
+              </Link>
+              . It shows corrections to records that are published on this site.
+              A correction to a record that has been withheld does not appear —
+              showing it would disclose the withheld record — and it appears the
+              moment that record is published.
             </p>
           </section>
 

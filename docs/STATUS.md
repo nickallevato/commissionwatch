@@ -1,7 +1,9 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after landing the **findings review queue** (B-a and B-b's
-> replacement) — the change that made publishing a finding possible at all. Earlier the same day:
+> Last updated: 2026-08-10, after landing **B3 — the public corrections log and the dispute
+> route**, which was the last build gate on making this site publicly reachable. Earlier the same
+> day: the **findings review queue** (B-a and B-b's
+> replacement) — the change that made publishing a finding possible at all. Earlier still:
 > the **public status page** and a sweep of the known defects; and before those: P7 (the public-records request generator), P5 (the agenda diff
 > timeline) and P6 (full-text search).
 > Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
@@ -430,6 +432,91 @@ Counts after B-a: backend **827 tests / 214 suites**, frontend **307 / 33**, bot
 lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
 `deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
 
+## B3 — the corrections log and the dispute route have landed
+
+Working from `docs/superpowers/plans/2026-08-10-corrections-and-disputes.md`. Migration 039.
+
+**B3 is satisfied.** Backlog item 7 required a published correction log and a route for a named
+person to contest a record *before* the Caddy IP allowlist comes down. Both exist, both are
+unauthenticated, both are tested. The remaining launch-readiness items — public data export and
+licensing, backups with a tested restore, accessibility — are **not** what B3 gated on, and are
+listed separately below.
+
+**`/corrections` publishes only corrections to records that are public now.** A correction row
+quotes a fact about its target in `old_value`, so publishing one for a withheld record would
+disclose the withheld record — through a page that takes no id and therefore, like P6's search,
+cannot be reached only by guessing one. The publicity test is **per target table** and routes
+through `services/publication.ts` rather than retyping the rule: `meetings` through
+`whereMeetingPublished`, `agenda_items` and `meeting_documents` through their meeting,
+`anomaly_flags` through `whereFindingPublic`. `review_policy` and `record_disputes` never appear —
+neither is a correction to a published record. Built from `EXISTS` rather than joins on purpose:
+**an `EXISTS` that is wrong returns nothing; a join that is wrong returns everything.**
+`public-corrections.test.ts` walks all four tables **in both directions**, withheld then published,
+because absence alone would also hold for a query that is simply broken.
+
+Two consequences that are intended: **unpublishing hides the correction that unpublished it**, and
+a *rejected* finding never surfaces because it stays `held`. The page states the first in plain
+words rather than implying the log is a complete history of every edit ever made.
+
+**The operator's address is not published.** `operator_id` and `operator_email` stop at the
+console; the accountable editor is named on the Methodology page.
+
+**A dispute is not a finding, and migration 039 keeps it that way.** Writing a stranger's assertion
+into `anomaly_flags` would make it the same object the detectors produce, on the same publish path,
+one operator misclick from being published under this project's name. `record_disputes` is its own
+table with its own two decisions — uphold and decline — sharing the operator's screen and the audit
+log but not the type. `/admin/review` gained a **Disputes** tab; the tab strip is the whole of the
+shared chrome and there is deliberately no approve button on the dispute side.
+
+**A dispute is never published.** `review_state` is `NOT NULL DEFAULT 'held'` with
+`CHECK (review_state = 'held')` — one legal value — and there is no public read route for the
+table. The CHECK is the second lock, not the first, and a test proves the database refuses the
+update.
+
+**Upholding a dispute changes no record.** The correction that follows is a separate operator act
+through the corrections path carrying `record_corrections.dispute_id`, which is what makes
+dispute → review → correction followable end to end in one table and what keeps an unauthenticated
+stranger's text from being one route away from the published record. A test asserts the `meetings`
+row is byte-identical either side of an uphold.
+
+**Abuse resistance, since it is the only unauthenticated write in the product.** Three bounds, and
+one alone would be theatre: an in-memory per-client fixed window (3/hour, 10/day) that **stores
+nothing about anybody**; a site-wide cap (30/hour) and a per-target cap (5 undecided) that are
+queries **inside the insert's transaction** — a limit checked in middleware and a limit checked in
+the transaction are two different limits, and only the second holds under concurrency. The target
+must resolve through the publication wall, and **an unpublished record and a non-existent one
+answer identically**, so the route is not an oracle for what has been ingested and withheld. The
+per-target refusal message deliberately says nothing about *that record* having disputes. Field
+lengths are capped in the database as well as at the route. **Nothing is emailed and nothing is
+published**, which is the strongest property here and is structural: the form has no output an
+attacker can aim at a third party.
+
+Three things collected: what is contested, the contester's account, a contact. No identity
+document, no IP, no user agent — a test asserts `record_disputes` has no such column.
+
+**`app.set("trust proxy", 1)`** — one hop, Caddy. `true` would trust the whole chain including
+anything a client wrote, which would let a caller displace their own address and walk past the
+per-client window.
+
+**Motive scanning moved to `appendCorrectionRow`**, the single writer every path already uses.
+Every stated reason in `record_corrections` is a publishable sentence now, including the ones B-a's
+approve and reject write, so *describe the record, never the motive* has to hold for all of them —
+and a guard the next writer has to remember is not a guarantee. `routes/admin/review.ts` learned to
+map `CorrectionError`, which it never needed to before; without that the 400 would have surfaced
+as a 500.
+
+**Four unenforced clocks came off the Methodology page.** It promised "2 business days", "10
+business days", "24 hours" and "3 business days" for handling a dispute. **Nothing in this codebase
+measured, tracked or alerted on any of them** — four unenforced claims on the page belonging to the
+project whose subject is unenforced claims. They are replaced by a table of what is actually
+guaranteed and *by what* (a database trigger, a database constraint, the response body).
+`MethodologyPage.test.tsx`'s assertion on `"10 business days"` is now the inverse: it fails if any
+`business days` promise comes back.
+
+Counts after B3: backend **867 tests / 221 suites**, frontend **330 / 36**, both green. Backend
+lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+`deploy/test-deploy-aws-ssm.sh` still 61 passed / 0.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
@@ -586,6 +673,10 @@ Learned the hard way; each cost a failed deploy.
 
 ### Going public
 
+**B3 no longer blocks this, as of 2026-08-10.** The published corrections log and the dispute route
+exist and are tested; see the B3 section above. What remains before the gate comes down is an
+operator decision, not a build.
+
 Delete the two `@blocked` lines from the `commissionwatch.bmux.sh` block in `your-org/platform-aws`'s `caddy/Caddyfile`. **Do not** change the security group — its 443 allowlist is shared with seven other products, so opening it exposes all of them at once. Per-product exposure belongs in Caddy.
 
 ## Gaps — what is not built
@@ -601,7 +692,11 @@ Ordered by how much each blocks the product being real.
 4. **MT CERS campaign finance** (`cers-ext.mt.gov/CampaignTracker`). Not started.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.
 6. ~~**W7 delivery channels.**~~ Built. Channels, routes, encryption, the Discord transport, and — as of B-e — cadence, SMS, and a self-serve subscriber surface on the same substrate. Nothing dispatches product events yet, because nothing ingests.
-7. **Launch readiness**: corrections and dispute policy, public data export and licensing, backups with a tested restore, accessibility and shareability. Specced only.
+7. **Launch readiness**: ~~corrections and dispute policy~~ — **closed 2026-08-10 by B3**, see
+   above. `/corrections` publishes the policy and the log, `/corrections/dispute` is the route, and
+   disputes reach the operator queue. **This was the gate on making the site public**; the rest of
+   this item is not. Still outstanding: public data export and licensing, backups with a tested
+   restore (see item 8 — `BACKUP_S3_URI` and the cron), accessibility and shareability.
 8. ~~**No database backups.**~~ Closed 2026-08-09 by P3. `deploy/backup.sh` takes a nightly
    `pg_dump -Fc` plus a MinIO mirror with 7 daily / 4 weekly retention and emits
    `ops.backup_succeeded` / `ops.backup_failed` through the delivery dispatcher.

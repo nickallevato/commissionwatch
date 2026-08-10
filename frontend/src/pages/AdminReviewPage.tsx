@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { DisputeQueue } from "@/components/DisputeQueue";
 import { PressroomCard, PressroomShell } from "@/components/PressroomShell";
 import { severityLabels, severityOrder } from "@/components/severity";
 import type {
@@ -28,7 +29,23 @@ import type {
  *
  * **There is no bulk action.** Approving in a batch is approving without
  * reading, on the one screen whose whole purpose is that somebody read it.
+ *
+ * **B3's disputes are the second tab, not a second console.** A dispute is a
+ * stranger's contest of a record rather than a claim this project makes, so it
+ * gets its own tab, its own two decisions and its own explanation — but the
+ * same screen and the same audit log, because an operator should have one place
+ * they review things. The tab strip is the whole of the shared chrome; nothing
+ * below it is shared, and `DisputeQueue` says why.
  */
+
+type ReviewTab = "findings" | "disputes";
+
+const TAB_LABEL: Record<ReviewTab, string> = {
+  findings: "Findings",
+  disputes: "Disputes",
+};
+
+const TABS: readonly ReviewTab[] = ["findings", "disputes"];
 
 const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
@@ -76,6 +93,7 @@ function shortHash(sha256: string): string {
 type LoadResult = { ok: true; body: ReviewQueueResponse } | { ok: false };
 
 export function AdminReviewPage() {
+  const [tab, setTab] = useState<ReviewTab>("findings");
   const [status, setStatus] = useState<ReviewRequestStatus>("pending_review");
   const [listing, setListing] = useState<ReviewQueueResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -206,6 +224,32 @@ export function AdminReviewPage() {
       <h1 className="headline text-3xl sm:text-4xl mt-1">Review queue</h1>
       <div className="rule-hi mt-4" role="presentation" />
 
+      {/* The whole of the shared chrome. Everything below it is per tab, and
+        that is the point: the two objects want different handling, and a
+        screen that treated them the same would be the defect. */}
+      <div className="mt-6 flex flex-wrap gap-2" role="tablist" aria-label="Review queue">
+        {TABS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            role="tab"
+            aria-selected={tab === option}
+            onClick={() => setTab(option)}
+            className={`border-b-2 px-1 py-1 text-[11px] font-semibold uppercase tracking-label ${focusRing} ${
+              tab === option
+                ? "border-accent text-ink"
+                : "border-transparent text-muted hover:text-ink"
+            }`}
+          >
+            {TAB_LABEL[option]}
+          </button>
+        ))}
+      </div>
+
+      {tab === "disputes" ? (
+        <DisputeQueue />
+      ) : (
+        <>
       <p className="mt-6 max-w-prose text-sm leading-relaxed text-ink-soft">
         Nothing naming a person publishes itself. A finding here is real, stored
         and citable, and absent from every public response until someone named
@@ -465,6 +509,8 @@ export function AdminReviewPage() {
             );
           })}
         </div>
+      )}
+        </>
       )}
     </PressroomShell>
   );

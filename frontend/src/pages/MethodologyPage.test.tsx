@@ -17,6 +17,10 @@ const ROUTED_PATHS = [
   // The per-source table this page used to promise "when the ingestion registry
   // ships". It has shipped, so the promise is now a link.
   "/status",
+  // B3. The corrections log and the dispute route this page used to describe
+  // without linking, because neither existed. Both do now.
+  "/corrections",
+  "/corrections/dispute",
 ];
 
 describe("MethodologyPage", () => {
@@ -77,13 +81,34 @@ describe("MethodologyPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("publishes a corrections route and a response clock", () => {
+  it("publishes a corrections route, by email and as a page", () => {
     const { container } = renderWithProviders(<MethodologyPage />);
     const mailto = container.querySelectorAll(
       'a[href="mailto:corrections@commissionwatch.bmux.sh"]',
     );
     expect(mailto.length).toBeGreaterThan(0);
-    expect(screen.getByText("10 business days")).toBeInTheDocument();
+    expect(container.querySelector('a[href="/corrections"]')).not.toBeNull();
+    expect(
+      container.querySelector('a[href="/corrections/dispute"]'),
+    ).not.toBeNull();
+  });
+
+  /**
+   * This assertion is the inverse of the one it replaces, on purpose.
+   *
+   * The page used to promise "2 business days", "10 business days", "24 hours"
+   * and "3 business days" for handling a dispute. Nothing in this codebase
+   * measured, tracked or alerted on any of them — four unenforced clocks on the
+   * page belonging to the project whose subject is unenforced claims. B3
+   * replaced them with what is actually guaranteed and by what, so the test
+   * that pinned the old wording now fails if any of it comes back.
+   */
+  it("promises no response time that nothing enforces", () => {
+    const { container } = renderWithProviders(<MethodologyPage />);
+    expect(container.textContent).not.toMatch(/business days/i);
+    expect(screen.getByText(/No response time is promised here/)).toBeInTheDocument();
+    // And what replaced them names its own mechanism.
+    expect(screen.getByText("Database trigger")).toBeInTheDocument();
   });
 
   it("links only to paths the app routes", () => {
