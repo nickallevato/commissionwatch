@@ -127,7 +127,7 @@ export function DisputeQueue() {
       }
       setNotice(
         decision === "uphold"
-          ? "Upheld, and recorded in the correction log. Nothing has changed on the record — correct it from its own page, quoting this reference."
+          ? "Upheld, and recorded in the correction log. Nothing has changed on the record — use “Correct the record, quoting this dispute” to make the change, and the log will join the two."
           : "Declined, and recorded in the correction log. The record stands.",
       );
       setReasonById((current) => ({ ...current, [id]: "" }));
@@ -151,8 +151,10 @@ export function DisputeQueue() {
           Upholding one changes nothing on the record
         </strong>{" "}
         — it records that the contest looks right. Correcting the record is a
-        separate act from its own page, with its own reason, and quoting the
-        reference is what ties the two together in the log.
+        separate act from its own page, with its own reason. The link below
+        carries this dispute onto that page, and{" "}
+        <code>record_corrections.dispute_id</code> is what ties the two together
+        in the log and on the public corrections page.
       </p>
 
       {listing && (
@@ -246,9 +248,22 @@ export function DisputeQueue() {
                   </p>
                 )}
                 {context.meeting_id && (
-                  <p className="mt-2">
+                  <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                     <Link className="cite" to={`/admin/meetings/${context.meeting_id}`}>
                       Open the record
+                    </Link>
+                    {/* Carries the dispute through rather than asking the
+                        operator to retype a reference. The correction screen
+                        resolves the id, shows what it resolved to, and puts it
+                        in `record_corrections.dispute_id` — which is the only
+                        thing that makes dispute → decision → correction
+                        followable in the log and on the public page. */}
+                    <Link
+                      className="cite"
+                      data-testid={`correct-from-dispute-${dispute.id}`}
+                      to={`/admin/meetings/${context.meeting_id}?dispute=${dispute.id}#record-a-correction`}
+                    >
+                      Correct the record, quoting this dispute
                     </Link>
                   </p>
                 )}

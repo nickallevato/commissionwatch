@@ -184,6 +184,17 @@ jobs:
           set -o pipefail
           bash ./deploy/test-deploy-aws-ssm.sh 2>&1 | tee -a /tmp/ci-output.txt
 
+      # The external monitor's clock. It is the only thing between a monitor
+      # that runs and one that sits registered and never fires — the state this
+      # repository was actually in, because scheduled workflows do not execute
+      # on this Gitea. Everything it does is driven against a stub curl, so this
+      # needs no token and makes no request.
+      - name: Test the external monitor trigger
+        shell: bash
+        run: |
+          set -o pipefail
+          bash ./deploy/test-monitor-trigger.sh 2>&1 | tee -a /tmp/ci-output.txt
+
   # ── Build and push images to ECR ────────────────────────────────────
   # The ai2-daedalus runner and its SSH-tunnelled localhost:5000 registry are
   # both gone. Images now go to ECR in account 123456789012, which the shared

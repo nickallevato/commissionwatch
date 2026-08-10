@@ -368,6 +368,12 @@ export interface RecordCorrection {
   new_value: string | null;
   reason: string;
   operator_email: string | null;
+  /**
+   * The dispute that prompted this correction, if one did — `record_corrections.dispute_id`,
+   * migration 039. It is the id and never the dispute's text: a dispute is
+   * never published, and the console renders the link, not the contest.
+   */
+  dispute_id: string | null;
   created_at: string;
 }
 

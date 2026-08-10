@@ -405,6 +405,185 @@ describe("the dispute route", () => {
     });
   });
 
+  /* --------------------------------------- the join, end to end */
+
+  /**
+   * `record_corrections.dispute_id` has existed since migration 039 and the
+   * public log has been rendering *"Prompted by dispute CW-…"* off it, but no
+   * operator screen set it — so an operator who upheld a dispute and then
+   * corrected the record produced two rows nothing joined, and the trail the
+   * feature was designed around silently did not connect. This suite walks the
+   * whole of it: filed, upheld, corrected, published.
+   */
+  describe("a dispute and the correction it produced", () => {
+    async function fileAndUphold(): Promise<{ id: string; reference: string }> {
+      resetDisputeRateLimits();
+      const filed = await request(app)
+        .post("/api/corrections/disputes")
+        .send({ target_table: "meetings", target_id: publishedMeeting, ...BODY })
+        .expect(201);
+      const { reference } = filed.body as Receipt;
+      const row = await db("record_disputes")
+        .where({ reference })
+        .first<{ id: string } | undefined>();
+      assert.ok(row);
+
+      await request(app)
+        .post(`/api/admin/review/disputes/${row.id}/uphold`)
+        .set("Cookie", cookie)
+        .send({ reason: "The agenda for that date names the annexe." })
+        .expect(200);
+
+      return { id: row.id, reference };
+    }
+
+    it("carries the dispute onto the correction, and the public log shows the link", async () => {
+      const { id, reference } = await fileAndUphold();
+
+      const corrected = await request(app)
+        .post("/api/admin/pressroom/corrections")
+        .set("Cookie", cookie)
+        .send({
+          target_table: "meetings",
+          target_id: publishedMeeting,
+          field: "location",
+          new_value: "The annexe",
+          reason: "The agenda published for that date records the annexe.",
+          dispute_id: id,
+        })
+        .expect(201);
+      const correction = corrected.body as { id: string; dispute_id: string | null };
+      assert.equal(correction.dispute_id, id);
+
+      // The record itself changed — the correction is the act that changes it,
+      // and upholding was not.
+      const meeting = await db("meetings")
+        .where({ id: publishedMeeting })
+        .first<{ location: string } | undefined>();
+      assert.equal(meeting?.location, "The annexe");
+
+      // And the two are joined where a reader can see it.
+      const log = await request(app).get("/api/corrections?limit=200").expect(200);
+      const entry = (log.body as { data: PublicCorrection[] }).data.find(
+        (row) => row.id === correction.id,
+      );
+      assert.ok(entry, "the correction is not on the public corrections log");
+      assert.equal(entry.dispute_reference, reference);
+      assert.equal(entry.new_value, "The annexe");
+      // The reference travels; nothing the contester wrote does.
+      assert.ok(!JSON.stringify(entry).includes(BODY.account));
+
+      await db("meetings").where({ id: publishedMeeting }).update({ location: "City Hall" });
+    });
+
+    it("refuses a dispute that does not exist, rather than silently ignoring it", async () => {
+      const before = await db("meetings").where({ id: publishedMeeting }).first();
+
+      const res = await request(app)
+        .post("/api/admin/pressroom/corrections")
+        .set("Cookie", cookie)
+        .send({
+          target_table: "meetings",
+          target_id: publishedMeeting,
+          field: "location",
+          new_value: "The annexe",
+          reason: "The agenda published for that date records the annexe.",
+          dispute_id: "00000000-0000-4000-8000-000000000000",
+        })
+        .expect(404);
+      assert.match((res.body as ErrorBody).error, /No dispute with that id/);
+
+      // Refused means refused: the record is untouched and nothing was logged.
+      assert.deepEqual(await db("meetings").where({ id: publishedMeeting }).first(), before);
+      const logged = await db("record_corrections")
+        .where({ dispute_id: "00000000-0000-4000-8000-000000000000" })
+        .first();
+      assert.equal(logged, undefined);
+    });
+
+    it("refuses a declined dispute, because declining says the record stands", async () => {
+      resetDisputeRateLimits();
+      const filed = await request(app)
+        .post("/api/corrections/disputes")
+        .send({ target_table: "meetings", target_id: publishedMeeting, ...BODY })
+        .expect(201);
+      const { reference } = filed.body as Receipt;
+      const row = await db("record_disputes")
+        .where({ reference })
+        .first<{ id: string } | undefined>();
+      assert.ok(row);
+      await request(app)
+        .post(`/api/admin/review/disputes/${row.id}/decline`)
+        .set("Cookie", cookie)
+        .send({ reason: "The agenda and the minutes both record the main chamber." })
+        .expect(200);
+
+      const res = await request(app)
+        .post("/api/admin/pressroom/corrections")
+        .set("Cookie", cookie)
+        .send({
+          target_table: "meetings",
+          target_id: publishedMeeting,
+          field: "location",
+          new_value: "The annexe",
+          reason: "The agenda published for that date records the annexe.",
+          dispute_id: row.id,
+        })
+        .expect(409);
+      assert.match((res.body as ErrorBody).error, /declined/);
+    });
+
+    it("refuses a malformed dispute id", async () => {
+      await request(app)
+        .post("/api/admin/pressroom/corrections")
+        .set("Cookie", cookie)
+        .send({
+          target_table: "meetings",
+          target_id: publishedMeeting,
+          field: "location",
+          new_value: "The annexe",
+          reason: "The agenda published for that date records the annexe.",
+          dispute_id: "CW-ABCD1234",
+        })
+        .expect(400);
+    });
+
+    it("still records an unlinked correction, so the column stays optional", async () => {
+      const res = await request(app)
+        .post("/api/admin/pressroom/corrections")
+        .set("Cookie", cookie)
+        .send({
+          target_table: "meetings",
+          target_id: publishedMeeting,
+          field: "location",
+          new_value: "City Hall annexe",
+          reason: "The agenda published for that date records the annexe.",
+        })
+        .expect(201);
+      assert.equal((res.body as { dispute_id: string | null }).dispute_id, null);
+      await db("meetings").where({ id: publishedMeeting }).update({ location: "City Hall" });
+    });
+
+    it("maps the motive scan to a 400, on the linked path as much as the plain one", async () => {
+      // `appendCorrectionRow` motive-scans every reason, so a caller that does
+      // not map `CorrectionError` surfaces a 400 as a 500.
+      const { id } = await fileAndUphold();
+      const res = await request(app)
+        .post("/api/admin/pressroom/corrections")
+        .set("Cookie", cookie)
+        .send({
+          target_table: "meetings",
+          target_id: publishedMeeting,
+          field: "location",
+          new_value: "The annexe",
+          reason: "The clerk concealed the venue to keep people away.",
+          dispute_id: id,
+        })
+        .expect(400);
+      assert.match((res.body as ErrorBody).error, /never the motive/);
+    });
+  });
+
   /* ------------------------------------------------------- nothing leaks */
 
   describe("nothing a contester writes reaches the public site", () => {

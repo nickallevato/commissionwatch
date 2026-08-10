@@ -52,10 +52,24 @@ on:
   #        -H "Content-Type: application/json" -d '{"ref":"main"}' \
   #        "$GITEA_URL/api/v1/repos/your-org/commissionwatch/actions/workflows/monitor.yml/dispatches"
   #
-  # — which answers 204. A Tracker routine is the established pattern for
-  # exactly this in this environment; `na/minobi`'s watchdog names it as its own
-  # fallback. Until something drives it, deploy.yml runs the identical probe
-  # after every deploy, which is the failure that actually happened.
+  # — which answers 204.
+  #
+  # THAT REQUEST NOW HAS A HOME: `deploy/monitor-trigger.sh`, committed, tested
+  # against a stub curl (36 assertions), and meant to be run from cron on an
+  # always-on machine. It holds no token — the token comes from the environment
+  # or from ~/.config/commissionwatch/gitea.env, which is not in this
+  # repository. It also reads back how long it has been since a monitor run and
+  # fails when that gap is past its allowance, so a clock that was stopped
+  # reports the gap on the tick that restarts it.
+  #
+  # **Installing that cron entry is an operator action and it has not been
+  # done.** The exact command is in docs/STATUS.md. Until it is, deploy.yml runs
+  # the identical probe after every deploy, which is aimed at the failure that
+  # actually happened but is not a periodic check and is not offered as one.
+  #
+  # And if the clock itself stops, nothing notices. That is a dead-man's-switch,
+  # it needs a third party outside both this repository and Gitea, and it is not
+  # built — named in docs/STATUS.md rather than left implicit.
   workflow_dispatch:
 
 jobs:

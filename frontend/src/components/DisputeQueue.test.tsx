@@ -97,6 +97,22 @@ describe("DisputeQueue", () => {
     expect(container.textContent).toMatch(/never the motive/);
   });
 
+  it("carries the dispute onto the correction screen rather than asking for it to be retyped", async () => {
+    // `record_corrections.dispute_id` is the only thing that joins a dispute to
+    // the correction it produced. A link an operator has to reconstruct by hand
+    // is a link that exists only when somebody remembers to make it.
+    serve([item({ status: "upheld" })]);
+    renderWithProviders(<DisputeQueue />);
+
+    const link = await screen.findByTestId(
+      "correct-from-dispute-33333333-3333-4333-8333-333333333333",
+    );
+    expect(link).toHaveAttribute(
+      "href",
+      "/admin/meetings/22222222-2222-4222-8222-222222222222?dispute=33333333-3333-4333-8333-333333333333#record-a-correction",
+    );
+  });
+
   it("refuses a decision with no reason, without calling the API", async () => {
     serve([item()]);
     let called = false;

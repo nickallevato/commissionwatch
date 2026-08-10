@@ -152,6 +152,49 @@ function toCorrectionRow(raw: unknown): CorrectionRow {
   };
 }
 
+/**
+ * The dispute a correction names must exist, and must not have been declined.
+ *
+ * Two refusals, and the pair of them is the whole rule:
+ *
+ *  - **A dispute that does not exist is a 404.** `record_corrections` has no
+ *    foreign key to `record_disputes` — migration 031's append-only trigger is
+ *    why the table has no foreign keys at all — so nothing in the database will
+ *    catch a mistyped id. A correction claiming to have been prompted by a
+ *    dispute that was never filed is exactly the kind of unsourced assertion
+ *    this project exists to find in other people's publications, and it would
+ *    render on the public log as *"Prompted by dispute"* with no reference
+ *    behind it.
+ *  - **A declined dispute is a 409.** Declining says the record stands. A
+ *    correction citing it would publish two statements that contradict each
+ *    other, in one log, with no way for a reader to tell which one we meant.
+ *
+ * **`received` and `upheld` are both accepted, deliberately.** The ordinary
+ * flow is uphold, then correct — which is precisely a *resolved* dispute, so a
+ * rule refusing every decided dispute would refuse the only sequence the
+ * feature was designed around. Correcting first and deciding after is also
+ * legitimate: an operator who reads a contest, checks the source document and
+ * fixes the record has done the work the decision records.
+ */
+async function assertDisputeLinkable(
+  executor: Knex | Knex.Transaction,
+  disputeId: string,
+): Promise<void> {
+  const row: unknown = await executor("record_disputes")
+    .where({ id: disputeId })
+    .select("status")
+    .first();
+  if (!isRecord(row)) {
+    throw new CorrectionError("No dispute with that id", 404);
+  }
+  if (row.status === "declined") {
+    throw new CorrectionError(
+      "That dispute was declined: a correction cannot be prompted by a contest we refused",
+      409,
+    );
+  }
+}
+
 export interface AppendCorrectionInput {
   targetTable: string;
   targetId: string;
@@ -256,6 +299,12 @@ export async function recordCorrection(
     const current: unknown = await trx(targetTable).where({ id: targetId }).first();
     if (!isRecord(current)) {
       throw new CorrectionError(`No ${targetTable} row with that id`, 404);
+    }
+
+    // Checked inside the transaction that writes the row, not before it, so a
+    // dispute decided between the check and the insert cannot slip through.
+    if (disputeId !== null && disputeId !== undefined) {
+      await assertDisputeLinkable(trx, disputeId);
     }
 
     const oldValue = asLogValue(current[field]);

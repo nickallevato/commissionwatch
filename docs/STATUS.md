@@ -1,7 +1,10 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after landing the **bulk data export, the fork path and the public
-> meeting calendar** (see below) — the launch-readiness item that was not B3. Before that: **B3 —
+> Last updated: 2026-08-10, after **joining a dispute to the correction it produced** (B3, below —
+> `dispute_id` was a column nothing wrote) and giving the **external monitor a trigger that
+> actually fires** (`deploy/monitor-trigger.sh`, below — one operator action remains, and the
+> dead-man's-switch gap is named there rather than left implicit). Before those: the **bulk data
+> export, the fork path and the public meeting calendar** (see below) — the launch-readiness item that was not B3. Before that: **B3 —
 > the public corrections log and the dispute route**, which was the last build gate on making this site publicly reachable. Earlier the same
 > day: the **findings review queue** (B-a and B-b's
 > replacement) — the change that made publishing a finding possible at all. Earlier still:
@@ -480,6 +483,27 @@ dispute → review → correction followable end to end in one table and what ke
 stranger's text from being one route away from the published record. A test asserts the `meetings`
 row is byte-identical either side of an uphold.
 
+**That last sentence was aspirational until 2026-08-10, and is now true.** `dispute_id` existed and
+the public log rendered *"Prompted by dispute CW-…"* off it, but **no operator screen ever set it**:
+`POST /api/admin/pressroom/corrections` did not accept the field, so upholding a dispute and then
+correcting the record produced two rows nothing joined — and the absence was silent. The route
+accepts `dispute_id` now and **validates it rather than ignoring it**: `record_corrections` has no
+foreign key to `record_disputes` (migration 031's append-only trigger is why that table has no
+foreign keys at all), so a dispute that does not exist is a **404** and a **declined** one is a
+**409** — declining says the record stands, and a correction citing it would put two contradicting
+statements in one log. `received` and `upheld` are both accepted, deliberately: the ordinary flow is
+uphold *then* correct, which is a resolved dispute, so refusing every decided dispute would refuse
+the only sequence the feature was designed around. The check runs inside the transaction that writes
+the row.
+
+In the console the link travels rather than being retyped. The Disputes tab offers **"Correct the
+record, quoting this dispute"**, which opens `/admin/meetings/:id?dispute=<id>`; that page resolves
+the id, shows the reference and the contested sentence before anything is submitted, and opens the
+correction form **on the contested row** rather than on the meeting — an operator who has to re-find
+the agenda item a stranger quoted will eventually correct the wrong one. A dispute that cannot be
+loaded is said out loud and the correction goes ahead unlinked, because refusing to correct a record
+over a broken query string would be the worse failure.
+
 **Abuse resistance, since it is the only unauthenticated write in the product.** Three bounds, and
 one alone would be theatre: an in-memory per-client fixed window (3/hour, 10/day) that **stores
 nothing about anybody**; a site-wide cap (30/hour) and a per-target cap (5 undecided) that are
@@ -586,6 +610,68 @@ monitor people mute.
 
 Counts after the external monitor: backend **894 tests / 226 suites**, frontend **383 / 39**, both
 green. Backend lint: 2 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+
+### The trigger — `deploy/monitor-trigger.sh`, and the one operator action left
+
+**`monitor.yml` is not changed. It is correct**, and its `schedule:` block stays so it starts
+working the day the instance's cron is turned on. What was missing was a clock, and there is one now:
+`deploy/monitor-trigger.sh` POSTs the `workflow_dispatch` that answers 204, and is meant to be run
+from cron.
+
+**Why this and not something cleverer.** It is the cheapest thing that genuinely fires.
+`workflow_dispatch` is the *only* trigger measured to work on this instance — `schedule` has never
+produced a single run in any of its 82 repositories. The trigger needs no access to the site at all:
+the probe runs on `dh1`, the one runner proven through the Caddy IP gate, so the clock and the
+prober fail independently. And it costs nothing and installs nothing — bash and curl, no account, no
+vendor, no daemon, no new dependency, and **no token in the repository**. Turning the instance's
+cron back on would be better and is not ours to make; a Tracker routine, which the workflow header
+names as this environment's pattern, would still need this same token and this same request, so the
+script is that routine's body either way; and hanging the monitor off `push` fires here but would
+mean committing on a timer.
+
+Two behaviours worth knowing. **The token never reaches argv** — curl is driven entirely from stdin
+through `--config -`, because `ps` and `/proc/<pid>/cmdline` are readable by every user on the
+machine and one of the two candidate hosts is shared with seven other products. And **the script
+reads back how long it has been since a monitor run** and exits 3 when that gap is past its
+allowance, which turns "we quietly stopped watching in March" into "the clock says it missed eleven
+hours" on the tick that restarts it. Two traps this Gitea sets are handled and tested: `started_at`
+carries an **offset** rather than a `Z`, and a run that has been created but not started reports
+**epoch zero**, not null — read blindly, the run the dispatch just created makes the clock look
+fifty-six years behind, on every healthy tick.
+
+`deploy/test-monitor-trigger.sh` drives all of it against a stub curl: **36 assertions**, no token,
+no request. It runs in CI beside the deploy-script test.
+
+#### ⛔ OPERATOR ACTION — the cron entry is not installed
+
+Nothing periodic is running yet. On an always-on machine that can reach `gitea.example.invalid`, with
+this repository checked out and `~/.config/commissionwatch/gitea.env` in place:
+
+```bash
+# Prove it before trusting it — sends nothing.
+./deploy/monitor-trigger.sh --dry-run
+./deploy/monitor-trigger.sh                    # expect: ok dispatched … (http=204)
+
+# Then, every 15 minutes:
+( crontab -l 2>/dev/null; \
+  echo '*/15 * * * * cd /path/to/commissionwatch && ./deploy/monitor-trigger.sh >> /tmp/commissionwatch-monitor-trigger.log 2>&1' \
+) | crontab -
+```
+
+**Where to put it is a real choice, not a detail.** The operator's own always-on machine is
+preferred, because it fails independently of the subject. The deploy host
+(`i-0123456789abcdef0`, reachable over SSM, already on) is the alternative and needs no new
+hardware — but it shares a failure domain with the site it is watching, so a host-level outage
+takes the clock down with the thing the clock exists to report.
+
+#### The dead-man's-switch gap, stated rather than implied
+
+**If the trigger itself stops, nothing notices.** A cron entry that was never installed, a machine
+that rebooted and did not come back, an expired token — all of them look exactly like a site that
+has been healthy for a week. Silence is the same shape as success. Closing that needs a third party
+outside both this repository and Gitea, and every free one is an account and a vendor, so it is not
+built. The staleness check above is a smaller claim and is not offered as a substitute: it reports a
+gap *after* the clock restarts, and says nothing at all while the clock is stopped.
 
 ## Donor-to-vote correlation and the officials page have landed
 
@@ -1148,9 +1234,12 @@ Ordered by how much each blocks the product being real.
    that is a copy, not a backup. Setting it needs a bucket, which costs money and is the operator's
    call. The cron entry also still has to be installed on the host.
 9. **No monitoring** — **mostly closed 2026-08-10 by the external monitor, with one operator task
-   left.** See the section below. The probe is built, tested and green against production; what is
-   missing is a periodic trigger, because **scheduled workflows do not fire on this Gitea
-   instance** and that is measured, not suspected.
+   left.** See the section below. The probe is built, tested and green against production, and the
+   periodic trigger it was missing is now `deploy/monitor-trigger.sh` — **scheduled workflows do not
+   fire on this Gitea instance**, measured, not suspected, so the clock is a cron entry driving the
+   `workflow_dispatch` that does fire. **Installing that cron entry is the operator task**; the
+   exact command is in the monitor section. Still open and named there rather than left implicit:
+   nothing notices if the trigger itself stops.
 10. ~~**No admin authentication.**~~ Closed 2026-08-09 by A1. One operator class, `scrypt` from
     `node:crypto`, revocable server-side sessions in an httpOnly cookie, no public registration.
     The review queue is no longer blocked on it.
@@ -1287,6 +1376,10 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    confidently wrong. It blocks P7 entirely and nothing else blocks it. Full instructions in the
    P7 section above. **This one cannot be delegated to an agent** — it is a person reading a
    statute and putting their name against the date.
+0b. **Install the external monitor's cron entry.** One line, on an always-on machine, and until it
+   is installed nothing checks the site periodically at all. Exact command in the monitor section
+   above. Prefer a machine that is *not* the deploy host, so the clock does not go down with the
+   thing it watches.
 1. **Enable Gallatin on the live host and install the backup cron.** The code for both landed
    2026-08-09; neither is switched on in production. `npm run sweep -- --adapter gallatin-civicplus
    --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
