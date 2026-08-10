@@ -7,6 +7,12 @@ import {
   type RecordsRequestStatus,
 } from '../../services/records/requests';
 import type { ExtractedEntities } from '../../services/records/extraction';
+import { listGaps } from '../../services/records/gaps';
+import {
+  generateOperatorRequest,
+  listJurisdictionLaw,
+  normaliseRequester,
+} from '../../services/records/generator';
 
 /**
  * The operator's records surface: requests, uploads, extraction, corrections.
@@ -52,6 +58,76 @@ function fail(res: import('express').Response, err: unknown, next: (e?: unknown)
   }
   next(err);
 }
+
+// ---- P7: gaps, the records law, and drafting ------------------------------
+
+/**
+ * These sit above `/requests/:id` on purpose — they use their own path segments
+ * rather than `/requests/gaps`, which the id route would otherwise swallow and
+ * answer with "Invalid request id".
+ *
+ * The operator scope sees two gap kinds the public one does not: a disabled
+ * source and a failed fetch. Those describe *our* ingestion rather than the
+ * public record, and publishing them would present our operational state as
+ * though it were the county's.
+ */
+router.get('/gaps', async (req, res, next) => {
+  try {
+    const meetingId = typeof req.query.meeting_id === 'string' ? req.query.meeting_id : undefined;
+    if (meetingId !== undefined && !UUID_RE.test(meetingId)) {
+      res.status(400).json({ error: 'Invalid meeting_id format', statusCode: 400 });
+      return;
+    }
+    const data = await listGaps(db, 'operator', { meetingId });
+    res.json({ data, total: data.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Every jurisdiction and the state of its records law.
+ *
+ * A jurisdiction with no row is listed with an advisory rather than omitted:
+ * the missing row is what blocks the whole feature, and a console that hid it
+ * would present "no gaps can be requested" as though it were a property of the
+ * record rather than of our own table.
+ */
+router.get('/law', async (_req, res, next) => {
+  try {
+    const data = await listJurisdictionLaw(db);
+    res.json({ data, total: data.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+interface DraftRequestBody {
+  gap_id?: unknown;
+  requester?: unknown;
+}
+
+router.post(
+  '/draft-request',
+  async (req: Request<unknown, unknown, DraftRequestBody>, res, next) => {
+    try {
+      const body = req.body ?? {};
+      if (typeof body.gap_id !== 'string' || body.gap_id.trim() === '') {
+        res.status(400).json({ error: 'gap_id is required', statusCode: 400 });
+        return;
+      }
+
+      const requester = normaliseRequester(body.requester);
+      const generated = await generateOperatorRequest(db, { gapId: body.gap_id, requester });
+
+      // 201: a `records_requests` row was created, in `draft`. Nothing was sent,
+      // and nothing in this application will send it.
+      res.status(201).json(generated);
+    } catch (err) {
+      fail(res, err, next);
+    }
+  },
+);
 
 // ---- requests -------------------------------------------------------------
 

@@ -14,6 +14,7 @@ import notificationsRouter from "./routes/notifications";
 import alertsRouter from "./routes/alerts";
 import smsRouter from "./routes/sms";
 import searchRouter from "./routes/search";
+import publicRecordsRouter from "./routes/public-records";
 import adminRouter from "./routes/admin";
 import { errorHandler } from "./middleware/errorHandler";
 
@@ -64,6 +65,9 @@ app.use("/api/anomalies", anomaliesRouter);
 // P6 · full-text search. Public and unauthenticated like the rest of the read
 // API, and restricted to published records inside the service.
 app.use("/api/search", searchRouter);
+// P7 · the public-records request generator, unauthenticated. It drafts letter
+// text and writes nothing — no database row, and nothing is ever transmitted.
+app.use("/api/public-records", publicRecordsRouter);
 app.use("/api/ingestion", ingestionRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/notifications", notificationsRouter);
