@@ -47,9 +47,17 @@ services:
     #
     # Kept because starting in a sensible order still avoids a window of 502s,
     # and because depends_on does not help on a host reboot anyway.
+    #
+    # service_healthy, NOT service_started. `up -d --wait` treats a started
+    # process as a successful deploy, so with service_started a backend that
+    # boots and immediately dies — and is restarted forever by
+    # restart: unless-stopped — deploys as a green build serving 502s, and the
+    # version-skew check further down the deploy script never even runs.
+    # Verified 2026-08-09 in production: sha 1fb246f deployed "successfully"
+    # with /api/health, /api/version and /api/meetings all 502.
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       # 127.0.0.1, NOT localhost. /etc/hosts in this image maps localhost to
       # both 127.0.0.1 and ::1, busybox wget tries ::1 first, and nginx listens
@@ -88,6 +96,20 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      # 127.0.0.1, NOT localhost — the same trap that made the web container
+      # permanently unhealthy. /etc/hosts in this image maps localhost to ::1 as
+      # well, busybox wget tries ::1 first, and the Express server binds IPv4.
+      #
+      # start_period covers the entrypoint's `knex migrate:latest`, which runs
+      # before the server listens. Failures inside start_period do not count
+      # against `retries`, so a slow migration cannot fail the deploy — but a
+      # crash loop still will, which is the entire point of adding this.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
 
   db:
     image: pgvector/pgvector:pg16

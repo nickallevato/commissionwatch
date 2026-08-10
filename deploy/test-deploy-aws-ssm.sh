@@ -283,6 +283,81 @@ grep -v '^[[:space:]]*#' "$HERE/docker-compose.shared.yml" | grep -q "http://loc
   && bad "a compose healthcheck probes localhost; it can never pass" \
   || ok "no compose healthcheck probes localhost"
 
+# ── Compose healthchecks ────────────────────────────────────────────────────
+# Every long-running service must declare one. This is not hygiene: the deploy
+# runs `docker compose up -d --wait`, and --wait considers a service without a
+# healthcheck to be ready the moment its PROCESS starts. On 2026-08-09 the
+# backend had no healthcheck and `web` depended on it with service_started, so a
+# backend that boots and dies deployed as a success — restarted forever by
+# restart: unless-stopped — and the version-skew check below never ran because
+# the deploy already believed it had won. Production served 502s from a green
+# build. A missing healthcheck is therefore a deploy defect, and it gets a test.
+echo
+echo "compose healthchecks"
+
+# Top-level service names, in file order.
+services_of() {
+  awk '
+    /^services:/    { in_svc = 1; next }
+    /^[^[:space:]]/ { in_svc = 0 }
+    in_svc && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+      svc = $0; sub(/^  /, "", svc); sub(/:[[:space:]]*$/, "", svc); print svc
+    }
+  ' "$1"
+}
+
+# Does service $1 declare a healthcheck: block?
+has_healthcheck() {
+  awk -v want="$1" '
+    /^services:/                  { in_svc = 1; next }
+    /^[^[:space:]]/               { in_svc = 0 }
+    in_svc && /^  [A-Za-z0-9_-]+:/ {
+      svc = $0; sub(/^  /, "", svc); sub(/:.*$/, "", svc); next
+    }
+    in_svc && svc == want && /^    healthcheck:/ { found = 1 }
+    END { exit !found }
+  ' "$2"
+}
+
+COMPOSE_SERVICES="$(services_of "$HERE/docker-compose.shared.yml")"
+# Guard against the parser matching nothing, which would pass vacuously.
+check "compose parses: services are enumerable" \
+  "$(echo "$COMPOSE_SERVICES" | grep -c .)" "4"
+for svc in $COMPOSE_SERVICES; do
+  if has_healthcheck "$svc" "$HERE/docker-compose.shared.yml"; then
+    ok "service '$svc' declares a healthcheck"
+  else
+    bad "service '$svc' declares NO healthcheck (--wait will call it ready on process start)"
+  fi
+done
+
+# The backend probe must hit the backend's own port and path, not the frontend's.
+grep -q 'http://127.0.0.1:3001/api/health' "$HERE/docker-compose.shared.yml" \
+  && ok "backend healthcheck probes its own /api/health on 127.0.0.1" \
+  || bad "backend healthcheck does not probe 127.0.0.1:3001/api/health"
+
+# A healthcheck on the backend achieves nothing if web still waits only for the
+# process. These two changes are a pair and must stay one.
+awk '
+  /^services:/               { in_svc = 1; next }
+  /^[^[:space:]]/            { in_svc = 0 }
+  in_svc && /^  [A-Za-z0-9_-]+:/ {
+    svc = $0; sub(/^  /, "", svc); sub(/:.*$/, "", svc); in_dep = 0; next
+  }
+  in_svc && svc == "web" && /^    depends_on:/ { in_dep = 1; next }
+  in_svc && in_dep && /^    [^[:space:]]/      { in_dep = 0 }
+  in_svc && in_dep && /condition:[[:space:]]*service_healthy/ { found = 1 }
+  END { exit !found }
+' "$HERE/docker-compose.shared.yml" \
+  && ok "web waits on backend health, not merely on its process" \
+  || bad "web depends_on backend with service_started; a crash loop deploys green"
+
+# The migration failure path must be distinguishable in the logs from any other
+# crash, because in a restart loop the logs are all the operator has.
+grep -q 'FATAL: database migration failed' "$HERE/../backend/docker-entrypoint.sh" \
+  && ok "entrypoint announces a migration failure by name" \
+  || bad "entrypoint exits silently on a failed migration"
+
 # ── Compose networking ──────────────────────────────────────────────────────
 # A service declaring `networks:` joins ONLY those. The public service and the
 # internal one must therefore share a network explicitly, or the proxy 502s
