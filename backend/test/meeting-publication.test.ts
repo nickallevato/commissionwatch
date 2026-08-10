@@ -16,9 +16,9 @@ import {
  *
  * The acceptance criterion is one sentence: **a meeting with
  * `published_at IS NULL` must not appear in any public API response.** The
- * public meetings router has seven routes that take a meeting id and the
- * anomalies router has three more, so the test walks all of them rather than
- * checking the two that were easy to remember.
+ * public meetings router has eight routes that take a meeting id — seven, plus
+ * P5's agenda diff — and the anomalies router has three more, so the test walks
+ * all of them rather than checking the two that were easy to remember.
  *
  * A 404 rather than a 403 on an unpublished meeting is deliberate. Telling an
  * anonymous caller "this exists but you may not see it" would let them
@@ -75,6 +75,9 @@ describe("published meetings and the public API", () => {
       `/api/meetings/${unpublishedId}/anomalies`,
       `/api/meetings/${unpublishedId}/agenda-items`,
       `/api/meetings/${unpublishedId}/documents`,
+      // P5's agenda diff is the most quotable thing this project produces, so
+      // it is the worst possible place for the wall to have a hole.
+      `/api/meetings/${unpublishedId}/agenda-diff`,
       `/api/anomalies/meeting/${unpublishedId}`,
     ];
     for (const path of paths) {

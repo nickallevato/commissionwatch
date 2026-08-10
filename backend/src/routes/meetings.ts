@@ -1,5 +1,6 @@
 import { Router, Request } from "express";
 import db from "../config/database";
+import { loadDocumentTimelines } from "../services/agenda-diff";
 import { detectAnomalies } from "../services/anomaly-detection";
 import { findPublishedMeeting, whereMeetingPublished } from "../services/publication";
 
@@ -219,6 +220,37 @@ router.get("/:id/documents", async (req, res, next) => {
       .where({ meeting_id: id })
       .orderBy("created_at", "desc");
     res.json({ data: documents, total: documents.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * P5 — what changed in this meeting's documents, and when.
+ *
+ * One timeline per document: every version, and a diff of the extracted agenda
+ * items between each consecutive pair. Most documents have exactly one version
+ * and return an empty `diffs` array, which is a complete answer and not an
+ * error.
+ *
+ * Behind `findPublishedMeeting` like every other public meeting route. A diff
+ * is the most quotable thing this project produces, so an unpublished meeting
+ * leaking one would be the review wall failing at precisely the place it
+ * matters most — `meeting-publication.test.ts` walks this path with the rest.
+ */
+router.get("/:id/agenda-diff", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
+
+    const meeting = await findPublishedMeeting(db, id);
+    if (!meeting) {
+      res.status(404).json({ error: "Meeting not found", statusCode: 404 });
+      return;
+    }
+
+    const timelines = await loadDocumentTimelines(db, id);
+    res.json({ data: timelines, total: timelines.length });
   } catch (err) {
     next(err);
   }
