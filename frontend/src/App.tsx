@@ -23,6 +23,7 @@ import { AdminHomePage } from "./pages/AdminHomePage";
 import { AdminChannelsPage } from "./pages/AdminChannelsPage";
 import { AdminRecordsPage } from "./pages/AdminRecordsPage";
 import { AdminSourcesPage } from "./pages/AdminSourcesPage";
+import { AdminSourceMeetingsPage } from "./pages/AdminSourceMeetingsPage";
 import { AdminRunDetailPage } from "./pages/AdminRunDetailPage";
 import { AdminMeetingDetailPage } from "./pages/AdminMeetingDetailPage";
 import { AdminReviewPage } from "./pages/AdminReviewPage";
@@ -122,6 +123,9 @@ export function App() {
             detail routes are reached from a source row and from a meeting,
             which is why they carry an id rather than sitting in the rail. */}
           <Route path="admin/sources" element={<AdminSourcesPage />} />
+          {/* The gate between ingested and public: a sweep produces candidates,
+            an operator produces publications. */}
+          <Route path="admin/sources/:id/meetings" element={<AdminSourceMeetingsPage />} />
           <Route path="admin/runs/:id" element={<AdminRunDetailPage />} />
           {/* B-a. The only screen from which a generated claim about a named
             person becomes public. */}

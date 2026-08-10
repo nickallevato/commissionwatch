@@ -216,3 +216,139 @@ export async function getMeetingDetail(db: Knex, meetingId: string): Promise<Mee
     corrections,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Browsing what a sweep produced
+// ---------------------------------------------------------------------------
+
+/**
+ * The ingested-but-not-yet-public list, per source.
+ *
+ * The console could open one meeting by id and could see nothing else, which
+ * is workable when a sweep lands three records and impossible when it lands the
+ * Bozeman archive. Publication is a per-record decision (decision 8), so the
+ * operator needs the set of records awaiting one.
+ *
+ * Scoped by source rather than by run because `meetings` has no `run_id`:
+ * identity is `(commission_id, external_id)` and a re-sweep revises a row
+ * rather than inserting a second one, so "the meetings this run produced" is
+ * not a question the schema can answer. "The meetings from this source that
+ * nobody has published" is, and it is the question the operator actually has.
+ */
+export interface PressroomMeetingSummary {
+  id: string;
+  date: string;
+  time: string | null;
+  status: string;
+  location: string | null;
+  external_id: string | null;
+  agenda_url: string | null;
+  minutes_url: string | null;
+  published_at: string | null;
+  commission: { id: string; name: string };
+  document_count: number;
+}
+
+export interface ListMeetingsFilter {
+  sourceId: string;
+  /** `false` for the review backlog, `true` for what is live, omitted for all. */
+  published?: boolean;
+  limit?: number;
+}
+
+/** A hard ceiling, so a source with a decade of archive cannot hang the screen. */
+export const MEETING_PAGE_MAX = 500;
+
+function asIso(value: unknown): string | null {
+  if (value instanceof Date) return value.toISOString();
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+function isRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+export async function listMeetingsForSource(
+  db: Knex,
+  filter: ListMeetingsFilter,
+): Promise<{ meetings: PressroomMeetingSummary[]; unpublished_total: number }> {
+  const limit = Math.min(Math.max(filter.limit ?? 100, 1), MEETING_PAGE_MAX);
+
+  const base = () =>
+    db("meetings as m")
+      .join("commissions as c", "m.commission_id", "c.id")
+      .join("ingestion_sources as s", "s.jurisdiction_id", "c.jurisdiction_id")
+      .where("s.id", filter.sourceId);
+
+  // Counted independently of `limit`, so the screen can say "showing 100 of
+  // 512" rather than implying the backlog is exactly what fits on it.
+  const countRow: unknown = await base().whereNull("m.published_at").count({ total: "m.id" }).first();
+  const unpublishedTotal =
+    isRow(countRow) && countRow.total !== undefined ? Number(countRow.total) : 0;
+
+  const query = base()
+    .select(
+      "m.id as id",
+      "m.date as date",
+      "m.time as time",
+      "m.status as status",
+      "m.location as location",
+      "m.external_id as external_id",
+      "m.agenda_url as agenda_url",
+      "m.minutes_url as minutes_url",
+      "m.published_at as published_at",
+      "c.id as commission_id",
+      "c.name as commission_name",
+    )
+    .orderBy([
+      { column: "m.date", order: "desc" },
+      { column: "m.id", order: "asc" },
+    ])
+    .limit(limit);
+
+  if (filter.published === true) query.whereNotNull("m.published_at");
+  if (filter.published === false) query.whereNull("m.published_at");
+
+  const rows: unknown = await query;
+  const list = (Array.isArray(rows) ? rows : []).filter(isRow);
+
+  const ids = list.map((row) => String(row.id));
+  const documentCounts = new Map<string, number>();
+  if (ids.length > 0) {
+    const docRows: unknown = await db("meeting_documents")
+      .whereIn("meeting_id", ids)
+      .groupBy("meeting_id")
+      .select("meeting_id")
+      .count({ total: "id" });
+    for (const row of Array.isArray(docRows) ? docRows : []) {
+      if (!isRow(row)) continue;
+      documentCounts.set(String(row.meeting_id), Number(row.total ?? 0));
+    }
+  }
+
+  const meetings = list.map((row): PressroomMeetingSummary => {
+    const id = String(row.id);
+    return {
+      id,
+      // `date` is a DATE column: the driver hands back a Date at UTC midnight,
+      // and rendering it as an ISO instant would shift the day backwards for
+      // anyone west of Greenwich — which is everyone this project covers.
+      date: row.date instanceof Date ? row.date.toISOString().slice(0, 10) : String(row.date ?? ""),
+      time: text(row.time),
+      status: String(row.status ?? ""),
+      location: text(row.location),
+      external_id: text(row.external_id),
+      agenda_url: text(row.agenda_url),
+      minutes_url: text(row.minutes_url),
+      published_at: asIso(row.published_at),
+      commission: { id: String(row.commission_id), name: String(row.commission_name ?? "") },
+      document_count: documentCounts.get(id) ?? 0,
+    };
+  });
+
+  return { meetings, unpublished_total: unpublishedTotal };
+}

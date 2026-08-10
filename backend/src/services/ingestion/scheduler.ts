@@ -324,6 +324,23 @@ export class SourceScheduler {
     this.started = false;
   }
 
+  /**
+   * Re-read the enabled set and re-arm.
+   *
+   * `start()` reads `ingestion_sources` exactly once, so a source enabled at
+   * runtime had no cron task until the next deploy — which would make the
+   * console's toggle mean "sweeps nightly, eventually", and would be discovered
+   * by an operator wondering why nothing happened overnight.
+   *
+   * Sweeps nothing, exactly like `start()`. Re-arming is not a reason to break
+   * the boot-safety rule: the first execution of a newly enabled source is
+   * still its first cron tick, or an explicit **Sweep now**.
+   */
+  async refresh(): Promise<void> {
+    this.stop();
+    await this.start();
+  }
+
   private async loadCron(): Promise<CronModule | null> {
     if (this.cron !== null) return this.cron;
     try {

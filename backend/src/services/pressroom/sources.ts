@@ -1,5 +1,6 @@
 import type { Knex } from "knex";
 import { FAILURE_KEYS, SUCCESS_KEYS } from "../ingestion/scheduler";
+import { CorrectionError, type CorrectionActor } from "./corrections";
 
 /**
  * The sources screen: every ingestion source, including the ones that are off.
@@ -331,4 +332,151 @@ export async function listSources(db: Knex, now: Date = new Date()): Promise<Pre
       latest_run: latestRun,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Turning a source on and off
+// ---------------------------------------------------------------------------
+
+/**
+ * The one write on this screen.
+ *
+ * Every source registers disabled — `registration.ts` says why, and the default
+ * is right: a source that begins sweeping the moment it is deployed is a source
+ * nobody chose. But until this existed, nothing in the running system could
+ * undo it. The only code that flipped `enabled` was `src/scripts/sweep.ts`, and
+ * `backend/Dockerfile` copies `dist/` and `migrations/` and never `src/`, so
+ * that script does not exist inside the production image. Going live meant
+ * hand-written SQL against the host — the precise thing registration was built
+ * to replace — and the console's own **Sweep now** button was a no-op, because
+ * `runSweep` skips a disabled source before it does anything else.
+ *
+ * Logged to `operator_actions`, not to `record_corrections`. That was not the
+ * first choice — reusing the corrections log looked tidier — and the database
+ * refused it: migration 031 CHECKs `target_table` against the three record
+ * tables. The refusal is a distinction worth keeping. `record_corrections` is
+ * published as the public corrections log, and a configuration change listed
+ * there would read as a correction to the record. Nobody's agenda was misstated
+ * because a source was off. See migration 071.
+ */
+export interface SetSourceEnabledInput {
+  enabled: boolean;
+  reason: string;
+  actor: CorrectionActor;
+}
+
+export interface OperatorActionRow {
+  id: string;
+  action: string;
+  target_table: string;
+  target_id: string;
+  old_value: string | null;
+  new_value: string | null;
+  reason: string;
+  operator_id: string | null;
+  operator_email: string | null;
+  created_at: string;
+}
+
+export interface SourceToggleResult {
+  id: string;
+  enabled: boolean;
+  disabled_reason: string | null;
+  action: OperatorActionRow;
+}
+
+export async function setSourceEnabled(
+  db: Knex,
+  sourceId: string,
+  input: SetSourceEnabledInput,
+): Promise<SourceToggleResult> {
+  if (input.reason.trim() === "") {
+    throw new CorrectionError(
+      "reason is required: enabling a source is a decision, and a decision has a reason",
+      400,
+    );
+  }
+
+  return db.transaction(async (trx) => {
+    const current: unknown = await trx("ingestion_sources").where({ id: sourceId }).first();
+    if (!isSourceRow(current)) {
+      throw new CorrectionError("Source not found", 404);
+    }
+
+    const was = current.enabled === true;
+
+    // The reason a source *was* disabled is not the reason it is now enabled.
+    // Carrying the old text onto an enabled row makes the console say a live
+    // source is blocked; dropping it when disabling would break decision 3,
+    // which is that a disabled source stays listed with the reason it is off.
+    const disabledReason = input.enabled ? null : input.reason;
+
+    const inserted: unknown = await trx("operator_actions")
+      .insert({
+        action: input.enabled ? "source.enabled" : "source.disabled",
+        target_table: "ingestion_sources",
+        target_id: sourceId,
+        old_value: was ? "true" : "false",
+        new_value: input.enabled ? "true" : "false",
+        reason: input.reason,
+        operator_id: input.actor.id,
+        // Snapshotted, not joined — the log must still name who acted after the
+        // operator row is gone, and migration 071 has no foreign key to keep it
+        // honest.
+        operator_email: input.actor.email,
+      })
+      .returning("*");
+
+    await trx("ingestion_sources")
+      .where({ id: sourceId })
+      .update({
+        enabled: input.enabled,
+        disabled_reason: disabledReason,
+        updated_at: trx.fn.now(),
+      });
+
+    return {
+      id: sourceId,
+      enabled: input.enabled,
+      disabled_reason: disabledReason,
+      action: toOperatorAction(Array.isArray(inserted) ? inserted[0] : undefined),
+    };
+  });
+}
+
+function isSourceRow(value: unknown): value is { enabled: unknown } {
+  return typeof value === "object" && value !== null && "enabled" in value;
+}
+
+function toOperatorAction(row: unknown): OperatorActionRow {
+  if (typeof row !== "object" || row === null) {
+    throw new Error("operator_actions: insert returned no row");
+  }
+  const value = row as Record<string, unknown>;
+  const createdAt = value.created_at;
+  return {
+    id: asString(value.id),
+    action: asString(value.action),
+    target_table: asString(value.target_table),
+    target_id: asString(value.target_id),
+    old_value: typeof value.old_value === "string" ? value.old_value : null,
+    new_value: typeof value.new_value === "string" ? value.new_value : null,
+    reason: asString(value.reason),
+    operator_id: typeof value.operator_id === "string" ? value.operator_id : null,
+    operator_email: typeof value.operator_email === "string" ? value.operator_email : null,
+    created_at: createdAt instanceof Date ? createdAt.toISOString() : asString(createdAt),
+  };
+}
+
+/** One source's decision history, newest first. */
+export async function listSourceActions(
+  db: Knex,
+  sourceId: string,
+): Promise<OperatorActionRow[]> {
+  const rows: unknown = await db("operator_actions")
+    .where({ target_table: "ingestion_sources", target_id: sourceId })
+    .orderBy("created_at", "desc")
+    .limit(50)
+    .select("*");
+  return (Array.isArray(rows) ? rows : []).map(toOperatorAction);
 }

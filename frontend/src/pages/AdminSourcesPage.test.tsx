@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import userEvent from "@testing-library/user-event";
 import { screen, waitFor, within } from "@testing-library/react";
@@ -253,5 +253,91 @@ describe("AdminSourcesPage", () => {
     renderWithProviders(<AdminSourcesPage />);
 
     expect(await screen.findByText("No ingestion source is registered.")).toBeInTheDocument();
+  });
+
+  it("offers Enable on a disabled source and Disable on a live one", async () => {
+    // The lever that was missing. A disabled source cannot sweep — the server
+    // skips it before it does anything — so on that row this, not Sweep now, is
+    // the button that does something, and it is styled as the primary one.
+    server.use(listHandler());
+    renderWithProviders(<AdminSourcesPage />);
+
+    const disabled = await screen.findByTestId("toggle-s3");
+    expect(disabled).toHaveTextContent("Enable");
+    const live = screen.getByTestId("toggle-s1");
+    expect(live).toHaveTextContent("Disable");
+  });
+
+  it("requires a typed reason before a source can be enabled", async () => {
+    server.use(listHandler());
+    renderWithProviders(<AdminSourcesPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("toggle-s3"));
+
+    const confirm = screen.getByRole("button", { name: "Enable source" });
+    expect(confirm).toBeDisabled();
+
+    await user.type(
+      screen.getByLabelText(/why is bozeman_legistar being enabled/i),
+      "Adapter reviewed.",
+    );
+    expect(confirm).toBeEnabled();
+  });
+
+  it("sends the toggle with the typed reason and the inverted flag", async () => {
+    const sent = vi.fn();
+    server.use(
+      listHandler(),
+      http.patch("/api/admin/pressroom/sources/s3", async ({ request }) => {
+        sent(await request.json());
+        return HttpResponse.json({ id: "s3", enabled: true, disabled_reason: null });
+      }),
+    );
+    renderWithProviders(<AdminSourcesPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("toggle-s3"));
+    await user.type(
+      screen.getByLabelText(/why is bozeman_legistar being enabled/i),
+      "Akamai block resolved; authorised.",
+    );
+    await user.click(screen.getByRole("button", { name: "Enable source" }));
+
+    await waitFor(() => {
+      expect(sent).toHaveBeenCalledWith({
+        enabled: true,
+        reason: "Akamai block resolved; authorised.",
+      });
+    });
+  });
+
+  it("surfaces a refusal rather than claiming the source was enabled", async () => {
+    server.use(
+      listHandler(),
+      http.patch("/api/admin/pressroom/sources/s3", () =>
+        HttpResponse.json({ error: "reason is required" }, { status: 400 }),
+      ),
+    );
+    renderWithProviders(<AdminSourcesPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("toggle-s3"));
+    await user.type(screen.getByLabelText(/why is bozeman_legistar being enabled/i), "x");
+    await user.click(screen.getByRole("button", { name: "Enable source" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("reason is required");
+    });
+  });
+
+  it("links each source to its ingested meetings", async () => {
+    // Where a sweep's output becomes public. Offered even on a source with
+    // nothing ingested: "0 awaiting review" answers "did that sweep land?"
+    server.use(listHandler());
+    renderWithProviders(<AdminSourcesPage />);
+
+    const link = await screen.findByLabelText("Review ingested meetings: bozeman_legistar");
+    expect(link).toHaveAttribute("href", "/admin/sources/s3/meetings");
   });
 });

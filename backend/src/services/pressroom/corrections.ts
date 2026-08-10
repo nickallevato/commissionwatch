@@ -408,3 +408,114 @@ export function unpublishMeeting(
 ): Promise<PublicationResult> {
   return setPublication(db, meetingId, null, reason, actor);
 }
+
+// ---------------------------------------------------------------------------
+// Publishing a sweep's worth of meetings
+// ---------------------------------------------------------------------------
+
+/**
+ * The most that may be published in one action.
+ *
+ * A ceiling rather than "however many were selected": the Bozeman Granicus page
+ * carries 2013–2026 in one document, so the first sweep of it produces a
+ * backlog in the hundreds, and one runaway click should not be able to make the
+ * entire archive public in a single statement. Publishing in batches is a mild
+ * inconvenience; publishing 500 records you meant to review is not undoable in
+ * any way that matters, because the corrections log will faithfully record that
+ * you did.
+ */
+export const PUBLISH_BATCH_MAX = 200;
+
+export interface BulkPublishResult {
+  published: string[];
+  /** Already public before this call. Not republished, so the log stays honest. */
+  already_published: string[];
+  /** Ids that matched no meeting. Reported, never silently dropped. */
+  not_found: string[];
+}
+
+/**
+ * Publish many meetings, each with its own log row.
+ *
+ * One correction row per meeting rather than one row for the batch. The log's
+ * job is to answer "why is this record public?" for a given record, and a
+ * single row saying "and 213 others" cannot answer it. The reason is shared
+ * because the decision was shared; the entries are separate because the records
+ * are.
+ *
+ * Already-published meetings are skipped rather than republished. The
+ * single-meeting path deliberately permits republishing with a new reason — that
+ * is how publishing over a known defect is recorded — but doing it in bulk would
+ * write a correction row per meeting saying nothing changed, which is noise in
+ * the one place noise is most expensive.
+ *
+ * All of it in one transaction: a partial publish that also partially logged
+ * would leave the site asserting things the log cannot explain.
+ */
+export async function publishMeetings(
+  db: Knex,
+  meetingIds: string[],
+  reason: string,
+  actor: CorrectionActor,
+  now: Date = new Date(),
+): Promise<BulkPublishResult> {
+  if (reason.trim() === "") {
+    throw new CorrectionError(
+      "reason is required: publication is a decision, and a decision has a reason",
+      400,
+    );
+  }
+
+  const unique = [...new Set(meetingIds)];
+  if (unique.length === 0) {
+    throw new CorrectionError("no meetings were selected", 400);
+  }
+  if (unique.length > PUBLISH_BATCH_MAX) {
+    throw new CorrectionError(
+      `at most ${PUBLISH_BATCH_MAX} meetings may be published at once (got ${unique.length})`,
+      400,
+    );
+  }
+
+  return db.transaction(async (trx) => {
+    const rows: unknown = await trx("meetings")
+      .whereIn("id", unique)
+      // Locked for the length of the decision, so a sweep writing the same rows
+      // cannot land between the read and the update.
+      .forUpdate()
+      .select("id", "published_at");
+
+    const found = new Map<string, unknown>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (isRecord(row) && typeof row.id === "string") found.set(row.id, row.published_at);
+    }
+
+    const notFound = unique.filter((id) => !found.has(id));
+    const alreadyPublished: string[] = [];
+    const toPublish: string[] = [];
+    for (const [id, publishedAt] of found) {
+      if (publishedAt === null || publishedAt === undefined) toPublish.push(id);
+      else alreadyPublished.push(id);
+    }
+
+    for (const id of toPublish) {
+      await appendCorrection(trx, {
+        targetTable: "meetings",
+        targetId: id,
+        field: PUBLICATION_FIELD,
+        oldValue: null,
+        newValue: now.toISOString(),
+        reason,
+        actor,
+      });
+    }
+
+    if (toPublish.length > 0) {
+      await trx("meetings")
+        .whereIn("id", toPublish)
+        .update({ published_at: now, updated_at: trx.fn.now() });
+    }
+
+    return { published: toPublish, already_published: alreadyPublished, not_found: notFound };
+  });
+}

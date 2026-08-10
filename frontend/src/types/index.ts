@@ -971,3 +971,38 @@ export interface CalendarResponse {
   data: CalendarJurisdiction[];
   total: number;
 }
+
+/**
+ * One ingested meeting as the console lists it, published or not.
+ *
+ * The public API cannot return an unpublished meeting at all — decision 8 — so
+ * this shape exists only behind `requireOperator`. `published_at` being null is
+ * the whole point of the screen it feeds: it is the backlog awaiting a human.
+ */
+export interface PressroomMeetingSummary {
+  id: string;
+  /** A calendar day, `YYYY-MM-DD`, never an instant. */
+  date: string;
+  time: string | null;
+  status: string;
+  location: string | null;
+  external_id: string | null;
+  agenda_url: string | null;
+  minutes_url: string | null;
+  published_at: string | null;
+  commission: { id: string; name: string };
+  document_count: number;
+}
+
+export interface PressroomMeetingList {
+  meetings: PressroomMeetingSummary[];
+  /** The whole unpublished backlog, not just what fitted on this page. */
+  unpublished_total: number;
+  total: number;
+}
+
+export interface BulkPublishResult {
+  published: string[];
+  already_published: string[];
+  not_found: string[];
+}

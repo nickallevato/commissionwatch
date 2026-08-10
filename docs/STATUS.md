@@ -1,6 +1,9 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after **putting the name-match quality in front of the operator who
+> Last updated: 2026-08-10, after **building the two console levers that stood between a healthy
+> deployment and a live one** (below — production had every source registered and no way to enable
+> one, because the only code that flipped the flag lives in a script the production image does not
+> ship). Before that: **putting the name-match quality in front of the operator who
 > approves it** (below — the public page showed the band and the review console showed nothing,
 > so the person deciding knew less than the person reading) and **remembering an operator's
 > entity-resolution judgement** so the same ambiguous pair is not re-asked every sweep. Before
@@ -1164,6 +1167,85 @@ that absences are honest.
 Counts after the second PII pass: backend **1108 tests / 269 suites**, frontend **430 tests / 42
 files**, deploy **61 checks**, all green. Backend lint: 2 warnings, 0 errors — the same two
 deliberate ones. Frontend lint: zero problems.
+
+## Going live — the two levers that were missing
+
+Found 2026-08-10 by tracing the path from "the container is healthy" to "a citizen sees a record."
+Production was further along than it looked and blocked in an unexpected place.
+
+**What was already true.** Registration had run. All three sources existed with their
+jurisdictions, cadences and honest disabled-reasons; the scheduler was armed; MinIO had made its
+bucket; `/api/admin/session` answered 401 on bad credentials, so an operator was seeded. And
+`/api/meetings` returned `{"data":[],"total":0}`. Nothing was broken. One boolean was false three
+times.
+
+**Lever 1 — a source could not be enabled from anything that ships.** The only code in the repo
+that writes `ingestion_sources.enabled` was `src/scripts/sweep.ts`, reached through
+`npm run sweep -- --enable`. `backend/Dockerfile` copies `dist/` and `migrations/` and **never
+`src/`**, so that script does not exist inside the container. No admin route wrote the column
+either — the console listed three disabled sources and offered no way to turn one on. The **Sweep
+now** button was live but a no-op, because `runSweep` returns `skipped: disabled` before doing
+anything. Going live meant hand-written SQL over SSM, which is exactly what
+`services/ingestion/registration.ts` says in its own doc-comment that it exists to avoid.
+
+Now `PATCH /api/admin/pressroom/sources/:id` takes `{enabled, reason}`, with the toggle on the
+sources screen. `enabled` must be a real boolean — accepting `"yes"` would let a typo read as the
+decision that starts hitting a county's web server. The reason is mandatory and typed, never
+defaulted.
+
+**The scheduler had to learn to re-arm.** `start()` reads the enabled set exactly once, so a
+source enabled at runtime had no cron task until the next deploy. `SourceScheduler.refresh()`
+re-reads and re-arms, and the route calls it — otherwise the toggle would mean "sweeps nightly,
+eventually", discovered by an operator wondering why nothing happened overnight. `refresh()`
+sweeps nothing, exactly like `start()`: re-arming is not a reason to break the boot-safety rule.
+
+**The database refused the first design, and was right.** The toggle was going to be logged as a
+`record_corrections` row, next to publication. Migration 031 CHECKs `target_table` against
+`meetings`, `agenda_items` and `meeting_documents`, and the insert failed. That constraint is
+correct: `record_corrections` **is** the public corrections log, and widening it would put
+configuration changes one allowlist edit away from a public page where they would read as
+corrections to the record. Nobody's agenda was misstated because a source was off. So migration
+071 adds `operator_actions` — same discipline, different subject: append-only by trigger, a CHECK
+on `action`, no foreign key to `operators`, actor snapshotted. Not exposed publicly.
+
+**Lever 2 — a swept meeting had no path to the public site.** Migration 030 made `ingested` and
+`published` different states, which was right and left a hole: the console could open one meeting
+by id and had nowhere to *find* an id. For Bozeman, whose Granicus page carries 2013–2026 in a
+single 5.9 MB document, that is not a path at all.
+
+`GET /api/admin/pressroom/sources/:id/meetings` lists what a source has ingested with its
+publication state, and `POST /api/admin/pressroom/meetings/publish` publishes an explicit
+selection. Scoped by **source, not by run**, because `meetings` has no `run_id` — identity is
+`(commission_id, external_id)` and a re-sweep revises rather than inserts, so "what this run
+produced" is not a question the schema can answer. "What from this source nobody has published"
+is, and it is the question the operator actually has.
+
+Four decisions in it worth keeping:
+
+- **Explicit ids, never publish-by-filter.** A filter that drifted between the screen and the
+  server would publish records nobody looked at.
+- **One correction row per meeting, not one for the batch.** The log answers "why is *this* record
+  public?", and a row saying "and 213 others" cannot.
+- **Already-published records are skipped, not republished.** The single-meeting path deliberately
+  permits republishing with a new reason — that is how publishing over a known defect is recorded —
+  but in bulk it would write a row per meeting saying nothing changed, which is noise in the one
+  place noise is most expensive.
+- **A ceiling of 200 per action**, and the whole batch in one transaction. A partial publish that
+  also partially logged would leave the site asserting things the log cannot explain.
+
+`unpublished_total` is counted independently of the page limit, so the screen says "showing 100 of
+512" rather than implying the backlog is what fitted on it. A failed load does not render as an
+empty queue: "nothing is awaiting review" and "you cannot see the queue" are different sentences
+and the first is the dangerous one to say wrongly.
+
+**Verified:** backend 1168/1168 (was 1141), frontend 457/457 across 43 files (was 443/42), lint 0
+errors both packages, `deploy/test-deploy-aws-ssm.sh` 61/0, both builds clean. Migration 071
+applied locally.
+
+**First light is now:** sign in → `/admin/sources` → **Enable** with a reason → **Sweep now** →
+**Review** → select → publish with a reason. No SSH, no psql, no expired credential. Gallatin is
+the honest first target: its `robots.txt` is permissive, where Bozeman fetches under the vendor
+exception at the published 10-second crawl-delay and is correspondingly slow.
 
 ## Live state
 

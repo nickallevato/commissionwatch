@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ACTION,
@@ -135,6 +135,9 @@ export function AdminSourcesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sweeping, setSweeping] = useState("");
+  /** The source whose enable/disable form is open, if any. */
+  const [toggling, setToggling] = useState("");
+  const [toggleBusy, setToggleBusy] = useState(false);
   const [notice, setNotice] = useState("");
   /**
    * When the listing was read, captured in the effect rather than in render.
@@ -190,6 +193,52 @@ export function AdminSourcesPage() {
       ignore = true;
     };
   }, [applyResult, fetchSources]);
+
+  /**
+   * Turn a source on or off.
+   *
+   * This is the screen's only write that changes what the product *does*, and
+   * the reason it exists: every source registers disabled, and until this
+   * button there was no way to undo that from a running deployment — the only
+   * code that flipped the flag lives in a script the production image does not
+   * ship. The live site was three false booleans away from having content, and
+   * the console could not touch one of them.
+   *
+   * The reason is mandatory and typed here, not defaulted. A source going live
+   * means a county's web server starts receiving requests from us, and "why did
+   * this start fetching?" should have an answer written by the person who
+   * decided it rather than by whoever writes the default string.
+   */
+  async function handleToggle(source: PressroomSource, reason: string) {
+    setToggleBusy(true);
+    setNotice("");
+    try {
+      const res = await fetch(`/api/admin/pressroom/sources/${source.id}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !source.enabled, reason }),
+      });
+
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setNotice(body?.error ?? `${source.adapter_key} could not be changed.`);
+        return;
+      }
+
+      setToggling("");
+      setNotice(
+        source.enabled
+          ? `${source.adapter_key} is disabled. It will not sweep, and the reason is on its row.`
+          : `${source.adapter_key} is enabled. It sweeps on its own cadence — use Sweep now for a first run.`,
+      );
+      await load();
+    } catch {
+      setNotice("The change could not be sent.");
+    } finally {
+      setToggleBusy(false);
+    }
+  }
 
   async function handleSweep(source: PressroomSource) {
     setSweeping(source.id);
@@ -396,12 +445,26 @@ export function AdminSourcesPage() {
               </thead>
               <tbody>
                 {sources.map((source) => (
-                  <SourceRow
-                    key={source.id}
-                    source={source}
-                    sweeping={sweeping === source.id}
-                    onSweep={() => void handleSweep(source)}
-                  />
+                  <Fragment key={source.id}>
+                    <SourceRow
+                      source={source}
+                      sweeping={sweeping === source.id}
+                      onSweep={() => void handleSweep(source)}
+                      toggleOpen={toggling === source.id}
+                      onToggleClick={() => {
+                        setNotice("");
+                        setToggling(toggling === source.id ? "" : source.id);
+                      }}
+                    />
+                    {toggling === source.id && (
+                      <ToggleRow
+                        source={source}
+                        busy={toggleBusy}
+                        onCancel={() => setToggling("")}
+                        onConfirm={(reason) => void handleToggle(source, reason)}
+                      />
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -439,10 +502,14 @@ function SourceRow({
   source,
   sweeping,
   onSweep,
+  toggleOpen,
+  onToggleClick,
 }: {
   source: PressroomSource;
   sweeping: boolean;
   onSweep: () => void;
+  toggleOpen: boolean;
+  onToggleClick: () => void;
 }) {
   const zero = source.lifetime_records === 0;
   const spark = sweepBars(source);
@@ -541,6 +608,19 @@ function SourceRow({
           >
             {sweeping ? "Sweeping…" : "Sweep now"}
           </button>
+          {/* A disabled source cannot sweep — `runSweep` skips it before it does
+              anything — so on a disabled row this, not Sweep now, is the button
+              that does something. It is styled as the primary one there. */}
+          <button
+            type="button"
+            onClick={onToggleClick}
+            aria-expanded={toggleOpen}
+            className={`${source.enabled ? ACTION_QUIET : ACTION_PRIMARY} ${ACTION_SMALL} ${FOCUS_RING}`}
+            aria-label={`${source.enabled ? "Disable" : "Enable"}: ${source.adapter_key}`}
+            data-testid={`toggle-${source.id}`}
+          >
+            {source.enabled ? "Disable" : "Enable"}
+          </button>
           {source.latest_run ? (
             <Link
               to={`/admin/runs/${source.latest_run.id}`}
@@ -554,10 +634,100 @@ function SourceRow({
               No log
             </span>
           )}
+          {/* Where a sweep's output becomes public. Always offered, including on
+              a source with nothing ingested — "0 awaiting review" is a useful
+              answer to "did that sweep land anything?" */}
+          <Link
+            to={`/admin/sources/${source.id}/meetings`}
+            className={`${ACTION_QUIET} ${ACTION_SMALL} ${FOCUS_RING} no-underline`}
+            aria-label={`Review ingested meetings: ${source.adapter_key}`}
+          >
+            Review
+          </Link>
         </div>
         <span className="mt-1 block max-w-[11rem] text-[11px] leading-relaxed text-muted">
           Sweeping goes out to the source.
         </span>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * The reason form, in a row of its own beneath the source it belongs to.
+ *
+ * A row rather than a dialog: the decision is about this source, and keeping it
+ * physically attached to the source is worth more than the tidiness of a modal.
+ * `Confirm` stays disabled until something is typed, so the required reason is
+ * visibly required rather than a 400 that arrives after the click.
+ */
+function ToggleRow({
+  source,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  source: PressroomSource;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const turningOn = !source.enabled;
+  const fieldId = `toggle-reason-${source.id}`;
+
+  return (
+    <tr className="border-b border-rule bg-paper-sunk last:border-b-0">
+      <td colSpan={7} className="px-3 py-3">
+        <form
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (reason.trim() !== "" && !busy) onConfirm(reason);
+          }}
+        >
+          <span className="block grow">
+            <label htmlFor={fieldId} className="label-sm block">
+              {turningOn
+                ? `Why is ${source.adapter_key} being enabled?`
+                : `Why is ${source.adapter_key} being disabled?`}
+            </label>
+            <input
+              id={fieldId}
+              type="text"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder={
+                turningOn
+                  ? "Adapter reviewed; authorised for live sweeps."
+                  : "Custodian asked us to pause while they migrate the portal."
+              }
+              className={`mt-1 w-full border border-rule bg-paper px-3 py-2 text-[13px] text-ink ${FOCUS_RING}`}
+            />
+            <span className="mt-1 block max-w-prose text-[11.5px] leading-relaxed text-muted">
+              {turningOn
+                ? "Enabling starts nothing immediately — the first sweep is the next cron tick, or Sweep now."
+                : "The reason stays on the row, so why this source is off lives in the console."}
+            </span>
+          </span>
+          <span className={ACTION_ROW}>
+            <button
+              type="submit"
+              disabled={busy || reason.trim() === ""}
+              className={`${ACTION_PRIMARY} ${ACTION_SMALL} ${FOCUS_RING} disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              {busy ? "Saving…" : turningOn ? "Enable source" : "Disable source"}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={busy}
+              className={`${ACTION_QUIET} ${ACTION_SMALL} ${FOCUS_RING}`}
+            >
+              Cancel
+            </button>
+          </span>
+        </form>
       </td>
     </tr>
   );

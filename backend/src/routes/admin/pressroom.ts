@@ -6,12 +6,17 @@ import {
   CorrectionError,
   listCorrections,
   publishMeeting,
+  publishMeetings,
   recordCorrection,
   unpublishMeeting,
 } from "../../services/pressroom/corrections";
-import { getMeetingDetail } from "../../services/pressroom/meetings";
+import {
+  getMeetingDetail,
+  listMeetingsForSource,
+  MEETING_PAGE_MAX,
+} from "../../services/pressroom/meetings";
 import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services/pressroom/runs";
-import { listSources } from "../../services/pressroom/sources";
+import { listSources, setSourceEnabled } from "../../services/pressroom/sources";
 
 /**
  * `/api/admin/pressroom` — the operator console's API.
@@ -78,6 +83,65 @@ router.get("/sources", async (_req, res, next) => {
     next(err);
   }
 });
+
+interface ToggleBody {
+  enabled?: unknown;
+  reason?: unknown;
+}
+
+/**
+ * Turn a source on or off.
+ *
+ * The lever that was missing. Sources register disabled on purpose, and before
+ * this the only code that could undo that was `src/scripts/sweep.ts` — which
+ * the production image does not contain, because `backend/Dockerfile` copies
+ * `dist/` and `migrations/` and never `src/`. The console showed three disabled
+ * sources and offered no way to enable one, so the live site could only be
+ * brought up with hand-written SQL on the host.
+ *
+ * `enabled` must be a real boolean. Accepting `"yes"` or `1` here would let a
+ * typo in a fetch body read as a decision, and this is the decision that starts
+ * hitting a county's web server.
+ */
+router.patch(
+  "/sources/:id",
+  async (req: Request<{ id: string }, unknown, ToggleBody>, res, next) => {
+    try {
+      const { id } = req.params;
+      if (!UUID_RE.test(id)) return badId(res, "source");
+
+      const body = req.body ?? {};
+      if (typeof body.enabled !== "boolean") {
+        res.status(400).json({ error: "enabled must be true or false", statusCode: 400 });
+        return;
+      }
+      if (typeof body.reason !== "string" || body.reason.trim() === "") {
+        res.status(400).json({
+          error: "reason is required: enabling a source is a decision, and a decision has a reason",
+          statusCode: 400,
+        });
+        return;
+      }
+
+      const result = await setSourceEnabled(db, id, {
+        enabled: body.enabled,
+        reason: body.reason,
+        actor: actorOf(req),
+      });
+
+      // A newly enabled source has no cron task until the scheduler re-arms:
+      // `start()` reads the enabled set once. Re-arming here is what makes the
+      // toggle mean "this sweeps nightly" rather than "this sweeps nightly
+      // after the next deploy". The stack is absent in tests, and the toggle
+      // is still a valid, recorded decision without it.
+      if (stack !== null) await stack.scheduler.refresh();
+
+      res.json(result);
+    } catch (err) {
+      fail(res, err, next);
+    }
+  },
+);
 
 /**
  * Sweep now. Distinct from re-parse, which touches no network at all.
@@ -159,6 +223,101 @@ router.get("/meetings/:id", async (req, res, next) => {
     next(err);
   }
 });
+
+interface SourceMeetingsQuery {
+  published?: string;
+  limit?: string;
+}
+
+/**
+ * What a source has ingested, and whether it is public yet.
+ *
+ * Without this the console could open a meeting by id and could discover no ids
+ * — workable for a sweep that lands three records, impossible for one that
+ * lands a decade. Publication is a per-record decision, so the person making it
+ * needs the list of records awaiting one.
+ *
+ * `published` is tri-state on purpose: absent means everything, which is how an
+ * operator checks that what they published is actually live.
+ */
+router.get(
+  "/sources/:id/meetings",
+  async (req: Request<{ id: string }, unknown, unknown, SourceMeetingsQuery>, res, next) => {
+    try {
+      const { id } = req.params;
+      if (!UUID_RE.test(id)) return badId(res, "source");
+
+      const { published, limit } = req.query;
+      if (published !== undefined && published !== "true" && published !== "false") {
+        res.status(400).json({ error: "published must be true or false", statusCode: 400 });
+        return;
+      }
+
+      let parsedLimit: number | undefined;
+      if (limit !== undefined) {
+        parsedLimit = Number(limit);
+        if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > MEETING_PAGE_MAX) {
+          res.status(400).json({
+            error: `limit must be an integer between 1 and ${MEETING_PAGE_MAX}`,
+            statusCode: 400,
+          });
+          return;
+        }
+      }
+
+      const result = await listMeetingsForSource(db, {
+        sourceId: id,
+        ...(published === undefined ? {} : { published: published === "true" }),
+        ...(parsedLimit === undefined ? {} : { limit: parsedLimit }),
+      });
+      res.json({ ...result, total: result.meetings.length });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+interface BulkPublishBody {
+  meeting_ids?: unknown;
+  reason?: unknown;
+}
+
+/**
+ * Publish a reviewed selection in one action.
+ *
+ * Explicit ids rather than "publish everything from this source": the operator
+ * chooses, and the request records exactly what they chose. A
+ * publish-by-filter route would let a filter that drifted between the screen
+ * and the server publish records nobody looked at.
+ */
+router.post(
+  "/meetings/publish",
+  async (req: Request<Record<string, string>, unknown, BulkPublishBody>, res, next) => {
+    try {
+      const body = req.body ?? {};
+      if (!Array.isArray(body.meeting_ids)) {
+        res.status(400).json({ error: "meeting_ids must be an array", statusCode: 400 });
+        return;
+      }
+      const ids = body.meeting_ids;
+      if (!ids.every((id): id is string => typeof id === "string" && UUID_RE.test(id))) {
+        res.status(400).json({ error: "meeting_ids must all be uuids", statusCode: 400 });
+        return;
+      }
+      if (typeof body.reason !== "string" || body.reason.trim() === "") {
+        res.status(400).json({
+          error: "reason is required: publication is a decision, and a decision has a reason",
+          statusCode: 400,
+        });
+        return;
+      }
+
+      res.json(await publishMeetings(db, ids, body.reason, actorOf(req)));
+    } catch (err) {
+      fail(res, err, next);
+    }
+  },
+);
 
 router.post("/meetings/:id/reparse", async (req, res, next) => {
   try {
