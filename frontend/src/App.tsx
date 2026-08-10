@@ -6,6 +6,7 @@ import { HomePage } from "./pages/HomePage";
 import { MeetingsPage } from "./pages/MeetingsPage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
 import { MembersPage } from "./pages/MembersPage";
+import { OfficialPage } from "./pages/OfficialPage";
 import { SearchPage } from "./pages/SearchPage";
 import { VotesPage } from "./pages/VotesPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
@@ -52,6 +53,10 @@ export function App() {
           <Route path="meetings" element={<MeetingsPage />} />
           <Route path="meetings/:id" element={<MeetingDetailPage />} />
           <Route path="members" element={<MembersPage />} />
+          {/* One official as a subject: voting record, attendance, patterns
+            and the campaign-finance overlay. Reached from the roster, not
+            from the nav — the roster is the index of this page. */}
+          <Route path="officials/:id" element={<OfficialPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="votes" element={<VotesPage />} />
           <Route path="anomalies" element={<AnomaliesPage />} />

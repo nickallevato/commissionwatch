@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { Member } from "@/types";
 
 /** A member's cast votes, counted by `vote_value`. */
@@ -72,7 +73,12 @@ export function MemberCard({ member, record }: Props) {
           id={headingId}
           className="font-display text-xl leading-headline tracking-headline text-ink"
         >
-          {member.name}
+          {/* The roster is the index of `/officials/:id`, so the name is the
+            way in. There is no separate "view profile" affordance: a second
+            control to reach the same page is a second thing to maintain. */}
+          <Link to={`/officials/${member.id}`} className="underline-offset-4 hover:underline">
+            {member.name}
+          </Link>
         </h3>
         {office && <p className="mt-1 text-sm text-muted">{office}</p>}
         {member.email && (
