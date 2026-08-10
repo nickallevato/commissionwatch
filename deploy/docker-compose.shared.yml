@@ -91,6 +91,14 @@ services:
       # Delivery channels (W7). Encrypts webhook URLs at rest.
       - CHANNEL_SECRET_KEY=${CHANNEL_SECRET_KEY}
       - CI_EVENT_TOKEN=${CI_EVENT_TOKEN}
+      # First-operator seed. Without these three the operators table stays
+      # empty forever, and since there is deliberately no registration route,
+      # /admin/login renders but nobody can ever sign in — the console is
+      # deployed and unenterable. seedFirstOperator is a no-op once the table
+      # is non-empty, so leaving them set is safe; blank is also safe.
+      - OPERATOR_SEED_EMAIL=${OPERATOR_SEED_EMAIL:-}
+      - OPERATOR_SEED_PASSWORD=${OPERATOR_SEED_PASSWORD:-}
+      - OPERATOR_SEED_NAME=${OPERATOR_SEED_NAME:-}
     depends_on:
       db:
         condition: service_healthy
