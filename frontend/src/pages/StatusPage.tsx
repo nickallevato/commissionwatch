@@ -32,7 +32,7 @@ import type { PublicStatus, PublicStatusSource } from "@/types";
  *    disclosed. Weakening either page ends the exception.
  *
  * Front-of-house, so the ground is `paper` and the chrome is the ordinary site
- * chrome. `PressroomShell` is the console's, and this is not the console.
+ * chrome. `PressroomUI` carries the console's, and this is not the console.
  */
 
 const VERDICT_LABEL: Record<PublicStatusSource["verdict"], string> = {

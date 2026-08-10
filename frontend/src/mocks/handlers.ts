@@ -314,4 +314,14 @@ export const handlers = [
    * destination and would otherwise hit an unhandled request on this one.
    */
   http.get("/api/public-records/gaps", () => list([])),
+
+  /**
+   * B3 · the public corrections log.
+   *
+   * Empty by default, for the same reason as the gaps handler above: the
+   * corrections suite supplies its own fixtures, and what this is for is the
+   * chrome walk, which now mounts `/corrections` from the colophon and would
+   * otherwise hit an unhandled request.
+   */
+  http.get("/api/corrections", () => list([])),
 ];

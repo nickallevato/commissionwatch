@@ -11,6 +11,8 @@ import { VotesPage } from "./pages/VotesPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
 import { PublicRecordsPage } from "./pages/PublicRecordsPage";
+import { CorrectionsPage } from "./pages/CorrectionsPage";
+import { DisputePage } from "./pages/DisputePage";
 import { StatusPage } from "./pages/StatusPage";
 import { DataLicensePage } from "./pages/DataLicensePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -61,6 +63,12 @@ export function App() {
           {/* The public collection status. Unauthenticated: it describes this
             site's own ingestion, not anybody's record. */}
           <Route path="status" element={<StatusPage />} />
+          {/* B3. The corrections policy and the log that shows it is kept, and
+            the route by which a person named in a record contests it. Both
+            unauthenticated: the person who most needs them is the one this
+            site has written about, and they do not have an account here. */}
+          <Route path="corrections" element={<CorrectionsPage />} />
+          <Route path="corrections/dispute" element={<DisputePage />} />
           <Route path="data-license" element={<DataLicensePage />} />
           <Route path="subscribe" element={<SubscribePage />} />
 

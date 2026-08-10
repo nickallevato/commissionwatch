@@ -1,4 +1,5 @@
 import type { Knex } from "knex";
+import { motiveTerms } from "../review/language";
 
 /**
  * Corrections, and publication — which is recorded through the same table.
@@ -89,6 +90,7 @@ export interface CorrectionRow {
   reason: string;
   operator_id: string | null;
   operator_email: string | null;
+  dispute_id: string | null;
   created_at: string;
 }
 
@@ -99,6 +101,8 @@ export interface RecordCorrectionInput {
   newValue: string | null;
   reason: string;
   actor: CorrectionActor;
+  /** The dispute that prompted this correction, if one did. See migration 039. */
+  disputeId?: string | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -138,6 +142,7 @@ function toCorrectionRow(raw: unknown): CorrectionRow {
     reason: typeof raw.reason === "string" ? raw.reason : "",
     operator_id: typeof raw.operator_id === "string" ? raw.operator_id : null,
     operator_email: typeof raw.operator_email === "string" ? raw.operator_email : null,
+    dispute_id: typeof raw.dispute_id === "string" ? raw.dispute_id : null,
     created_at:
       createdAt instanceof Date
         ? createdAt.toISOString()
@@ -155,6 +160,8 @@ export interface AppendCorrectionInput {
   newValue: string | null;
   reason: string;
   actor: CorrectionActor;
+  /** The dispute that prompted this row, if one did. See migration 039. */
+  disputeId?: string | null;
 }
 
 /**
@@ -166,11 +173,26 @@ export interface AppendCorrectionInput {
  * uses this writer and **not** `recordCorrection`, which also writes
  * `updated_at`: `anomaly_flags` has no such column, so sharing the update as
  * well as the log would be sharing a bug.
+ *
+ * **Every reason is scanned for motive here.** B3 projects this table onto a
+ * public page, so the stated reason on a correction, a publication and a review
+ * decision are all published sentences now, and *describe the record, never the
+ * motive* has to hold for all of them. The scan is at this one choke point
+ * rather than at each of the six call sites, because the guarantee is "every
+ * row in the log", and a guard the next writer has to remember is not that.
  */
 async function appendCorrection(
   executor: Knex | Knex.Transaction,
   input: AppendCorrectionInput,
 ): Promise<CorrectionRow> {
+  const terms = motiveTerms(input.reason);
+  if (terms.length > 0) {
+    throw new CorrectionError(
+      `A correction describes the record, never the motive. Remove: ${terms.join(", ")}`,
+      400,
+    );
+  }
+
   const inserted: unknown = await executor("record_corrections")
     .insert({
       target_table: input.targetTable,
@@ -183,6 +205,7 @@ async function appendCorrection(
       // Snapshotted, not joined. The log must still name who acted after the
       // operator row is gone, and there is no foreign key to keep it honest.
       operator_email: input.actor.email,
+      dispute_id: input.disputeId ?? null,
     })
     .returning("*");
   return toCorrectionRow(Array.isArray(inserted) ? inserted[0] : undefined);
@@ -199,7 +222,7 @@ export async function recordCorrection(
   db: Knex,
   input: RecordCorrectionInput,
 ): Promise<CorrectionRow> {
-  const { targetTable, targetId, field, newValue, reason, actor } = input;
+  const { targetTable, targetId, field, newValue, reason, actor, disputeId } = input;
 
   if (!isCorrectableTable(targetTable)) {
     throw new CorrectionError(
@@ -244,6 +267,7 @@ export async function recordCorrection(
       newValue,
       reason,
       actor,
+      disputeId: disputeId ?? null,
     });
 
     await trx(targetTable)

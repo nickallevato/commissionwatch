@@ -1,0 +1,85 @@
+name: External monitor
+
+# Uptime, deploy skew and ingestion staleness, judged from outside the
+# application.
+#
+# WHY THIS IS NOT IN THE APP. On 2026-08-09 production returned 502 on every
+# /api/* route for about four hours and the only reason anyone found out was a
+# person opening the site. Everything this codebase says about its own health —
+# the masthead's sweep clock, /admin/sources, /status — is served by the process
+# that was down. A watch inside the process can only report while the process is
+# alive, which is exactly when it has nothing to report.
+#
+# WHY A FAILING RUN IS THE ALERT. A red scheduled run sits in Gitea's run list
+# until somebody deals with it. A warning in a green run's log is gone the moment
+# it scrolls.
+#
+# Design and the probes that grounded it:
+#   docs/superpowers/plans/2026-08-10-external-monitoring.md
+
+on:
+  # Gitea has supported scheduled workflows since 1.20; this instance is 1.25.5
+  # (confirmed via GET /api/v1/version). Gitea registers a schedule from the
+  # workflow file on the DEFAULT BRANCH only, so this fires from main and from
+  # nowhere else.
+  #
+  # Fifteen minutes is four requests a run against our own host, sixteen times
+  # an hour. Last night's outage lasted four hours; this shortens the worst case
+  # to fifteen minutes.
+  schedule:
+    - cron: "*/15 * * * *"
+  # So the monitor can be exercised on demand instead of by waiting for a tick —
+  # which is also how the schedule support itself was confirmed to fire here.
+  workflow_dispatch:
+
+jobs:
+  probe:
+    # dh1, and this is not interchangeable. The live site is gated at the Caddy
+    # layer to a single address, and dh1 is the ONLY runner proven to get
+    # through it: deploy.yml's "Verify the site responds" step has answered
+    # `attempt 1: http=200` from this label. `ubuntu-latest` has never made an
+    # outbound request to the site, so its egress address is unproven, and a
+    # monitor that is red from its first run because of its own network position
+    # is a monitor people learn to mute.
+    runs-on: dh1
+    steps:
+      - uses: actions/checkout@v4
+
+      # One dependency-free TypeScript file, run by a stock Node image. Node 22
+      # strips types natively, so there is no npm install, no lockfile and no
+      # build — deliberately: a monitor whose green run depends on the npm
+      # registry being reachable goes red for reasons that have nothing to do
+      # with the site it watches.
+      #
+      # docker is used rather than a `container:` block because this runner
+      # already builds images with it, so it is proven present rather than
+      # hoped for, and pinning the image pins the Node version.
+      #
+      # The webhook arrives in the environment, never in the argument list.
+      - name: Probe the live site
+        shell: bash
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          MONITOR_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$(pwd):/workspace" -w /workspace \
+            -e DISCORD_WEBHOOK_URL \
+            -e MONITOR_RUN_URL \
+            node:22-bookworm \
+            node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+              backend/src/scripts/external-monitor.ts --run
+
+      # Deliberately no Tracker step, and no POST to /api/internal/events.
+      #
+      # The application's own delivery routing is out because a deploy that
+      # broke the backend is exactly when the backend cannot be trusted to say
+      # the deploy broke it — the fallback reasoning in
+      # docs/superpowers/specs/2026-08-04-delivery-channels-design.md
+      # § "Transport, and why CI has a fallback", taken to its conclusion. The
+      # script posts straight to DISCORD_WEBHOOK_URL when that secret is
+      # configured, and says in the message that it bypassed routing.
+      #
+      # Tracker is out for a duller reason: a four-hour outage would file
+      # sixteen identical tickets. The failed run is the durable signal.
