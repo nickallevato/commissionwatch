@@ -57,6 +57,7 @@ const COVERAGE: FinanceCoverage = {
 };
 
 const EVIDENCE: VoteDonorEvidence = {
+  operatorEntityDecision: null,
   memberId: OFFICIAL_ID,
   memberName: "Dana Whitcomb",
   voteId: "22222222-2222-2222-2222-222222222222",

@@ -1,12 +1,7 @@
 import { Link } from "react-router-dom";
 import { FlagBar } from "@/components/PressroomUI";
-import type {
-  FinanceCoverage,
-  NameMatchBand,
-  OfficialFinding,
-  StoredNameMatch,
-  VoteDonorEvidence,
-} from "@/types";
+import { MatchConfidenceChip } from "@/components/officials/MatchQuality";
+import type { FinanceCoverage, OfficialFinding, VoteDonorEvidence } from "@/types";
 
 /**
  * The donor overlay, and the standing caveat that must never be separated
@@ -36,47 +31,17 @@ import type {
  * matched, the terms that did not, and the terms the matcher was blind to,
  * because a reader who can see the match can judge it — and roughly half the
  * time the honest judgement is "that is a coincidence".
- */
-
-/**
- * How a band reads to somebody who has not read the matcher's source.
  *
- * None of these three words is "confirmed", "verified" or "identified", and
- * none may become one: `strong` is the ceiling of the method, and the ceiling
- * of the method is still a name.
+ * The chip itself lives in `MatchQuality.tsx` and is shared with the operator
+ * review queue. It used to live here, and the console rendered nothing — so the
+ * person deciding whether to publish a claim saw less of its uncertainty than
+ * the person who would read it. One component now serves both, so the two can
+ * never describe the same stored band differently.
  */
-const BAND_LABEL: Record<NameMatchBand, string> = {
-  weak: "Weak name match",
-  moderate: "Possible name match",
-  strong: "Close name match",
-};
 
-const BAND_CLASS: Record<NameMatchBand, string> = {
-  weak: "border-rule text-muted",
-  moderate: "border-sev3 text-sev3",
-  strong: "border-ink text-ink",
-};
-
-export function MatchConfidenceChip({
-  match,
-  testId,
-}: {
-  match: StoredNameMatch;
-  testId?: string;
-}) {
-  return (
-    <span
-      data-testid={testId}
-      data-band={match.band}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-label ${BAND_CLASS[match.band]}`}
-    >
-      {BAND_LABEL[match.band]}
-      <span className="font-normal normal-case tracking-normal opacity-80">
-        — not a verified identity
-      </span>
-    </span>
-  );
-}
+// Re-exported so the public page's own tests keep importing the chip from the
+// component they are about. The definition is in `MatchQuality.tsx`.
+export { MatchConfidenceChip };
 
 function MatchDisclosure({ evidence }: { evidence: VoteDonorEvidence }) {
   return (

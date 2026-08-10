@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DisputeQueue } from "@/components/DisputeQueue";
-import { PressroomCard, WorkTitle } from "@/components/PressroomUI";
+import { FlagBar, PressroomCard, SegmentedControl, WorkTitle } from "@/components/PressroomUI";
+import { MatchQualityPanel } from "@/components/officials/MatchQuality";
+import { BAND_SHORT_LABEL } from "@/components/officials/matchBands";
 import { severityLabels, severityOrder } from "@/components/severity";
 import type {
   AnomalySeverity,
+  EntityResolutionDecision,
   FindingCitation,
+  NameMatchBand,
   ReviewQueueItem,
   ReviewQueueResponse,
+  ReviewQueueSort,
   ReviewRequestStatus,
 } from "@/types";
 
@@ -36,6 +41,22 @@ import type {
  * same screen and the same audit log, because an operator should have one place
  * they review things. The tab strip is the whole of the shared chrome; nothing
  * below it is shared, and `DisputeQueue` says why.
+ *
+ * **The match quality is above the buttons too, and it is not a footnote.** A
+ * `vote_donor_conflict` rests on a fuzzy name match. The public officials page
+ * has always rendered how uncertain that is — a band, in the same visual weight
+ * as a severity pill, carrying "not a verified identity" inside the chip. This
+ * screen rendered none of it, which meant the person deciding whether to publish
+ * a claim knew less about it than the person who would read it. That is
+ * backwards, and `MatchQualityPanel` — the same component, sharing the same
+ * labels — is the fix. Unlike the public page it is not behind a disclosure:
+ * this is the screen where the single most useful fact about a finding may be
+ * that it rests on one common word, and that must not be one click away.
+ *
+ * **The weak-match policy is stated, not implied.** A weak match is dropped at
+ * detection and never reaches this queue. The sentence saying so is rendered
+ * verbatim from `match_policy.statement`, so the screen and the detector cannot
+ * drift into describing the same rule differently.
  */
 
 type ReviewTab = "findings" | "disputes";
@@ -73,6 +94,32 @@ const CITATION_LABEL: Record<FindingCitation["kind"], string> = {
 
 const STATUSES: readonly ReviewRequestStatus[] = ["pending_review", "approved", "rejected"];
 
+/**
+ * The band filter. `all` is first because it is the working default — an
+ * operator should meet the whole queue unless they have chosen not to.
+ *
+ * `weak` is offered even though the policy keeps weak matches out of the queue.
+ * A queue that can contain one — a finding raised before the threshold existed,
+ * or by a path that does not go through it — must be reachable, and a filter
+ * that returns nothing is a truthful answer to "is there anything weak in
+ * here?". Hiding the option would make that question unaskable.
+ */
+const BAND_FILTERS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "weak", label: BAND_SHORT_LABEL.weak },
+  { value: "moderate", label: BAND_SHORT_LABEL.moderate },
+  { value: "strong", label: BAND_SHORT_LABEL.strong },
+];
+
+const SORTS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "default", label: "Overdue first" },
+  { value: "weakest_first", label: "Weakest match first" },
+];
+
+function isBand(value: string): value is NameMatchBand {
+  return value === "weak" || value === "moderate" || value === "strong";
+}
+
 function isSeverity(value: string): value is AnomalySeverity {
   return (severityOrder as readonly string[]).includes(value);
 }
@@ -95,6 +142,8 @@ type LoadResult = { ok: true; body: ReviewQueueResponse } | { ok: false };
 export function AdminReviewPage() {
   const [tab, setTab] = useState<ReviewTab>("findings");
   const [status, setStatus] = useState<ReviewRequestStatus>("pending_review");
+  const [band, setBand] = useState<"all" | NameMatchBand>("all");
+  const [sort, setSort] = useState<ReviewQueueSort>("default");
   const [listing, setListing] = useState<ReviewQueueResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -108,8 +157,10 @@ export function AdminReviewPage() {
   // synchronously causes a cascading render, and a fast unmount would set state
   // on a component that is already gone.
   const fetchQueue = useCallback(async (): Promise<LoadResult> => {
+    const params = new URLSearchParams({ status, sort });
+    if (band !== "all") params.set("band", band);
     try {
-      const res = await fetch(`/api/admin/review/queue?status=${status}`, {
+      const res = await fetch(`/api/admin/review/queue?${params.toString()}`, {
         credentials: "same-origin",
       });
       if (!res.ok) return { ok: false };
@@ -117,7 +168,7 @@ export function AdminReviewPage() {
     } catch {
       return { ok: false };
     }
-  }, [status]);
+  }, [band, sort, status]);
 
   const applyResult = useCallback((result: LoadResult) => {
     if (result.ok) {
@@ -189,6 +240,39 @@ export function AdminReviewPage() {
           : "Rejected. The finding stays held and cannot be published.",
       );
       setReasonById((current) => ({ ...current, [flagId]: "" }));
+      await reload();
+    }
+    setBusy("");
+  }
+
+  /**
+   * The operator's answer to the question the matcher cannot answer.
+   *
+   * Deliberately neither an approval nor a rejection, and the notice says so:
+   * recording that two names denote the same entity does not publish anything,
+   * and recording that they do not does not reject this finding. Both are
+   * judgements about a pair of names that outlive this finding, which is the
+   * whole point — the same pair comes back every sweep.
+   */
+  async function judge(item: ReviewQueueItem, decision: EntityResolutionDecision) {
+    const flagId = item.finding.id;
+    const reason = (reasonById[flagId] ?? "").trim();
+    if (reason === "") {
+      setNotice("A judgement about two names needs a stated reason.");
+      return;
+    }
+    setBusy(flagId);
+    setNotice("");
+    const ok = await post(`/api/admin/review/queue/${flagId}/entity-resolution`, {
+      decision,
+      reason,
+    });
+    if (ok) {
+      setNotice(
+        decision === "same_entity"
+          ? "Recorded: same entity. This finding is still held — judging is not approving."
+          : "Recorded: different entities. This pair will not be raised again. This finding is still held; reject it to close it.",
+      );
       await reload();
     }
     setBusy("");
@@ -299,6 +383,20 @@ export function AdminReviewPage() {
         </p>
       )}
 
+      {/* The policy, in the project's own words rather than this page's
+        paraphrase of them. Rendered whether or not anything below it is a
+        name-match finding: an operator is entitled to know what is *not* in
+        this queue, and an empty queue with no explanation reads as "nothing
+        matched" when the truth may be "something matched and we decided it did
+        not count". */}
+      {listing && (
+        <div className="mt-6">
+          <FlagBar label="What a match is worth" tone="warn" testId="match-policy">
+            {listing.match_policy.statement}
+          </FlagBar>
+        </div>
+      )}
+
       <div className="mt-6 flex flex-wrap gap-2">
         {STATUSES.map((option) => (
           <button
@@ -316,6 +414,50 @@ export function AdminReviewPage() {
             {STATUS_LABEL[option]}
           </button>
         ))}
+      </div>
+
+      {/* Working the queue by how much a claim rests on, rather than meeting
+        the ambiguous ones at random halfway down a list. */}
+      <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div>
+          <span className="label-sm">Name match</span>
+          <div className="mt-1.5">
+            <SegmentedControl
+              name="band"
+              label="Filter by name-match band"
+              options={BAND_FILTERS}
+              value={band}
+              onChange={(value) => {
+                setLoading(true);
+                setBand(value === "all" || !isBand(value) ? "all" : value);
+              }}
+            />
+          </div>
+        </div>
+        <div>
+          <span className="label-sm">Order</span>
+          <div className="mt-1.5">
+            <SegmentedControl
+              name="sort"
+              label="Order the queue"
+              options={SORTS}
+              value={sort}
+              onChange={(value) => {
+                setLoading(true);
+                setSort(value === "weakest_first" ? "weakest_first" : "default");
+              }}
+            />
+          </div>
+        </div>
+        {listing && (
+          <p data-testid="band-counts" className="text-[12.5px] text-muted">
+            Awaiting review:{" "}
+            <span className="tabular">{listing.band_counts.weak}</span> weak ·{" "}
+            <span className="tabular">{listing.band_counts.moderate}</span> possible ·{" "}
+            <span className="tabular">{listing.band_counts.strong}</span> close ·{" "}
+            <span className="tabular">{listing.band_counts.unbanded}</span> not a name match
+          </p>
+        )}
       </div>
 
       {error && (
@@ -370,6 +512,20 @@ export function AdminReviewPage() {
                 <p className="mt-3 max-w-prose text-base leading-relaxed text-ink">
                   {item.finding.description}
                 </p>
+
+                {/* Above the buttons, never behind a disclosure. See the
+                  header: an operator should be able to see that a finding
+                  rests on one common word and refuse it without opening
+                  anything. */}
+                {item.evidence && (
+                  <MatchQualityPanel
+                    match={item.evidence.donorMatch}
+                    recipientMatch={item.evidence.recipientMatch}
+                    recipientName={item.evidence.contributions[0]?.recipientName}
+                    entityDecision={item.entity_decision}
+                    testId={`match-quality-${flagId}`}
+                  />
+                )}
 
                 <p className="mt-2 label-sm">
                   {item.context.jurisdiction_name ?? "No jurisdiction"} ·{" "}
@@ -483,6 +639,42 @@ export function AdminReviewPage() {
                         Save edit
                       </button>
                     </div>
+
+                    {/* Separated from the three decisions above by its own
+                      heading, because it is not a fourth decision about this
+                      finding. It is a judgement about two names that outlives
+                      this finding and is reused on the next sweep. */}
+                    {item.evidence && (
+                      <div
+                        data-testid={`entity-resolution-${flagId}`}
+                        className="border-t border-rule pt-3"
+                      >
+                        <p className="max-w-prose text-[12.5px] leading-relaxed text-muted">
+                          Are the donor and the subject of this agenda item the same entity?
+                          Answering records your judgement against this pair of names and reuses
+                          it on later sweeps. It publishes nothing: this finding stays held
+                          either way.
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={busy === flagId}
+                            onClick={() => void judge(item, "same_entity")}
+                            className={`${secondaryButtonClass} ${focusRing}`}
+                          >
+                            Same entity
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy === flagId}
+                            onClick={() => void judge(item, "different_entity")}
+                            className={`${secondaryButtonClass} ${focusRing}`}
+                          >
+                            Different entities
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <dl className="mt-6 grid gap-4 sm:grid-cols-3">

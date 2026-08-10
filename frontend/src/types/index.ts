@@ -459,7 +459,22 @@ export interface ReviewQueueItem {
   };
   /** Empty means the finding cannot be approved. The API enforces it. */
   citations: FindingCitation[];
+  /**
+   * The stored name match, parsed server-side by the same
+   * `parseVoteDonorEvidence` the public API uses. `null` for a finding that is
+   * not a name-match finding, or whose metadata does not parse.
+   */
+  evidence: VoteDonorEvidence | null;
+  /**
+   * The judgement in force on this finding's donor/subject pair **now** — which
+   * is not necessarily the one inside `evidence`, which is frozen at the moment
+   * the finding was raised.
+   */
+  entity_decision: StoredEntityDecision | null;
 }
+
+/** How the queue is ordered. Mirrors `QueueSort` in the review service. */
+export type ReviewQueueSort = "default" | "weakest_first";
 
 /** `review_policy` — B-b's replacement. One row, one threshold. */
 export interface ReviewPolicy {
@@ -476,6 +491,10 @@ export interface ReviewQueueResponse {
   total: number;
   policy: ReviewPolicy;
   counts: { pending: number; overdue: number; approved: number; rejected: number };
+  /** Served rather than restated in the console. See `MatchPolicy`. */
+  match_policy: MatchPolicy;
+  /** Pending findings by stored band, so the shape of the queue is visible. */
+  band_counts: Record<NameMatchBand | "unbanded", number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -781,6 +800,42 @@ export interface VoteDonorEvidence {
   recipientMatch: StoredNameMatch;
   contributions: CitedContribution[];
   coverageNote: string;
+  /**
+   * The operator judgement in force when this finding was raised, frozen onto
+   * it. `null` when the pair had never been judged. Mirrors
+   * `backend/src/services/finance/evidence.ts`.
+   */
+  operatorEntityDecision: StoredEntityDecision | null;
+}
+
+/**
+ * An operator's answer to the one question the matcher cannot answer.
+ *
+ * Only `same_entity` ever reaches a finding: a `different_entity` judgement
+ * suppresses the finding, so there is none for it to be attached to.
+ */
+export interface StoredEntityDecision {
+  decision: "same_entity";
+  donorNameFiled: string;
+  subjectTerms: string;
+  reason: string;
+  operatorEmail: string | null;
+  decidedAt: string;
+}
+
+export type EntityResolutionDecision = "same_entity" | "different_entity";
+
+/**
+ * `MATCH_POLICY` from `backend/src/services/finance/correlation.ts`.
+ *
+ * `statement` is rendered verbatim rather than restated in a component, so the
+ * policy on the screen and the policy the detector enforces cannot drift into
+ * disagreeing.
+ */
+export interface MatchPolicy {
+  minimumBand: NameMatchBand;
+  bands: Array<{ band: NameMatchBand; label: string }>;
+  statement: string;
 }
 
 export interface OfficialFinding {
