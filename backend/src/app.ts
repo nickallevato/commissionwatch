@@ -16,6 +16,8 @@ import smsRouter from "./routes/sms";
 import searchRouter from "./routes/search";
 import publicRecordsRouter from "./routes/public-records";
 import correctionsRouter from "./routes/corrections";
+import dataRouter from "./routes/data";
+import calendarRouter from "./routes/calendar";
 import adminRouter from "./routes/admin";
 import { errorHandler } from "./middleware/errorHandler";
 
@@ -85,6 +87,15 @@ app.use("/api/public-records", publicRecordsRouter);
 // B3 · the public corrections log, and the dispute route. Unauthenticated, and
 // the only unauthenticated write in the product — see routes/corrections.ts.
 app.use("/api/corrections", correctionsRouter);
+// The bulk export. Unauthenticated, no key: "here is what the record shows" is
+// only checkable if you can get the record. Published rows only — every query
+// routes through services/publication.ts, and data-export.test.ts walks all ten
+// datasets in both directions.
+app.use("/api/data", dataRouter);
+// The public meeting calendar and the per-jurisdiction iCal feeds. Published
+// meetings only; a meeting with no published time is an all-day event rather
+// than an appointment at midnight.
+app.use("/api/calendar", calendarRouter);
 app.use("/api/ingestion", ingestionRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/notifications", notificationsRouter);
