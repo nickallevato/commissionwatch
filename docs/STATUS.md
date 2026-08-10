@@ -963,8 +963,8 @@ purpose: at 2 s per request the first draft's 25×12 would have been over 3,000 
 two hours, timing out every night and looking like a broken scraper.
 
 **Deliberately not built:** no public route, no frontend, no donor-to-vote join, no committee sweep.
-Candidates' home addresses, personal emails and telephone numbers are in these filings; they are
-**stored and never surfaced**, and publishing them is an operator decision, not a default.
+Candidates' home addresses, personal emails and telephone numbers are in these filings; **they are
+no longer stored at all** — see the two sections below, which supersede this paragraph entirely.
 
 ### The donor PII was removed on 2026-08-10, hours after it landed
 
@@ -1015,27 +1015,68 @@ there so a future "scrub" cannot gut the disclosure instead.
 and the `artifacts` export carries only `sha256`, `source_url` and `byte_size` — never bytes. The
 two local scratch databases holding the swept rows were dropped.
 
-**Two things this deliberately did not do, both operator decisions:**
+**One thing this deliberately did not do, and it is still an operator decision:**
 
-1. **Git history was not rewritten.** The unscrubbed fixtures are already on `origin/main`. Whether
-   to rewrite published history is the operator's call and is *pending*; this work is the forward
-   fix only. Nothing was force-pushed and no published commit was rebased.
-2. **Migration 050's `campaign_contributions` still has `donor_employer`, `donor_occupation` and
-   `donor_city`.** Same shape of PII on the OpenFEC path. They are outside the 041–049 CERS block
-   this change was scoped to, and they are written `NULL` today — `services/finance/ingest.ts` no
-   longer carries the fields on its row type at all, so the compiler now refuses a writer that
-   tries. Dropping the columns is a separate call. **Also still open:** the roster fixture
-   `get-listCandidateResults-*.json` retains candidates' `personDTO` — home addresses, personal
-   email addresses, home and mobile telephone numbers. Nothing reads it any more, but it is still
-   bytes in a public repository.
+**Git history was not rewritten.** The unscrubbed fixtures are already on `origin/main`. Whether to
+rewrite published history is the operator's call and is *pending*; this work is the forward fix
+only. Nothing was force-pushed and no published commit was rebased. That remains true after the
+second pass below.
+
+### The second pass closed the rest of it, on 2026-08-10
+
+The first pass named three exposures it had surfaced and left open. Closing them found three more.
+
+**Migration 051 dropped `donor_employer`, `donor_occupation` and `donor_city`** from
+`campaign_contributions` — migration 043 applied to the federal path, in the 050–059 block that
+owns it. Verified first that nothing read them: `correlation.ts` is the only production SELECT and
+names its columns, this project has no views, and no export, serializer, route, detector, seed or
+frontend component mentions any of the three. **The claim that all three were written `NULL` was
+true of two.** `normalizeContribution` was setting `donor_city` from `record.contributor_city` on
+every ingested row; its writer went with the column.
+
+**`campaign_contributions.raw` was putting them straight back.** It stores the OpenFEC record
+verbatim, and OpenFEC sends contributor employer, occupation, city, street and ZIP whether or not
+`OpenFecContributionRecord` declares them — an interface describes what we read, not what arrives.
+Dropping three columns while serialising the same values into a jsonb blob one column over would
+have been a schema change dressed as a privacy measure. `withoutContributorPii` now filters by key
+shape rather than by a list of the fields we happen to know about.
+
+**The CERS sweep was writing a candidate's address into the database, and it is not a dead path.**
+`toCandidate` parsed `candidateAddress`, and `scheduleRef` put it into `DocumentRef.metadata`,
+which `handlers.ts` round-trips through `ingestion_jobs.target.metadata`. Every sweep wrote it. The
+parse is gone rather than the emission, because a populated field one autocomplete away from the
+next metadata key is not a decision anybody has to argue with. `resCountyDescr` stays: a county is
+the jurisdiction a candidacy is filed in, not a place a person lives.
+
+**The fixture scrub went from four files to eleven.** 1,190 JSON values and 16 rendered HTML values,
+covering candidates' mailing and home addresses, personal email addresses and home, work and mobile
+telephone numbers. Three places the first pass had not looked: **both** `get-listFinanceReports-*.json`
+embed the same `personDTO` inside `candidateDTO`; the rendered C-5 HTML prints the candidate's
+contact details **and the campaign treasurer's home address**, and a treasurer is not a public figure
+at all; and two email addresses were typed into free text, one in a candidacy's `comments` and one
+in an expenditure's `purposeDescr`, where no field-name-driven scrub would ever have found them.
+Nothing was dropped — every key, type and populated-ness is as recorded, so the parser's "not filed"
+paths still run. `record.ts` now scrubs every response by shape rather than one endpoint by field
+name. Full accounting in `backend/test/fixtures/mt-cers/PROVENANCE.md`.
+
+**The guard was extended and watched failing, twelve violations one at a time.** It gained email and
+telephone patterns — which it had never had, which is why 42 candidates' email addresses and 74 of
+their telephone numbers sat in a scanned directory and the scan passed — an address predicate that
+recognises all five renderings CERS ships rather than one literal, coverage of the whole tape rather
+than six files out of twenty-one, and assertions on the two parsers where PII enters a column that
+is allowed to exist. Doing it found two defects in the guard: the populated-ness check summed nulls
+across the directory and asserted the total was non-zero, so filling in every optional field in the
+roster still passed; and the table-existence check — the one that exists because a previous run was
+silently pointed at the wrong database — failed without naming the missing table.
 
 The source stays **disabled**. Migration 042 rewrites 037's `disabled_reason`, which said "No
 adapter has been written for this source yet" and is published verbatim on the **public** status
 page — leaving it would put a false statement about our own ingestion on the page whose purpose is
 that absences are honest.
 
-Counts after MT CERS: backend **989 tests / 247 suites**, green. Backend lint: 2 warnings, 0
-errors — the same two deliberate ones.
+Counts after the second PII pass: backend **1108 tests / 269 suites**, frontend **430 tests / 42
+files**, deploy **61 checks**, all green. Backend lint: 2 warnings, 0 errors — the same two
+deliberate ones. Frontend lint: zero problems.
 
 ## Live state
 
