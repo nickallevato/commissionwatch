@@ -5,7 +5,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AdminMeetingDetailPage } from "./AdminMeetingDetailPage";
 import { server } from "@/mocks/server";
-import type { MeetingDetailPayload } from "@/types";
+import type { DisputeItem, MeetingDetailPayload } from "@/types";
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
@@ -15,9 +15,9 @@ afterAll(() => server.close());
  * `renderWithProviders` mounts its own `MemoryRouter` at "/", which cannot be
  * nested and carries no params. This page reads `:id`.
  */
-function renderMeeting(id = "m1") {
+function renderMeeting(id = "m1", search = "") {
   return render(
-    <MemoryRouter initialEntries={[`/admin/meetings/${id}`]}>
+    <MemoryRouter initialEntries={[`/admin/meetings/${id}${search}`]}>
       <Routes>
         <Route path="/admin/meetings/:id" element={<AdminMeetingDetailPage />} />
       </Routes>
@@ -92,6 +92,7 @@ const base: MeetingDetailPayload = {
       new_value: "City Hall, 121 N Rouse Ave",
       reason: "Street address was truncated by the scraper",
       operator_email: "operator@example.test",
+      dispute_id: null,
       created_at: "2026-08-06T00:00:00.000Z",
     },
     {
@@ -103,6 +104,7 @@ const base: MeetingDetailPayload = {
       new_value: "CONSENT AGENDA ITEM 4 CONTINUED",
       reason: "Heading was split across two PDF columns",
       operator_email: "operator@example.test",
+      dispute_id: null,
       created_at: "2026-08-07T00:00:00.000Z",
     },
   ],
@@ -228,6 +230,157 @@ describe("AdminMeetingDetailPage", () => {
     // Nothing in the log can be typed over.
     expect(within(history).queryAllByRole("textbox")).toHaveLength(0);
     expect(within(history).queryAllByRole("button")).toHaveLength(0);
+  });
+
+  /**
+   * The join. `record_corrections.dispute_id` exists and the public log renders
+   * off it, so the only thing missing was an operator screen that sets it —
+   * and a link the operator has to retype is a link that exists only when
+   * somebody remembers to make it.
+   */
+  describe("a correction prompted by a dispute", () => {
+    const dispute: DisputeItem = {
+      dispute: {
+        id: "dsp-1",
+        reference: "CW-7K2M4NPQ",
+        target_table: "agenda_items",
+        target_id: "a1",
+        contested: "The title of item 1 is not what the agenda says.",
+        account: "I read the agenda. It says CONSENT AGENDA ITEM 4.",
+        contact: "someone@example.test",
+        status: "upheld",
+        review_state: "held",
+        reviewer_operator_id: null,
+        reviewer_email: "operator@example.test",
+        review_reason: "The agenda published for that date reads differently.",
+        reviewed_at: "2026-08-09T00:00:00.000Z",
+        created_at: "2026-08-08T00:00:00.000Z",
+        updated_at: "2026-08-09T00:00:00.000Z",
+      },
+      context: {
+        meeting_id: "m1",
+        meeting_date: "2026-08-04T00:00:00.000Z",
+        commission_name: "Board of County Commissioners",
+        jurisdiction_name: "Gallatin County",
+        record_summary: "Agenda item · CONSENT AGENDA ITEM 4 CONTINUED",
+      },
+    };
+
+    const disputeHandler = http.get("/api/admin/review/disputes/:id", () =>
+      HttpResponse.json(dispute),
+    );
+
+    it("carries the dispute into the request, and preselects the contested row", async () => {
+      let body: unknown = null;
+      server.use(
+        detailHandler(),
+        disputeHandler,
+        http.post("/api/admin/pressroom/corrections", async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json({ id: "corr-3" }, { status: 201 });
+        }),
+      );
+      renderMeeting("m1", "?dispute=dsp-1");
+
+      const banner = await screen.findByTestId("dispute-link");
+      expect(banner).toHaveTextContent("CW-7K2M4NPQ");
+      expect(banner).toHaveTextContent("The title of item 1 is not what the agenda says.");
+
+      // The dispute names the row it contests, so the form opens on it.
+      await waitFor(() =>
+        expect(screen.getByLabelText("Target")).toHaveValue("agenda_items:a1"),
+      );
+
+      await userEvent.type(screen.getByLabelText("New value"), "CONSENT AGENDA ITEM 4");
+      await userEvent.type(
+        screen.getByLabelText("Correction reason"),
+        "The agenda published for that date reads CONSENT AGENDA ITEM 4",
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Record correction" }));
+
+      await waitFor(() =>
+        expect(body).toEqual({
+          target_table: "agenda_items",
+          target_id: "a1",
+          field: "title",
+          new_value: "CONSENT AGENDA ITEM 4",
+          reason: "The agenda published for that date reads CONSENT AGENDA ITEM 4",
+          dispute_id: "dsp-1",
+        }),
+      );
+    });
+
+    it("omits the link when the operator unchecks it, rather than sending null", async () => {
+      let body: unknown = null;
+      server.use(
+        detailHandler(),
+        disputeHandler,
+        http.post("/api/admin/pressroom/corrections", async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json({ id: "corr-4" }, { status: 201 });
+        }),
+      );
+      renderMeeting("m1", "?dispute=dsp-1");
+
+      await screen.findByTestId("dispute-link");
+      await userEvent.click(
+        screen.getByLabelText("Record this correction against the dispute"),
+      );
+      await userEvent.type(screen.getByLabelText("New value"), "CONSENT AGENDA ITEM 4");
+      await userEvent.type(screen.getByLabelText("Correction reason"), "The agenda reads so");
+      await userEvent.click(screen.getByRole("button", { name: "Record correction" }));
+
+      await waitFor(() => expect(body).not.toBeNull());
+      expect(body).not.toHaveProperty("dispute_id");
+    });
+
+    it("says so and corrects anyway when the dispute cannot be loaded", async () => {
+      // Refusing to correct a record over a broken query string would be the
+      // worse failure. The page states what it could not resolve instead.
+      let body: unknown = null;
+      server.use(
+        detailHandler(),
+        http.get("/api/admin/review/disputes/:id", () =>
+          HttpResponse.json({ error: "Dispute not found", statusCode: 404 }, { status: 404 }),
+        ),
+        http.post("/api/admin/pressroom/corrections", async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json({ id: "corr-5" }, { status: 201 });
+        }),
+      );
+      renderMeeting("m1", "?dispute=dsp-missing");
+
+      expect(await screen.findByTestId("dispute-link-error")).toHaveTextContent(
+        "without a link to one",
+      );
+      expect(screen.queryByTestId("dispute-link")).not.toBeInTheDocument();
+
+      await userEvent.type(screen.getByLabelText("New value"), "City Hall annexe");
+      await userEvent.type(screen.getByLabelText("Correction reason"), "The agenda says annexe");
+      await userEvent.click(screen.getByRole("button", { name: "Record correction" }));
+
+      await waitFor(() => expect(body).not.toBeNull());
+      expect(body).not.toHaveProperty("dispute_id");
+    });
+
+    it("marks the prompted rows in the history and leaves the others alone", async () => {
+      server.use(
+        detailHandler({
+          ...base,
+          corrections: [
+            { ...base.corrections[0], dispute_id: "dsp-1" },
+            base.corrections[1],
+          ],
+        }),
+        disputeHandler,
+      );
+      renderMeeting("m1", "?dispute=dsp-1");
+
+      expect(await screen.findByTestId("correction-dispute-corr-old")).toHaveTextContent(
+        "Prompted by dispute CW-7K2M4NPQ",
+      );
+      expect(screen.queryByTestId("correction-dispute-corr-new")).not.toBeInTheDocument();
+    });
   });
 
   it("re-parses stored bytes without contacting the source", async () => {

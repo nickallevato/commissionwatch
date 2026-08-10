@@ -244,6 +244,17 @@ interface CreateCorrectionBody {
   field?: unknown;
   new_value?: unknown;
   reason?: unknown;
+  /**
+   * The dispute this correction answers, if one prompted it.
+   *
+   * Optional, and validated when present rather than ignored when wrong. The
+   * column has existed since migration 039 and the public log has been
+   * rendering *"Prompted by dispute CW-…"* off it, but until now no operator
+   * screen could set it — so upholding a dispute and then correcting the record
+   * produced two rows that nothing joined, and the end-to-end trail the feature
+   * was designed around did not connect.
+   */
+  dispute_id?: unknown;
 }
 
 router.post(
@@ -279,6 +290,16 @@ router.post(
         res.status(400).json({ error: "new_value must be a string or null", statusCode: 400 });
         return;
       }
+      // Absent and explicitly null both mean "no dispute prompted this". A
+      // malformed id is refused here rather than stored: `record_corrections`
+      // has no foreign key to catch it, for migration 031's reason.
+      if (
+        body.dispute_id !== null &&
+        body.dispute_id !== undefined &&
+        (typeof body.dispute_id !== "string" || !UUID_RE.test(body.dispute_id))
+      ) {
+        return badId(res, "dispute");
+      }
 
       const correction = await recordCorrection(db, {
         targetTable: body.target_table,
@@ -287,6 +308,7 @@ router.post(
         newValue: typeof body.new_value === "string" ? body.new_value : null,
         reason: body.reason,
         actor: actorOf(req),
+        disputeId: typeof body.dispute_id === "string" ? body.dispute_id : null,
       });
 
       // 201: a correction appends. Nothing was replaced.

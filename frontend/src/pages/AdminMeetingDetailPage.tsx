@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   ACTION,
   ACTION_PRIMARY,
@@ -17,6 +17,7 @@ import {
 import type {
   ConfidenceLevel,
   CorrectionTargetTable,
+  DisputeItem,
   MeetingDetailPayload,
   ReparseResult,
 } from "@/types";
@@ -41,6 +42,16 @@ import type {
  *
  * Re-parse here means the same thing it means on the run screen: replay the
  * bytes already stored. No request goes back out to the source.
+ *
+ * **`?dispute=<id>` carries a contest through from the Disputes tab.** Upholding
+ * a dispute changes nothing; the correction that follows is a separate act, and
+ * `record_corrections.dispute_id` is what joins the two. Making the operator
+ * retype a reference into a free-text box would mean the join exists only when
+ * somebody remembers it — so the link travels in the URL, the page shows what it
+ * resolved to before anything is submitted, and the id goes in the request body.
+ * A dispute that cannot be loaded is said out loud and the correction goes
+ * ahead unlinked, because refusing to correct a record over a broken query
+ * string would be the worse failure.
  */
 
 /**
@@ -76,6 +87,15 @@ function formatStamp(value: string | null): string {
 
 export function AdminMeetingDetailPage() {
   const { id = "" } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const disputeId = searchParams.get("dispute") ?? "";
+  // Keyed on the id it was fetched for, so "no dispute in the URL" and "the
+  // dispute in the URL has not resolved yet" are told apart by reading state
+  // rather than by an effect that clears it.
+  const [resolved, setResolved] = useState<{ id: string; item: DisputeItem | null } | null>(
+    null,
+  );
+  const [linkDispute, setLinkDispute] = useState(true);
   const [detail, setDetail] = useState<MeetingDetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -136,6 +156,35 @@ export function AdminMeetingDetailPage() {
     };
   }, [applyResult, fetchDetail]);
 
+  useEffect(() => {
+    if (disputeId === "") return;
+    let ignore = false;
+    void (async () => {
+      const item = await (async (): Promise<DisputeItem | null> => {
+        try {
+          const res = await fetch(`/api/admin/review/disputes/${disputeId}`, {
+            credentials: "same-origin",
+          });
+          if (!res.ok) return null;
+          return (await res.json()) as DisputeItem;
+        } catch {
+          return null;
+        }
+      })();
+      if (ignore) return;
+      setResolved({ id: disputeId, item });
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [disputeId]);
+
+  const dispute = disputeId !== "" && resolved?.id === disputeId ? resolved.item : null;
+  const disputeError =
+    disputeId !== "" && resolved?.id === disputeId && resolved.item === null
+      ? "That dispute could not be loaded. This correction will be recorded without a link to one."
+      : "";
+
   const targets = useMemo<CorrectionTarget[]>(() => {
     if (!detail) return [];
     return [
@@ -163,7 +212,25 @@ export function AdminMeetingDetailPage() {
     ];
   }, [detail]);
 
-  const selectedTarget = targets.find((target) => target.key === targetKey) ?? targets[0];
+  /**
+   * A dispute names the exact row it contests, so the form opens on that row
+   * rather than on the meeting. An operator who has to re-find the agenda item
+   * a stranger quoted is an operator who will occasionally correct the wrong
+   * one. If the contested row is not on this page — the dispute points at
+   * another meeting — nothing is preselected and the banner says so.
+   */
+  const contestedKey =
+    dispute === null ? "" : `${dispute.dispute.target_table}:${dispute.dispute.target_id}`;
+  const contestedOnThisPage = targets.some((target) => target.key === contestedKey);
+
+  // Derived rather than written into state by an effect: the operator's own
+  // choice wins as soon as they make one, and until then the contested row is
+  // the default. Pushing it through `setTargetKey` would race the fetch that
+  // resolves the dispute and would fight any selection made before it landed.
+  const effectiveTargetKey =
+    targetKey !== "" ? targetKey : contestedOnThisPage ? contestedKey : "";
+  const selectedTarget =
+    targets.find((target) => target.key === effectiveTargetKey) ?? targets[0];
   const selectedField = selectedTarget?.fields.includes(field)
     ? field
     : (selectedTarget?.fields[0] ?? "");
@@ -222,6 +289,9 @@ export function AdminMeetingDetailPage() {
           field: selectedField,
           new_value: newValue,
           reason: correctionReason,
+          // Omitted rather than sent as null when there is nothing to link, so
+          // the request says what it means: no dispute prompted this.
+          ...(dispute !== null && linkDispute ? { dispute_id: dispute.dispute.id } : {}),
         }),
       });
       if (!res.ok) {
@@ -639,6 +709,50 @@ export function AdminMeetingDetailPage() {
               evidence has nothing left to stand on.
             </p>
 
+            {disputeError && (
+              <p
+                role="alert"
+                data-testid="dispute-link-error"
+                className="max-w-prose border-l-2 border-accent px-4 py-2 text-sm text-ink-soft"
+              >
+                {disputeError}
+              </p>
+            )}
+
+            {dispute && (
+              <div
+                data-testid="dispute-link"
+                className="max-w-prose border-l-2 border-ink bg-paper-sunk px-4 py-3"
+              >
+                <p className="label-sm">
+                  Prompted by dispute{" "}
+                  <span className="figure text-accent">{dispute.dispute.reference}</span> ·{" "}
+                  {dispute.dispute.status}
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-ink">
+                  {dispute.dispute.contested}
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-muted">
+                  {contestedOnThisPage
+                    ? `The contested row — ${dispute.context.record_summary} — is selected below.`
+                    : `The contested row is ${dispute.context.record_summary}, which is not on this page. Choose the target yourself.`}
+                </p>
+                <label className="mt-3 flex items-center gap-2 text-xs text-ink-soft">
+                  <input
+                    type="checkbox"
+                    checked={linkDispute}
+                    onChange={(event) => setLinkDispute(event.target.checked)}
+                    className={FOCUS_RING}
+                  />
+                  Record this correction against the dispute
+                </label>
+                <p className="mt-1 text-xs leading-relaxed text-muted">
+                  The link is written to <code>record_corrections.dispute_id</code> and the public
+                  log names the reference. Nothing the contester wrote is published.
+                </p>
+              </div>
+            )}
+
             <form onSubmit={handleCorrection} className="max-w-lg space-y-4">
               {formError && (
                 <p role="alert" className="border-l-2 border-accent px-4 py-2 text-sm text-ink-soft">
@@ -747,6 +861,20 @@ export function AdminMeetingDetailPage() {
                     <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-soft">
                       {correction.reason}
                     </p>
+                    {correction.dispute_id !== null && (
+                      // The reference is shown only when this page already
+                      // resolved that dispute. Fetching one per row to print a
+                      // label would be a query per line of an audit log.
+                      <p
+                        data-testid={`correction-dispute-${correction.id}`}
+                        className="label-sm mt-1"
+                      >
+                        Prompted by dispute
+                        {dispute !== null && dispute.dispute.id === correction.dispute_id
+                          ? ` ${dispute.dispute.reference}`
+                          : ""}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ol>
