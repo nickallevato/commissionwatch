@@ -6,6 +6,7 @@ import { DigestScheduler } from "./services/digest-scheduler";
 import { registerDigestStatus } from "./routes/health";
 import { operatorAuthService } from "./middleware/requireOperator";
 import { buildIngestionStack, startIngestion } from "./services/ingestion";
+import { registerPressroomStack } from "./routes/admin/pressroom";
 
 const PORT = process.env.PORT || 3001;
 
@@ -15,6 +16,11 @@ const digestScheduler = new DigestScheduler(db, emailService);
 const ingestion = buildIngestionStack(db);
 
 registerDigestStatus(() => digestScheduler.getStatus());
+
+// The console's two action routes — "sweep now" and "re-parse" — need the live
+// queue and scheduler. Handed over here rather than imported there, so the
+// route module stays constructible in a test that has Postgres and no MinIO.
+registerPressroomStack({ queue: ingestion.queue, scheduler: ingestion.scheduler });
 
 // Consumed once: a no-op when the table already holds an operator, so it is
 // safe on every boot. A failure is logged, not fatal — a running site nobody

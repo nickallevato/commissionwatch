@@ -1,6 +1,7 @@
 import { Router, Request } from "express";
 import db from "../config/database";
 import { detectAnomalies } from "../services/anomaly-detection";
+import { findPublishedMeeting, whereMeetingPublished } from "../services/publication";
 
 const router = Router();
 
@@ -48,7 +49,10 @@ router.get("/", async (req: Request<unknown, unknown, unknown, MeetingsQuery>, r
     const limit = Math.min(Math.max(parseInt(rawLimit || "50", 10) || 50, 1), 200);
     const offset = Math.max(parseInt(rawOffset || "0", 10) || 0, 0);
 
-    const query = db("meetings");
+    // Ingested is not published. An unpublished meeting is absent from every
+    // public response, including the count — a total that includes rows the
+    // caller cannot reach is a leak dressed as a number.
+    const query = whereMeetingPublished(db("meetings"));
 
     if (jurisdiction_id) {
       query.whereIn(
@@ -81,7 +85,7 @@ router.get("/:id", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;
@@ -103,7 +107,7 @@ router.get("/:id/rundown", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;
@@ -129,7 +133,7 @@ router.post("/:id/detect-anomalies", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;
@@ -147,7 +151,7 @@ router.get("/:id/votes", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;
@@ -165,7 +169,7 @@ router.get("/:id/anomalies", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;
@@ -185,7 +189,7 @@ router.get("/:id/agenda-items", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;
@@ -205,7 +209,7 @@ router.get("/:id/documents", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;

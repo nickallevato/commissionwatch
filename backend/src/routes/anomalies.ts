@@ -1,5 +1,6 @@
 import { Router, Request } from "express";
 import db from "../config/database";
+import { findPublishedMeeting } from "../services/publication";
 import { detectAnomalies, detectAnomaliesBatch } from "../services/anomaly-detection";
 
 const router = Router();
@@ -136,7 +137,7 @@ router.post("/", async (req: Request<unknown, unknown, CreateAnomalyBody>, res, 
     if (!severity || !VALID_SEVERITIES.includes(severity))
       throw badRequest("Valid severity is required");
 
-    const meeting = await db("meetings").where({ id: meeting_id }).first();
+    const meeting = await findPublishedMeeting(db, meeting_id);
     if (!meeting) throw badRequest("Meeting not found");
 
     const [created] = await db("anomaly_flags")
@@ -178,7 +179,7 @@ router.get("/meeting/:id", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;
@@ -199,7 +200,7 @@ router.post("/meeting/:id/detect", async (req, res, next) => {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
 
-    const meeting = await db("meetings").where({ id }).first();
+    const meeting = await findPublishedMeeting(db, id);
     if (!meeting) {
       res.status(404).json({ error: "Meeting not found", statusCode: 404 });
       return;
