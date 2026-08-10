@@ -163,7 +163,7 @@ describe('mt-cers fetch', () => {
     expect(Array.isArray(payload)).toBe(true);
   });
 
-  it('reads real itemised contributions with donor, occupation and employer', async () => {
+  it('reads real itemised contributions with donor, date and amount', async () => {
     const adapter = buildAdapter();
     const refs = await adapter.discoverDocuments(SINCE);
     const schedules = refs.filter(
@@ -173,15 +173,49 @@ describe('mt-cers fetch', () => {
     );
 
     let total = 0;
-    let withEmployer = 0;
+    let withDonor = 0;
+    let withAmount = 0;
     for (const ref of schedules) {
       const artifact = await adapter.fetchDocument(ref);
       const items = parseLineItems(expectJson(artifact.bytes, ref.url), ref.url);
       total += items.length;
-      withEmployer += items.filter((item) => item.employerDescr !== null).length;
+      withDonor += items.filter((item) => item.entityName !== null).length;
+      withAmount += items.filter((item) => item.totalAmt !== null).length;
     }
     expect(total).toBeGreaterThan(0);
-    expect(withEmployer).toBeGreaterThan(0);
+    // The civic core. A contribution this project cannot name, date or price is
+    // not a disclosure, and `vote_donor_conflict` has nothing to correlate.
+    expect(withDonor).toBeGreaterThan(0);
+    expect(withAmount).toBeGreaterThan(0);
+  });
+
+  it('does not carry the donor PII the response contains', async () => {
+    // CERS returns entityAddress, occupationDescr and employerDescr on every
+    // contribution row. The raw body still has them — this asserts the *parser*
+    // drops them, which is what stops them reaching a writer. The paired schema
+    // and fixture guards are in `test/finance-pii-guard.test.ts`.
+    const adapter = buildAdapter();
+    const refs = await adapter.discoverDocuments(SINCE);
+    const schedules = refs.filter(
+      (ref) =>
+        ref.metadata?.recordKind === RECORD_KIND_REPORT_SCHEDULE &&
+        ref.metadata.schedule === 'individual',
+    );
+
+    let inspected = 0;
+    for (const ref of schedules) {
+      const artifact = await adapter.fetchDocument(ref);
+      const payload = expectJson(artifact.bytes, ref.url);
+      const items = parseLineItems(payload, ref.url);
+      for (const item of items) {
+        inspected += 1;
+        for (const field of ['entityAddress', 'occupationDescr', 'employerDescr']) {
+          expect(Object.prototype.hasOwnProperty.call(item, field)).toBe(false);
+        }
+      }
+    }
+    // A scan that matched no rows would pass forever.
+    expect(inspected).toBeGreaterThan(0);
   });
 
   it('accepts an empty schedule as a real answer, not a failure', async () => {

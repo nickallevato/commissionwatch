@@ -87,26 +87,16 @@ function requireMetadata(metadata: unknown, field: string): string {
   return value;
 }
 
-/**
- * Splits `'109 Sunset Blvd., Bozeman, MT 59715'` into its city.
+/*
+ * `cityFromAddress` used to live here. It split a candidate's filed home
+ * address into a city for `cf_filers.residence_city`, and it is gone with that
+ * column (migration 043): its only input was a home address and its only output
+ * was a location of a person. Nothing else called it.
  *
- * Returns null rather than a guess whenever the shape is not the expected
- * `..., City, ST ZIP`. This is the only place a jurisdiction is ever inferred,
- * and what it produces lands in `derived_jurisdiction`, which is a separate
- * column from the address it was read out of precisely so the inference cannot
- * be mistaken for the filing.
+ * If a jurisdiction ever needs to be inferred for a candidacy again, infer it
+ * from something the candidacy asserts — the office, the county, the filing
+ * target — and not from where the candidate sleeps.
  */
-export function cityFromAddress(address: string | null): string | null {
-  if (address === null) return null;
-  const parts = address.split(",").map((part) => part.trim()).filter((part) => part !== "");
-  if (parts.length < 2) return null;
-  const tail = parts[parts.length - 1] ?? "";
-  // The last part must look like `MT 59715` — a state and a ZIP — or we are not
-  // reading the shape we think we are reading.
-  if (!/^[A-Za-z]{2}\s+\d{5}(-\d{4})?$/.test(tail)) return null;
-  const city = parts[parts.length - 2] ?? "";
-  return city === "" ? null : city;
-}
 
 /**
  * `MM/DD/YYYY` as CERS renders it, to `YYYY-MM-DD`. Null on anything else.
@@ -175,7 +165,10 @@ export async function upsertCandidateFiler(
     campaign_type_code: candidate.candidateTypeCode,
     election_year: candidate.electionYear,
     party: candidate.partyDescr,
-    residence_city: cityFromAddress(candidate.candidateAddress),
+    // No residence city. It was read out of the candidate's filed home address,
+    // which makes it a location of a person rather than a fact about the
+    // candidacy; migration 043 removed the column. `residence_county` stays —
+    // a county is the jurisdiction the candidacy is filed in.
     residence_county: candidate.resCountyDescr,
     // Left NULL here on purpose. A roster row states a residence, not a
     // jurisdiction of office, and this writer does not conclude anything from
@@ -263,9 +256,9 @@ export async function replaceTransactions(
         schedule,
         row_index: index,
         entity_name: item.entityName === null ? null : item.entityName.slice(0, 300),
-        entity_address: item.entityAddress,
-        occupation: item.occupationDescr === null ? null : item.occupationDescr.slice(0, 200),
-        employer: item.employerDescr === null ? null : item.employerDescr.slice(0, 300),
+        // No address, occupation or employer. The parser does not produce them
+        // and migration 043 removed the columns; see that migration's header
+        // for why the filing's own PII is not ours to keep.
         election_type: item.amountTypeDescr,
         transaction_date: toIsoDateFromEpoch(item.datePaid),
         cash_amount: item.cashAmt,

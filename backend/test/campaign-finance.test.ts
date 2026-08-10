@@ -13,7 +13,6 @@ import {
 } from "../src/services/ingestion/adapters/mt-cers";
 import type { DocumentRef } from "../src/services/ingestion/adapters/types";
 import {
-  cityFromAddress,
   directionForSchedule,
   isCampaignFinanceKind,
   recordCampaignFinance,
@@ -149,14 +148,16 @@ describe("campaign finance — routing", () => {
 });
 
 describe("campaign finance — value conversion", () => {
-  it("reads a city out of a filed address, and refuses anything else", () => {
-    expect(cityFromAddress("109 Sunset Blvd., Bozeman, MT 59715")).toBe("Bozeman");
-    expect(cityFromAddress("PO Box 275, Bozeman, MT 59771")).toBe("Bozeman");
-    // No state-and-ZIP tail: we are not reading the shape we think we are.
-    expect(cityFromAddress("Bozeman")).toBe(null);
-    expect(cityFromAddress("somewhere, else")).toBe(null);
-    expect(cityFromAddress(null)).toBe(null);
-  });
+  /*
+   * `cityFromAddress` was tested here. It and its test went with
+   * `cf_filers.residence_city` in migration 043: the function existed only to
+   * split a candidate's filed home address into a city, so with that column
+   * dropped it had no caller and its test asserted the behaviour of code whose
+   * whole purpose was to derive a location of a person. Coverage is not
+   * weakened — nothing it protected still exists, and what replaces it is the
+   * schema guard in `test/finance-pii-guard.test.ts`, which fails if the column
+   * comes back.
+   */
 
   it("stores an unreadable date as null rather than a plausible wrong one", () => {
     expect(toIsoDate("09/16/2022")).toBe("2022-09-16");
@@ -199,7 +200,11 @@ describe("campaign finance — the roster", () => {
     expect(row.name).toMatch(/Brown, Zach/);
     expect(row.office_title).toBe("County Commissioner");
     expect(row.residence_county).toBe("Gallatin");
-    expect(row.residence_city).toBe("Bozeman");
+    // No `residence_city`: it was derived from the candidate's filed home
+    // address and migration 043 dropped it. The county stays, because a county
+    // is the jurisdiction the candidacy is filed in rather than a location of a
+    // person.
+    expect("residence_city" in row).toBe(false);
     // CERS has no city field. Anything we conclude from a residence address is
     // an inference and must not be stored as though CERS asserted it.
     expect(row.derived_jurisdiction).toBe(null);
@@ -264,7 +269,7 @@ describe("campaign finance — itemised transactions", () => {
     );
   }
 
-  it("writes real donors with occupation, employer and amount", async () => {
+  it("writes real donors with a name, a date and an amount, and no PII", async () => {
     const schedule = populatedSchedule();
     expect(schedule).toBeDefined();
     if (schedule === undefined) return;
@@ -282,10 +287,21 @@ describe("campaign finance — itemised transactions", () => {
       expect(row.direction).toBe("contribution");
       expect(row.schedule).toBe("individual");
       expect(typeof row.entity_name).toBe("string");
+      // The columns migration 043 dropped must not be back on the written row.
+      // Asserting on a row this writer actually produced, rather than on the
+      // schema alone, is what catches a writer that reintroduced one of them
+      // together with the column.
+      for (const field of ["entity_address", "occupation", "employer"]) {
+        expect(field in row).toBe(false);
+      }
     }
-    // At least one donor states an employer — the field that makes a donor
-    // network more than a list of names.
-    expect(rows.some((row: { employer: string | null }) => row.employer !== null)).toBe(true);
+    // The disclosure itself: a name, a date and an amount. Without these three
+    // there is no contribution to publish and nothing for a correlation to
+    // stand on.
+    expect(rows.some((row: { entity_name: string | null }) => row.entity_name !== null)).toBe(true);
+    expect(
+      rows.some((row: { transaction_date: Date | null }) => row.transaction_date !== null),
+    ).toBe(true);
     expect(rows.some((row: { total_amount: string | null }) => row.total_amount !== null)).toBe(
       true,
     );

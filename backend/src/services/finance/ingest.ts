@@ -182,8 +182,14 @@ export interface ContributionRow {
   recipient_name: string;
   committee_name: string | null;
   donor_name: string;
-  donor_employer: string | null;
-  donor_occupation: string | null;
+  /*
+   * No `donor_employer` and no `donor_occupation`. OpenFEC publishes both and
+   * this path already wrote NULL for them; the fields are now absent from the
+   * type so that "we do not ingest PII" is enforced by the compiler rather than
+   * by two literals a future edit could quietly replace with `record.*`.
+   * `campaign_contributions` still has the columns — they are migration 050's,
+   * outside the CERS block, and dropping them is the operator's call.
+   */
   donor_city: string | null;
   donor_state: string | null;
   amount: number;
@@ -250,8 +256,6 @@ export function normalizeContribution(
     recipient_name: recipientName,
     committee_name: trimmed(record.committee_name),
     donor_name: donorName,
-    donor_employer: null,
-    donor_occupation: null,
     donor_city: trimmed(record.contributor_city),
     donor_state: trimmed(record.contributor_state),
     amount: round2(amount),

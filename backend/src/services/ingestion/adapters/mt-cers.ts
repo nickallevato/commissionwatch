@@ -210,12 +210,23 @@ export interface CersReport {
  * comes from the `listName` that was asked for, never from the row. A row's own
  * `lineItemCompositeDescr` is a label CERS chose for display and is not a
  * closed domain.
+ *
+ * ## The response carries more than this, on purpose
+ *
+ * CERS returns `entityAddress`, `occupationDescr` and `employerDescr` on every
+ * contribution row, and this interface deliberately does not have them. They
+ * describe the donor as a person rather than the contribution as a public act,
+ * and the operator's instruction is that we do not ingest PII — so the field is
+ * absent from the type, which makes it absent from every caller. Dropping them
+ * at the parser rather than at the writer is what makes that true: a value this
+ * never produces cannot be stored by a writer that later grows a column for it.
+ * See migration 043.
+ *
+ * `entityName`, `datePaid` and the three amounts stay. They are the disclosure,
+ * and `vote_donor_conflict` has nothing to say without them.
  */
 export interface CersLineItem {
   entityName: string | null;
-  entityAddress: string | null;
-  occupationDescr: string | null;
-  employerDescr: string | null;
   amountTypeDescr: string | null;
   datePaid: number | null;
   cashAmt: number | null;
@@ -342,9 +353,8 @@ export function toReport(row: Record<string, unknown>): CersReport {
 export function toLineItem(row: Record<string, unknown>): CersLineItem {
   return {
     entityName: optionalString(row.entityName),
-    entityAddress: optionalString(row.entityAddress),
-    occupationDescr: optionalString(row.occupationDescr),
-    employerDescr: optionalString(row.employerDescr),
+    // row.entityAddress, row.occupationDescr and row.employerDescr are present
+    // in the response and are not read. See CersLineItem's header.
     amountTypeDescr: optionalString(row.amountTypeDescr),
     datePaid: optionalNumber(row.datePaid),
     cashAmt: optionalNumber(row.cashAmt),
