@@ -1,14 +1,21 @@
 import type { Knex } from "knex";
 import { FEDERAL_ONLY_CAVEAT } from "./coverage";
 import {
+  loadEntityDecisions,
+  pairFor,
+  pairKey,
+  type StoredEntityDecision as OperatorEntityDecision,
+} from "./entity-resolution";
+import {
   fecDocumentUrl,
   isCitable,
   serializeVoteDonorEvidence,
   type CitedContribution,
+  type StoredEntityDecision,
   type StoredNameMatch,
   type VoteDonorEvidence,
 } from "./evidence";
-import { bandAtLeast, matchNameInText, matchNames, type MatchBand } from "./name-match";
+import { bandAtLeast, matchNameInText, matchNames, MATCH_BANDS, type MatchBand } from "./name-match";
 
 /**
  * Donor-to-vote correlation — the rule that raises `vote_donor_conflict`.
@@ -63,6 +70,83 @@ import { bandAtLeast, matchNameInText, matchNames, type MatchBand } from "./name
  */
 export const MINIMUM_MATCH_BAND: MatchBand = "moderate";
 
+/**
+ * How a band reads to somebody who has not read the matcher's source.
+ *
+ * The same three strings the public officials page uses. Neither surface is
+ * allowed to invent its own vocabulary for the same stored band, and neither
+ * word may become "confirmed", "verified" or "identified": `strong` is the
+ * ceiling of the method, and the ceiling of the method is still a name.
+ */
+export const MATCH_BAND_LABEL: Record<MatchBand, string> = {
+  weak: "Weak name match",
+  moderate: "Possible name match",
+  strong: "Close name match",
+};
+
+/**
+ * The threshold, as a stated policy rather than as a `continue` in a loop.
+ *
+ * Until this constant existed, the decision that a `weak` match is dropped lived
+ * only in the comparison below. It was the right decision and it was
+ * unfindable — an operator could not read it, an auditor could not cite it, and
+ * nobody looking at the review queue could tell whether an absence there meant
+ * "nothing matched" or "something matched and we decided it did not count".
+ *
+ * The decision, stated:
+ *
+ * **A `weak` name match is not raised as a finding.** A weak match is a single
+ * common term shared between a filed donor name and the text of an agenda item —
+ * one "Anderson", one "Ridge". Across a jurisdiction's full donor list and full
+ * agenda history that describes an enormous number of pairs, essentially all of
+ * them coincidences, and raising them would bury the findings that are worth an
+ * operator's attention under the ones that are not. A queue nobody can finish is
+ * a queue nobody reads.
+ *
+ * **The drop is not recorded per pair, and that is also a decision.** A row for
+ * every considered-and-dropped coincidence would be a table growing with the
+ * product of donors and agenda items that answers no question anyone has.
+ * `correlateVoteDonorsWithDiagnostics` returns the tally so the rule can be
+ * tested and reported on; nothing writes it down.
+ *
+ * This object is served to the operator console, which renders `statement`
+ * verbatim — so the policy on the screen and the policy in the code cannot
+ * drift into disagreeing.
+ */
+export interface MatchPolicy {
+  minimumBand: MatchBand;
+  bands: ReadonlyArray<{ band: MatchBand; label: string }>;
+  statement: string;
+}
+
+export const MATCH_POLICY: MatchPolicy = {
+  minimumBand: MINIMUM_MATCH_BAND,
+  bands: MATCH_BANDS.map((band) => ({ band, label: MATCH_BAND_LABEL[band] })),
+  statement:
+    "A finding here rests on a name match between a filed donor name and text in an " +
+    "agenda item. A name match is not a verified identity, and no band means it is: " +
+    "there is no band above “close”. A weak match — a single common term, shared by " +
+    "chance more often than not — is dropped at detection and never enters this queue, " +
+    "because raising every coincidence would bury the findings worth reading. Nothing " +
+    "below the “possible” band appears on this screen.",
+};
+
+/** Why a candidate pair was considered and not raised. */
+export type WithheldReason = "below_minimum_band" | "operator_judged_different_entity";
+
+/**
+ * A pair the rule looked at and did not raise.
+ *
+ * Counted, never stored — see `MATCH_POLICY`. The shape carries no donor name
+ * and no agenda text on purpose: a diagnostic is a tally of what the rule did,
+ * not a shadow copy of the records it did it to.
+ */
+export interface WithheldMatch {
+  reason: WithheldReason;
+  band: MatchBand;
+  count: number;
+}
+
 export interface CorrelationVote {
   vote_id: string;
   member_id: string;
@@ -96,6 +180,12 @@ export interface CorrelationInput {
    * jurisdiction's own name, which appears in most of its own agenda items.
    */
   extraGenericTerms?: readonly string[];
+  /**
+   * What an operator has already decided about donor/subject pairs, keyed by
+   * `pairKey`. Passed in rather than read, so the rule stays a pure function
+   * over rows and the uniform-treatment test can still compare outputs directly.
+   */
+  entityDecisions?: ReadonlyMap<string, OperatorEntityDecision>;
 }
 
 export interface VoteDonorDraft {
@@ -157,9 +247,41 @@ export function describeFinding(evidence: VoteDonorEvidence): string {
  * fixture.
  */
 export function correlateVoteDonors(input: CorrelationInput): VoteDonorDraft[] {
-  const citable = input.contributions.filter(isCitable);
-  if (citable.length === 0) return [];
+  return correlateVoteDonorsWithDiagnostics(input).drafts;
+}
 
+export interface CorrelationResult {
+  drafts: VoteDonorDraft[];
+  /**
+   * What was considered and not raised, tallied by reason and band. Nothing
+   * persists this; see `MATCH_POLICY` for why.
+   */
+  withheld: WithheldMatch[];
+}
+
+/**
+ * The rule, plus an account of what it declined to raise.
+ *
+ * `correlateVoteDonors` is the thin wrapper over this, so every existing caller
+ * keeps the shape it had. The diagnostics exist so that the threshold is a
+ * testable, reportable policy rather than an invisible one — see `MATCH_POLICY`.
+ */
+export function correlateVoteDonorsWithDiagnostics(input: CorrelationInput): CorrelationResult {
+  const withheldTally = new Map<string, WithheldMatch>();
+  function withhold(reason: WithheldReason, band: MatchBand): void {
+    const key = `${reason}:${band}`;
+    const current = withheldTally.get(key);
+    if (current) current.count += 1;
+    else withheldTally.set(key, { reason, band, count: 1 });
+  }
+  function result(drafts: VoteDonorDraft[]): CorrelationResult {
+    return { drafts, withheld: [...withheldTally.values()] };
+  }
+
+  const citable = input.contributions.filter(isCitable);
+  if (citable.length === 0) return result([]);
+
+  const decisions = input.entityDecisions;
   const drafts: VoteDonorDraft[] = [];
 
   for (const vote of input.votes) {
@@ -173,19 +295,48 @@ export function correlateVoteDonors(input: CorrelationInput): VoteDonorDraft[] {
     /** Grouped by donor, so one donor's three gifts are one finding, not three. */
     const byDonor = new Map<
       string,
-      { donorName: string; donorMatch: StoredNameMatch; recipientMatch: StoredNameMatch; rows: CorrelationContribution[] }
+      {
+        donorName: string;
+        donorMatch: StoredNameMatch;
+        recipientMatch: StoredNameMatch;
+        entityDecision: StoredEntityDecision | null;
+        rows: CorrelationContribution[];
+      }
     >();
 
     for (const contribution of citable) {
       const recipientMatch = matchNames(vote.member_name, contribution.recipient_name, {
         extraGenericTerms: input.extraGenericTerms,
       });
-      if (!recipientMatch || !bandAtLeast(recipientMatch.band, MINIMUM_MATCH_BAND)) continue;
+      if (!recipientMatch) continue;
+      if (!bandAtLeast(recipientMatch.band, MINIMUM_MATCH_BAND)) {
+        withhold("below_minimum_band", recipientMatch.band);
+        continue;
+      }
 
       const donorMatch = matchNameInText(contribution.donor_name, itemText, {
         extraGenericTerms: input.extraGenericTerms,
       });
-      if (!donorMatch || !bandAtLeast(donorMatch.band, MINIMUM_MATCH_BAND)) continue;
+      if (!donorMatch) continue;
+      // The threshold. `MATCH_POLICY` states what this is and why, and the
+      // console renders that statement — so this comparison is the enforcement
+      // of a written policy rather than the policy itself.
+      if (!bandAtLeast(donorMatch.band, MINIMUM_MATCH_BAND)) {
+        withhold("below_minimum_band", donorMatch.band);
+        continue;
+      }
+
+      // What an operator already decided about this pair. `different_entity`
+      // means a person looked and said the names denote different things;
+      // raising it again would be asking them the same question after they
+      // answered it. `same_entity` changes nothing about whether the finding is
+      // raised or held — it travels with it as context for the next reader.
+      const pair = pairFor(contribution.donor_name, donorMatch.matchedTerms);
+      const decided = pair === null ? undefined : decisions?.get(pairKey(pair));
+      if (decided?.decision === "different_entity") {
+        withhold("operator_judged_different_entity", donorMatch.band);
+        continue;
+      }
 
       const key = donorMatch.matchedTerms.join(" ");
       const bucket = byDonor.get(key);
@@ -196,6 +347,17 @@ export function correlateVoteDonors(input: CorrelationInput): VoteDonorDraft[] {
           donorName: contribution.donor_name,
           donorMatch,
           recipientMatch,
+          entityDecision:
+            decided?.decision === "same_entity"
+              ? {
+                  decision: "same_entity",
+                  donorNameFiled: decided.donorNameFiled,
+                  subjectTerms: decided.subjectTerms,
+                  reason: decided.reason,
+                  operatorEmail: decided.operatorEmail,
+                  decidedAt: decided.decidedAt,
+                }
+              : null,
           rows: [contribution],
         });
       }
@@ -221,6 +383,7 @@ export function correlateVoteDonors(input: CorrelationInput): VoteDonorDraft[] {
         recipientMatch: bucket.recipientMatch,
         contributions,
         coverageNote: FEDERAL_ONLY_CAVEAT,
+        operatorEntityDecision: bucket.entityDecision,
       };
 
       drafts.push({
@@ -236,7 +399,7 @@ export function correlateVoteDonors(input: CorrelationInput): VoteDonorDraft[] {
     }
   }
 
-  return drafts;
+  return result(drafts);
 }
 
 /**
@@ -293,6 +456,11 @@ export async function checkVoteDonorConflict(
 
   if (contributions.length === 0) return [];
 
+  // Read once per meeting, not once per candidate pair. The table holds one row
+  // per judgement a human has actually made — dozens, not millions — and a sweep
+  // compares thousands of pairs against it.
+  const entityDecisions = await loadEntityDecisions(db);
+
   return correlateVoteDonors({
     meetingId: meeting.id,
     votes,
@@ -302,6 +470,7 @@ export async function checkVoteDonorConflict(
       contribution_date: isoDate(row.contribution_date),
     })),
     extraGenericTerms: [jurisdiction.name],
+    entityDecisions,
   });
 }
 
