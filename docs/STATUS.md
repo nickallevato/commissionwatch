@@ -880,6 +880,69 @@ two hours, timing out every night and looking like a broken scraper.
 Candidates' home addresses, personal emails and telephone numbers are in these filings; they are
 **stored and never surfaced**, and publishing them is an operator decision, not a default.
 
+### The donor PII was removed on 2026-08-10, hours after it landed
+
+**Superseding the paragraph immediately above, for donors.** That paragraph's reasoning — *stored
+and never surfaced, publishing is a separate decision* — conflated **what we may publish** with
+**what we may hold**, and only the first was ever in doubt. The operator's ruling is flat: *we must
+not ingest PII.* Being entitled to read a donor's home address off a public filing is not the same
+as being right to keep a copy of it in a database and a git repository this project operates.
+
+**Migration 043 dropped four columns**, and dropped rather than merely stopped writing them,
+because a nullable column left behind is an invitation the next writer will not think to refuse:
+
+| Column | Table |
+|---|---|
+| `entity_address` | `cf_transactions` — a donor's street address |
+| `occupation` | `cf_transactions` — a donor's occupation |
+| `employer` | `cf_transactions` — a donor's employer |
+| `residence_city` | `cf_filers` — a candidate's residence city, derived from their home address |
+
+The adapter's `CersLineItem` no longer parses the three CERS fields at all, so the values do not
+exist to be stored; `campaign-finance.ts` no longer maps them; and `cityFromAddress`, whose only
+purpose was to split a candidate's home address into `residence_city`, is gone with it.
+
+**Donor name, transaction date and amount stay, deliberately.** They are the disclosure.
+`vote_donor_conflict` exists to say a named donor gave money before a named vote and can say
+nothing without all three — removing them would not be a privacy measure, it would be the end of
+the feature. **No detector, view or export read any of the four dropped fields**, which is what made
+dropping them free: the bulk export has no `cf_` dataset at all, and `DonorOverlay` renders
+`donorName` and never an address.
+
+**The recorded fixtures were scrubbed.** 52 real values across four
+`post-financeRepDetailList-*.json` files — 22 street addresses, 15 occupations, 15 employers —
+replaced with clearly synthetic ones, preserving row counts, key order, field names, types and
+populated-ness so the parser tests stay meaningful. `record.ts` now scrubs on the way to disk, so a
+re-record cannot reintroduce them, and `PROVENANCE.md` carries a prominent notice so nobody
+"restores" the fixture believing it corrupt. *Seed data never names a real person* is an existing
+invariant; this is that rule applied to fixtures.
+
+**`test/finance-pii-guard.test.ts` is the guard**, and it was verified negatively — each assertion
+was made to fail by reintroducing a real violation, then restored. It checks the live schema after
+`migrate:latest` (so a *later* migration re-adding a column is caught, not just this one), refuses
+any column on the finance tables whose name suggests PII, scans the fixtures for unscrubbed values
+and for address-shaped strings in *any* field, and asserts the donor name/date/amount are still
+there so a future "scrub" cannot gut the disclosure instead.
+
+**Nothing had reached production and this did not need containment.** All three sources are
+`enabled=false`, production holds zero `cf_` rows, the public bulk export carries no `cf_` dataset,
+and the `artifacts` export carries only `sha256`, `source_url` and `byte_size` — never bytes. The
+two local scratch databases holding the swept rows were dropped.
+
+**Two things this deliberately did not do, both operator decisions:**
+
+1. **Git history was not rewritten.** The unscrubbed fixtures are already on `origin/main`. Whether
+   to rewrite published history is the operator's call and is *pending*; this work is the forward
+   fix only. Nothing was force-pushed and no published commit was rebased.
+2. **Migration 050's `campaign_contributions` still has `donor_employer`, `donor_occupation` and
+   `donor_city`.** Same shape of PII on the OpenFEC path. They are outside the 041–049 CERS block
+   this change was scoped to, and they are written `NULL` today — `services/finance/ingest.ts` no
+   longer carries the fields on its row type at all, so the compiler now refuses a writer that
+   tries. Dropping the columns is a separate call. **Also still open:** the roster fixture
+   `get-listCandidateResults-*.json` retains candidates' `personDTO` — home addresses, personal
+   email addresses, home and mobile telephone numbers. Nothing reads it any more, but it is still
+   bytes in a public repository.
+
 The source stays **disabled**. Migration 042 rewrites 037's `disabled_reason`, which said "No
 adapter has been written for this source yet" and is published verbatim on the **public** status
 page — leaving it would put a false statement about our own ingestion on the page whose purpose is
