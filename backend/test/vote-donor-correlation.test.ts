@@ -1,6 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
@@ -433,8 +434,13 @@ describe("the rule inside the detection pipeline", () => {
 
 /* ------------------------------------------------------------------------- */
 
+/**
+ * `__dirname`, not `import.meta.url`: tsx transpiles this suite to CommonJS,
+ * where `import.meta` is not available to the type checker. See
+ * `migrations-selfcontained.test.ts`, which learned the same thing.
+ */
 function readRuleSource(): string {
-  return readFileSync(new URL("../src/services/finance/correlation.ts", import.meta.url), "utf8");
+  return readFileSync(join(__dirname, "..", "src", "services", "finance", "correlation.ts"), "utf8");
 }
 
 function stripComments(source: string): string {
