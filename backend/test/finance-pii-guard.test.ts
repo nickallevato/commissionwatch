@@ -66,7 +66,33 @@ const FINANCE_TABLES = [
   "cf_reports",
   "campaign_contributions",
   "campaign_expenditures",
+  // Migration 070. It stores a donor's filed name and the terms that matched,
+  // because an operator judging whether two names denote the same entity has to
+  // see the names. Everything else about a donor is PII and none of it belongs
+  // here, so the column-name scan below covers this table too — the temptation
+  // to add "employer" as a disambiguating hint is exactly what it exists to
+  // catch.
+  "entity_resolution_decisions",
 ];
+
+/**
+ * Columns the name scan is allowed to skip, one at a time, each named in full.
+ *
+ * There is exactly one, and it is the operator's own email on the table that
+ * records **their** judgement — the audit actor, snapshotted the same way
+ * `record_corrections.operator_email` and `approval_requests.reviewer_email`
+ * snapshot it everywhere else in this project. The operator is this system's
+ * user, with an account in `operators`; they are not a member of the public
+ * whose data was ingested from a filing, which is what the standing directive
+ * is about.
+ *
+ * Deliberately a set of `table.column` strings rather than a pattern. Exempting
+ * `/operator_email/` would also exempt an `operator_email` somebody later added
+ * to `campaign_contributions`, and exempting `/email/` would exempt a
+ * `donor_email` outright. An exemption that can only ever cover the one column
+ * it names cannot quietly widen.
+ */
+const EXEMPT_COLUMNS = new Set(["entity_resolution_decisions.operator_email"]);
 
 const FIXTURE_DIR = join(__dirname, "fixtures", "mt-cers");
 
@@ -317,7 +343,9 @@ describe("campaign-finance schema carries no donor PII", () => {
     for (const table of FINANCE_TABLES) {
       const info = await db(table).columnInfo();
       for (const column of Object.keys(info)) {
-        if (suspicious.test(column)) offenders.push(`${table}.${column}`);
+        if (!suspicious.test(column)) continue;
+        if (EXEMPT_COLUMNS.has(`${table}.${column}`)) continue;
+        offenders.push(`${table}.${column}`);
       }
     }
     expect(offenders).toEqual([]);

@@ -40,6 +40,27 @@ export interface StoredNameMatch {
   discardedTerms: string[];
 }
 
+/**
+ * An operator's judgement about whether the donor and the agenda subject are the
+ * same entity, carried on the finding it was applied to.
+ *
+ * Stored rather than joined, for `evidence.ts`'s standing reason: a finding must
+ * keep meaning what it meant when a human read it. If the judgement is later
+ * revised, the finding raised under the old one still says which one it was
+ * raised under, and `entity_resolution_decisions` says what the answer is now.
+ *
+ * Only `same_entity` ever appears here. A `different_entity` judgement suppresses
+ * the finding, so there is no finding for it to be attached to.
+ */
+export interface StoredEntityDecision {
+  decision: "same_entity";
+  donorNameFiled: string;
+  subjectTerms: string;
+  reason: string;
+  operatorEmail: string | null;
+  decidedAt: string;
+}
+
 export interface CitedContribution {
   contributionId: string;
   sourceSystem: string;
@@ -74,6 +95,12 @@ export interface VoteDonorEvidence {
   contributions: CitedContribution[];
   /** Mirrors `coverage.ts`; stored so an archived finding keeps its caveat. */
   coverageNote: string;
+  /**
+   * The operator judgement in force when this finding was raised, or `null` if
+   * the pair had never been judged. Never an assertion of identity: it records
+   * that a person looked and said what they thought.
+   */
+  operatorEntityDecision: StoredEntityDecision | null;
 }
 
 /**
@@ -122,6 +149,30 @@ function parseMatch(value: unknown): StoredNameMatch | null {
     matchedTerms: asStringArray(row.matchedTerms),
     unmatchedTerms: asStringArray(row.unmatchedTerms),
     discardedTerms: asStringArray(row.discardedTerms),
+  };
+}
+
+/**
+ * A stored judgement, or `null`.
+ *
+ * `null` for anything that is not a complete `same_entity` record — including a
+ * stored `different_entity`, which cannot legitimately appear on a raised
+ * finding and is not rendered as though it could.
+ */
+function parseEntityDecision(value: unknown): StoredEntityDecision | null {
+  if (typeof value !== "object" || value === null) return null;
+  const row = value as Record<string, unknown>;
+  if (row.decision !== "same_entity") return null;
+  const reason = asString(row.reason);
+  const decidedAt = asString(row.decidedAt);
+  if (!reason || !decidedAt) return null;
+  return {
+    decision: "same_entity",
+    donorNameFiled: asString(row.donorNameFiled) ?? "",
+    subjectTerms: asString(row.subjectTerms) ?? "",
+    reason,
+    operatorEmail: asString(row.operatorEmail),
+    decidedAt,
   };
 }
 
@@ -211,5 +262,6 @@ export function parseVoteDonorEvidence(value: unknown): VoteDonorEvidence | null
     recipientMatch,
     contributions,
     coverageNote: asString(row.coverageNote) ?? "",
+    operatorEntityDecision: parseEntityDecision(row.operatorEntityDecision),
   };
 }
