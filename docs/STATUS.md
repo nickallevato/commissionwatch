@@ -1,7 +1,8 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-09, after landing P1 (ingestion scheduling), P3 (backups) and P4
-> (the Bozeman Granicus adapter).
+> Last updated: 2026-08-10, after landing P2 (the Pressroom console) and the deploy healthcheck
+> fix. Previously 2026-08-09, after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman
+> Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
 
 ## Archive salvage — what has landed
@@ -37,6 +38,54 @@ them the admin console exists and cannot be entered, which is the correct defaul
 
 `ADMIN_ORIGINS` gates credentialed requests to `/api/admin`. The public read-only API stays
 open to any origin — that is deliberate, and open data is the point.
+
+## P2 — the Pressroom console has landed
+
+Working from `docs/superpowers/specs/2026-08-09-phase-2-design.md` § P2 and
+`docs/superpowers/plans/2026-08-10-pressroom-console.md`. Migrations 030–033.
+
+Three operator screens behind `requireOperator`: `/admin/sources`, `/admin/runs/:id`,
+`/admin/meetings/:id`, served by `/api/admin/pressroom/*`.
+
+**`ingested` and `published` are now different states.** `meetings.published_at` exists, and a
+meeting with `published_at IS NULL` **does not appear in any public API response** — ten public
+paths take a meeting id and a test walks all ten. Existing rows were backfilled to `created_at`,
+so nothing that was public stopped being public. **Rows ingested from here on default to NULL**:
+a sweep produces a candidate, an operator produces a publication, and the seed sets the column
+explicitly because seed data demonstrates the public record. An unpublished meeting 404s rather
+than 403s, so nobody can enumerate what has been ingested and withheld.
+
+**Corrections are append-only, in the database.** `record_corrections` records who, when, field,
+old, new and why, and a trigger raises on `UPDATE` and on `DELETE`. **The artifact is never
+mutated** — a test hashes the `artifacts` row either side of a correction. The table has no
+foreign key to its target and none to `operators`: a cascade from `meetings` would collide with
+the trigger on every `pretest` seed, and `ON DELETE SET NULL` is itself an `UPDATE` the trigger
+forbids, so the actor is snapshotted as `operator_email`. **A consequence: tests cannot clean up
+`record_corrections`.** Rows accumulate in the test database, keyed on ids each run generates.
+That is intended, not a leak.
+
+**Confidence is per field.** `agenda_items.field_confidence` is a jsonb map of
+`{ level, reason }` per column, written by the extractor: a title truncated by the
+255-character column, an item with no section heading above it, a description cut at its limit.
+Seven good items and one mangled one is not a low-confidence meeting.
+
+**Silence is watched, and zero is a failure state.** A source past its own
+`expected_interval_hours` since its last success reads *Suspect*. Lifetime ingested records is
+computed from every run's `counts` and renders in the failure colour at 0. Disabled sources stay
+listed with `disabled_reason`, seeded from the adapter's own notes — the Akamai block on
+`bozemanmt.gov` is now in the console rather than in a code comment.
+
+**Re-parse without re-fetching** opens a *new* `ingestion_runs` row and queues one `parse` job
+per stored artifact. It cannot reach the network: parse targets carry a `sha256`, the queue
+rejects a post-fetch target carrying a `url`, and the parse stage has no path back to a URL. It
+is a separate action from "sweep now".
+
+The two action routes need the live queue and scheduler, handed over by
+`registerPressroomStack` from `index.ts`. **In a process where ingestion is not running they
+answer 503**, which is why the test suite sees 503 rather than a constructed MinIO client.
+
+Counts after P2: backend **660 tests / 168 suites**, frontend **180 / 25**, both green, zero
+lint errors.
 
 ## Live state
 
@@ -213,13 +262,31 @@ Ordered by how much each blocks the product being real.
    **Outstanding:** `BACKUP_S3_URI` is unset, so an archive currently never leaves the instance —
    that is a copy, not a backup. Setting it needs a bucket, which costs money and is the operator's
    call. The cron entry also still has to be installed on the host.
-9. **No monitoring.** Nothing alerts if the site goes down or ingestion silently stops.
+9. **No monitoring.** Nothing alerts if the site goes down or ingestion silently stops. P2's
+   console makes a stalled scraper *visible to an operator who looks*; it does not page anyone.
 10. ~~**No admin authentication.**~~ Closed 2026-08-09 by A1. One operator class, `scrypt` from
     `node:crypto`, revocable server-side sessions in an httpOnly cookie, no public registration.
     The review queue is no longer blocked on it.
 
 ## Known defects and debt
 
+- **PRODUCTION IS DOWN as of 2026-08-09.** Deployed sha `1fb246f`. The frontend serves; the
+  backend does not — `/api/health`, `/api/version` and `/api/meetings` all return 502. The host,
+  the workflow log and ECR are not reachable from this repo, so the cause is not diagnosed here.
+  Everything reproducible locally is green: migrations apply 1→33 on a fresh database, the image
+  builds, the backend boots with only `DATABASE_URL`, and it uses 115 MB against a 512 MB limit.
+  **Nothing has been pushed since**, deliberately — every push triggers a deploy onto the broken
+  stack.
+- ~~**A crash-looping backend deployed as a success.**~~ Fixed 2026-08-10, and it is why the
+  incident above went out green. `docker compose up -d --wait` treats a service with **no
+  healthcheck** as ready the instant its process starts; `backend` had none while `web`, `db` and
+  `minio` all did, `web` depended on it with `condition: service_started`, and
+  `restart: unless-stopped` restarted the dead container forever. The deploy script's
+  version-skew check (24/25/26) never ran, because by then the deploy believed it had won.
+  `backend` now has a healthcheck on its own `/api/health` — **127.0.0.1, never `localhost`** —
+  `web` waits on `service_healthy`, the entrypoint names a migration failure instead of exiting
+  silently, and `deploy/test-deploy-aws-ssm.sh` asserts every service in the deployed compose
+  file declares a healthcheck. 53 assertions before, **61** now.
 - **CI `deploy-aws` unverified.** The SSM round trip has not yet completed once from a runner. See above.
 - ~~**Deploy pattern is push-based SSH**~~ — resolved 2026-08-06. No SSH key in CI, no rsync; secrets live in Parameter Store and are fetched by the host. Still push-based; a pull-based rollout watching ECR remains the better end state but is not blocking anything.
 - **The instance-role grant for Parameter Store is outstanding**, so deploys run degraded. Not a defect in this repo — it needs whoever administers `your-org/platform-aws`. `deploy/README.md` §3 has the exact policy.
@@ -264,7 +331,9 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
 5. ~~**Bozeman Granicus adapter**~~, landed 2026-08-09 and registered disabled. The
    **public-records-request page** that goes with it is still outstanding — it is P7, and the
    vendor-robots exception is written on the promise that the statutory route is offered alongside.
-6. **Status page** reading `ingestion_runs`, so a silently stalled scraper is visible rather than reading as a quiet month at City Hall.
+6. ~~**Status page** reading `ingestion_runs`~~ — closed 2026-08-10 by P2 for the *operator*.
+   `/admin/sources` reads the runs and marks a source past its expected interval as Suspect. A
+   **public** status page is still outstanding.
 7. Then W5 correlation, W6 funding network, W7 delivery channels, and the launch-readiness work.
 
 ## For future agents
