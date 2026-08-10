@@ -1,0 +1,1015 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8"><![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9"><![endif]-->
+<!--[if gt IE 8]><!--><html class="no-js"><!--<![endif]-->
+    
+
+
+
+
+
+
+
+
+   
+
+   
+
+   
+
+   
+
+   
+
+   
+
+   
+      
+   
+
+
+
+    <head>
+
+        
+
+        
+        
+        
+        
+
+        
+        
+            
+            
+            
+            
+            
+            
+            
+        
+
+        
+
+        
+        
+        
+
+        
+        
+        
+
+        
+
+        
+        
+        
+
+        
+        
+        
+
+        	
+
+        
+        
+        
+        
+        
+        
+        
+        
+
+        
+        
+        
+
+        
+        
+
+        
+        
+        
+        
+        
+        
+
+        <meta charset="utf-8" />
+        <meta name="description" content="" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        
+        
+        
+
+        <title>Campaign Electronic Reporting System (publicReportList)</title>
+
+        
+        
+        
+        
+
+        <!--[if IE 7]>
+          <link rel="stylesheet" href="/CampaignTracker/assets/css/font-awesome-ie7.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <![endif]-->
+
+        <!--[if lte IE 8]>
+            <link rel="stylesheet" href="/CampaignTracker/assets/css/ace-ie.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <![endif]-->
+
+        <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+
+        <!--[if lt IE 9]>
+            <script src="/CampaignTracker/assets/js/html5shiv.js" type="text/javascript"></script>
+            <script src="/CampaignTracker/assets/js/respond.min.js" type="text/javascript"></script>
+        <![endif]-->
+
+        <!-- basic styles -->
+
+        <link href="/CampaignTracker/assets/css/bootstrap.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/font-awesome.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/ui.jqgrid.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/jquery-ui-1.10.3.full.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/jquery.gritter.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/coppPrint.css" rel="stylesheet" type="text/css" media="print"/>
+
+        <!-- page specific plugin styles -->
+
+        <!-- fonts -->
+        <link href="/CampaignTracker/assets/css/ace-fonts.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+
+        <!-- ace styles -->		
+        <link href="/CampaignTracker/assets/css/ace.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/ace-rtl.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/ace-skins.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/chosen.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/datepicker.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+
+        <!-- ace settings handler -->
+        <script src="/CampaignTracker/assets/js/ace-extra.min.js" type="text/javascript"></script>
+        <style>
+            p {
+                -webkit-font-smoothing: antialiased;
+            }
+        </style>
+    </head>
+
+    <body class="navbar-fixed breadcrumbs-fixed">
+
+        <div class="navbar navbar-fixed-top" id="navbar">
+            <script type="text/javascript">
+                try {
+                    ace.settings.check('navbar', 'fixed')
+                } catch (e) {
+                }
+            </script>
+
+            <div class="navbar-container omit-print" id="navbar-container">
+                <div class="navbar-header pull-left">
+                    <a href="#" class="navbar-brand">
+                        <!-- small><i class="icon-leaf"></i>Ace Admin</small -->
+                        <small><img src="/CampaignTracker/assets/images/app-logo.jpg"  height="26px" alt="logo" />&nbsp;&nbsp;Campaign Electronic Reporting System</small>						
+                    </a><!-- /.brand -->
+                </div><!-- /.navbar-header -->
+
+                <div class="navbar-header pull-right" role="navigation">
+                    <ul class="nav ace-nav">
+
+                        
+                        	
+                            <li><a href="/CampaignTracker/app/welcome"> Sign In
+                                    <i class="icon-signin"></i>
+                                </a></li>
+                            
+
+                    </ul><!-- /.ace-nav -->
+                </div><!-- /.navbar-header -->
+            </div><!-- /.container -->
+        </div>
+
+        <div class="main-container" id="main-container">
+            <script type="text/javascript">
+                try {
+                    ace.settings.check('main-container', 'fixed')
+                } catch (e) {
+                }
+            </script>
+
+            <div class="main-container-inner">
+                <a class="menu-toggler" id="menu-toggler" href="#">
+                    <span class="menu-text"></span>
+                </a>
+
+                <div class="sidebar sidebar-fixed omit-print" id="sidebar">
+                    <script type="text/javascript">
+                        try {
+                            ace.settings.check('sidebar', 'fixed')
+                        } catch (e) {
+                        }
+                    </script>
+
+                    <ul class="nav nav-list">
+                        <li>
+                            <a href="/CampaignTracker/">
+                                <i class="icon-dashboard"></i>
+                                <span class="menu-text"> Dashboard </span>
+                            </a>
+                        </li>
+
+                        <li>
+                            <a href="#" class="dropdown-toggle">
+                                <i class="icon-edit"></i>
+                                <span class="menu-text"> Candidate </span>
+
+                                <b class="arrow icon-angle-down"></b>
+                            </a>
+                            <ul class="submenu">
+                                <li>
+                                    <a href="/CampaignTracker/public/search/candidateSearch">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Candidate
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="/CampaignTracker/public/search/searchCandidateContributions">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Contributions
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="/CampaignTracker/public/search/searchCandidateExpenditures">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Expenditures
+                                    </a>
+                                </li>
+
+                            </ul>
+                        </li>
+
+                        <li>
+                            <a href="#" class="dropdown-toggle">
+                                <i class="icon-edit"></i>
+                                <span class="menu-text"> Committee </span>
+
+                                <b class="arrow icon-angle-down"></b>
+                            </a>
+                            <ul class="submenu">
+                                <li>
+                                    <a href="/CampaignTracker/public/search/committeeSearch">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Committee
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="/CampaignTracker/public/search/searchCommitteeContributions">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Contributions
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="/CampaignTracker/public/search/searchCommitteeExpenditures">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Expenditures
+                                    </a>
+                                </li>
+
+                            </ul>
+                        </li>
+
+                        
+
+                        	
+
+                        <li>
+                            <a href="#" class="dropdown-toggle">
+                                <img src="/CampaignTracker/assets/images/stateSeal.gif"  height="26px" alt="logo" />
+                                <span class="menu-text"> State of Montana </span>
+
+                                <b class="arrow icon-angle-down"></b>
+                            </a>
+
+                            <ul class="submenu">
+                                <li><a href="http://mt.gov/services/" target="_blank">Online Services</a></li>
+                                <li><a href="http://politicalpractices.mt.gov/default.mcpx" target="_blank">Commissioner of Political Practices</a></li>
+                                <li><a
+                                        href="http://itsd.mt.gov/content/policy/policies/Statewide_Policy_Internet_Privacy_and_Security.pdf" target="_blank">Privacy
+                                        &amp; Security</a></li>
+                                <li><a
+                                        href="http://mt.gov/discover/disclaimer.mcpx#accessibility" target="_blank">Accessibility</a></li>
+                                <li><a href="http://politicalpractices.mt.gov/aboutus" target="_blank">Contact
+                                        Us</a></li>
+                                <li><a href="http://mt.gov/" target="_blank"> <img
+                                            src="/CampaignTracker/assets/images/mtgov.gif" height="26px"
+                                            alt="logo" />
+                                    </a></li>
+                            </ul>
+                        </li>
+
+                    </ul><!-- /.nav-list -->
+
+                    <div class="sidebar-collapse" id="sidebar-collapse">
+                        <i class="icon-double-angle-left" data-icon1="icon-double-angle-left" data-icon2="icon-double-angle-right"></i>
+                    </div>
+
+                    <script type="text/javascript">
+                        try {
+                            ace.settings.check('sidebar', 'collapsed')
+                        } catch (e) {
+                        }
+                    </script>
+                </div>
+
+                <div class="main-content">
+                    <div class="breadcrumbs breadcrumbs-fixed omit-print" id="breadcrumbs">
+                        <script type="text/javascript">
+                            try {
+                                ace.settings.check('breadcrumbs', 'fixed')
+                            } catch (e) {
+                            }
+                        </script>
+
+                        <ul class="breadcrumb">
+                            <li>
+                                <i class="icon-home home-icon"></i>
+                                <a href="/CampaignTracker/app/welcome">Welcome</a>
+                            </li>
+                        </ul><!-- .breadcrumb -->
+
+                        <div class="pull-right">
+                            <i class="icon-key key-icon"></i>
+                            
+                                
+                                    <a id="oktaHomeLink" href="https://mtgov.okta.com/" target="_blank">Okta Home</a>&nbsp;&nbsp;&nbsp;&nbsp;
+                                
+                                							
+                            		
+                            <i class="icon-shield shield-icon"></i>
+                            <a id="versionLink" href="#">Version</a>&nbsp;&nbsp;&nbsp;&nbsp;                                
+                        </div>
+                    </div>
+
+                    <div class="page-content">
+                        <div class="row">
+                            <div class="col-xs-12">
+                                <!-- PAGE CONTENT BEGINS -->
+                                
+		
+	
+    
+    
+	
+    
+    
+    
+	
+
+
+
+
+
+<div class="omit-print">
+
+	
+	
+		
+	
+
+</div>
+
+	
+	<div class="page-header">
+		<h1>
+            
+                Campaign Report List
+                
+            
+			<small>
+				<i class="icon-double-angle-right"></i>
+				Finance Reports for&nbsp;
+				
+                      candidate.
+                      
+                				
+			</small>
+		</h1>
+	</div><!-- /.page-header -->
+            
+  	<div class="space-4"></div>
+
+		<div id="headerAccordionId" class="accordion-style1 panel-group">
+			<div class="panel panel-default">
+				<div class="panel-heading">
+					<h4 class="panel-title">
+						<a class="accordion-toggle" data-toggle="collapse" data-parent="#headerAccordionId" href="#collapseHeader">
+							<i class="icon-angle-down bigger-110" data-icon-hide="icon-angle-down" data-icon-show="icon-angle-right"></i>
+							&nbsp;
+							
+                                Candidate
+                                
+                            
+                            &nbsp;Information
+						</a>
+					</h4>
+				</div>
+	
+				<div class="panel-collapse collapse in" id="collapseHeader">
+					<div class="panel-body">
+					
+					    
+					       
+		                        <div class="row">
+		                          <div class="col-sm-6">
+		                              <h5 class="col-sm-5 control-label no-padding-left blue">Candidate Full Name:</h5>
+		                              <p class="form-control-static">Brown, Zach  J</p>
+		                          </div>
+		                          <div class="col-sm-6">
+		                             <h5 class="col-sm-5 control-label no-padding-left blue">Election Year:</h5>
+		                              <p class="form-control-static">2026</p>
+		                          </div>
+		                       </div>
+		                        <div class="row">
+		                           <div class="col-sm-6">
+		                              <h5 class="col-sm-5 control-label no-padding-left blue">Mailing Address:</h5>
+		                              <p class="form-control-static">107 South 10th Avenue Bozeman, MT  59715</p>                                                           
+		                           </div>
+		                           <div class="col-sm-6">
+		                               <h5 class="col-sm-5 control-label no-padding-left blue">Office Sought:</h5>
+		                               <p class="form-control-static">County Commissioner</p>
+		                           </div>
+		                       </div>
+					       
+					       
+					  					
+					</div>
+				</div>
+			</div>
+		</div>
+		
+		<div class="space-4"></div>
+	
+		<div class="table-header">
+		    
+                Campaign
+                
+            &nbsp;Report List
+		</div>
+	
+		<div class="table-responsive">
+			<table id="financeReportsTable" class="table table-striped table-bordered table-hover">
+				<thead>
+					<tr>
+						<th class="center" width="5%">
+							<!-- label>
+								<input type="checkbox" class="ace" />
+								<span class="lbl"></span>
+							</label -->
+						</th>
+                        <th width="10%">From</th>
+                        <th width="10%">To</th>
+                        <th width="20%">Report Title</th>
+                        <th width="5%">Type</th>
+						<th width="10%">Status</th>
+					</tr>
+				</thead>
+				
+			</table>
+		</div>
+	
+	   <form id="publicReportForm" class="form-horizontal" action="/CampaignTracker/public/publicReportList" method="post">
+ 	   
+        <input id="committeeIdHidden" name="committeeId" type="hidden" value=""/>
+        <input id="candidateIdHidden" name="candidateId" type="hidden" value=""/>
+        <input id="reportIdHidden" name="reportId" type="hidden" value=""/>
+		<input id="searchPageHidden" name="searchPage" type="hidden" value=""/>
+		
+		<div class="clearfix form-actions">
+			<div class="col-xs-12">
+				<button id="viewReportButton" class="btn btn-xs btn-info" type="button">
+                    <i class="icon-ok bigger-110"></i>
+                    View Report
+                </button>
+				
+				&nbsp; &nbsp; &nbsp;
+				<button id="goBackButton" class="btn btn-xs btn-info" type="button">
+					<i class="icon-ok bigger-110"></i>
+					Go Back
+				</button>
+
+				&nbsp; &nbsp; &nbsp;
+				<button id="exitButton" class="btn btn-xs btn-info" type="button">
+					<i class="icon-ok bigger-110"></i>
+					Exit
+				</button>	
+
+                <span id="downloadSpan" style="display:none">
+                    &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+                    <select id="downloadScheduleId">
+                        <option value="">- Please Select -</option>
+                    </select>
+                    <button id="downloadButton" class="btn btn-xs btn-info" type="button">
+                        <i class="icon-ok bigger-110"></i>
+                        Download
+                    </button>
+                </span>
+
+			</div>
+		</div>
+	</form>
+		
+    <!-- page specific plugin scripts -->
+  	   
+    
+    
+	
+
+	<!--[if !IE]> -->
+
+		<script type="text/javascript">
+			window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-2.0.3.min.js'>"+"<"+"/script>");
+		</script>
+
+	<!-- <![endif]-->
+
+	<!--[if IE]>
+			<script type="text/javascript">
+			 window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-1.10.2.min.js'>"+"<"+"/script>");
+			</script>
+	<![endif]-->
+			
+	<script type="text/javascript">
+			if("ontouchend" in document) document.write("<script src='/CampaignTracker/assets/js/jquery.mobile.custom.min.js'>"+"<"+"/script>");
+	</script>
+		
+	<script type="text/javascript">
+		
+	jQuery(function($) {
+		$('body').css('cursor', 'auto');
+		
+			var oTable1 = $('#financeReportsTable').dataTable( {
+    			"bProcessing": true,
+    			"bStateSave": false,
+    			"bServerSide": true,
+    			"aLengthMenu" : [[5, 10, 25, 50, 75, 100],[5, 10, 25, 50, 75, 100]],
+    			"iDisplayLength" : 5,
+    			"sAjaxSource": "/CampaignTracker/public/publicReportList/listFinanceReports",
+    			
+				"aoColumns": [
+					{ "sClass": "center",
+					  "bSortable": false,
+					  "mData": "checked",
+					  "fnRender" : function(obj) {
+						  return '<label><input type="checkbox" class="ace" value="'+obj.aData.reportId+'\" /><span class="lbl"></span></label>';
+					  }					
+					},
+                    { "sTitle": "From", "mData": "fromDateStr" },
+                    { "sTitle": "To", "mData": "toDateStr" },
+                    { "sTitle": "Report Title", "mData": "formTypeDescr" },
+                    { "sTitle": "Type", "mData": "formTypeCode" },
+					{ "sTitle": "Status", "mData": "statusDescr" }
+				], 
+				
+				"fnServerData": function ( sSource, aoData, fnCallback ) {	
+					$.ajaxSetup({cache:false});
+					$.ajax( {
+		                "dataType": 'json',
+		                "type": "GET",
+		                "url": sSource,
+		                "data": aoData,
+		                "success": function (json) {
+		                	/* Callback processing */
+		                	fnCallback(json);
+		                }
+		            } );  
+				}
+			
+    		} );
+				
+			$('#financeReportsTable').on('click','tr', function(event) {			
+				$(oTable1.fnSettings().aoData).each(function (){
+					$(this.nTr).removeClass('row_selected');
+				});
+				$(this).toggleClass('row_selected');
+			});
+			
+			$('#financeReportsTable').on('click','td input:checkbox', function(){
+				var that = this;
+				
+				$(this).closest('table').find('tr > td:first-child input:checkbox').each(function(){
+					
+					if (this == that) {
+						this.checked = that.checked;
+					}
+					else {
+						this.checked = false;
+					}
+				});
+				  
+                $("#downloadSpan").toggle(false);
+                
+                var selVal = fnGetSelected( oTable1 );              
+                if (selVal != null && selVal.length > 0) { 
+                       $("#downloadScheduleId").html("");
+                       $('<option>').val("").text("- Please Select -").appendTo('#downloadScheduleId');
+                       
+                       if (selVal[0].formTypeCode == "C4") {
+                           $('<option>').val('C4A').text('C4 Contributions').appendTo('#downloadScheduleId');
+                           $('<option>').val('C4B').text('C4 Expenditures').appendTo('#downloadScheduleId');
+                       } else if (selVal[0].formTypeCode == "C5") {
+                           $('<option>').val('A').text('Contributions').appendTo('#downloadScheduleId');
+                           $('<option>').val('B').text('Expenditures').appendTo('#downloadScheduleId');
+                           $('<option>').val('C').text('Debts').appendTo('#downloadScheduleId');
+                       } else if (selVal[0].formTypeCode == "C6") {
+                           $('<option>').val('C6A').text('C6 Contributions').appendTo('#downloadScheduleId');
+                           $('<option>').val('C6B').text('C6 Expenditures').appendTo('#downloadScheduleId');
+                           $('<option>').val('C6C').text('C6 Debts').appendTo('#downloadScheduleId');
+                       }
+                       
+                       if ($("#downloadScheduleId > option").length > 1) {
+                           $("#downloadSpan").toggle(true); 
+                       }
+                }
+
+            });
+
+	         /* Add a click handler for view report */
+            $('#viewReportButton').on('click', function() {
+                var selVal = fnGetSelected( oTable1 );              
+                if (selVal != null && selVal.length > 0) {      
+                	$('body').css('cursor', 'wait');
+                	if ("gov.mt.copp.camtracs.persistence.dto.CandidateDTO@43310e6c" != null && "22048" > 0) {
+                		$('#candidateIdHidden').val('22048');
+                	} else {
+                		$('#committeeIdHidden').val('');
+                	}
+                	$('#searchPageHidden').val("public");
+                    $('#reportIdHidden').val(selVal[0].reportId);
+                    $('#publicReportForm').get(0).setAttribute('action','/CampaignTracker/public/viewFinanceReport/retrieveReport');
+                    $('#publicReportForm').submit();
+                    
+                } else {
+                    $.gritter.add({
+                        title: 'No Selection',
+                        text: 'You must select a report to view.',
+                        class_name: 'gritter-error gritter-center gritter-light'
+                    });
+                }
+            } );
+
+	        $('#goBackButton').on('click', function() {
+	        	$('body').css('cursor', 'wait');
+	            $('#publicReportForm').get(0).setAttribute('action','/CampaignTracker/public/publicReportList/goBack');
+	            $('#publicReportForm').submit();
+	        } );
+
+	        $('#exitButton').on('click', function() {
+	        	$('body').css('cursor', 'wait');
+                $('#publicReportForm').get(0).setAttribute('action','/CampaignTracker/public/publicReportList/exit');
+                $('#publicReportForm').submit();
+            } );
+
+			$('table th input:checkbox').on('click' , function(){
+				var that = this;
+				$(this).closest('table').find('tr > td:first-child input:checkbox')
+				.each(function(){
+					this.checked = that.checked;
+					$(this).closest('tr').toggleClass('selected');
+				});
+					
+			});			
+			
+			$('[data-rel="tooltip"]').tooltip({placement: tooltip_placement});
+			function tooltip_placement(context, source) {
+				var $source = $(source);
+				var $parent = $source.closest('table');
+				var off1 = $parent.offset();
+				var w1 = $parent.width();
+		
+				var off2 = $source.offset();
+				var w2 = $source.width();
+		
+				if( parseInt(off2.left) < parseInt(off1.left) + parseInt(w1 / 2) ) return 'right';
+				return 'left';
+			}
+			
+			$('#collapseInstructions').collapse('hide');
+			
+            /* Add a click handler for downloading a finance report */
+            $('#downloadButton').on('click', function() {
+                
+                var selVal = fnGetSelected( oTable1 );              
+                if (selVal != null && selVal.length > 0) {
+                    var scheduleTypeCode = $("#downloadScheduleId option:selected").val();
+                    
+                    if (scheduleTypeCode == "") {
+                        $.gritter.add({
+                            title: 'No Selection',
+                            text: 'You must select a schedule type to download.',
+                            class_name: 'gritter-error gritter-center gritter-light'
+                        });
+                    } else {
+                    	var fname = "";
+                    	
+                    	if ("gov.mt.copp.camtracs.persistence.dto.CandidateDTO@43310e6c" != null && "22048" > 0) {
+                            fname = "Brown, Zach  J";
+                        } else {                            
+                            fname = "";
+                        }
+                    	
+                        $('body').css('cursor', 'wait');
+                        $('#downloadButton').prop('disabled', true);
+                        
+                        $.post('/CampaignTracker/public/viewFinanceReport/prepareDownloadFileFromSearch',
+                                  {reportId: selVal[0].reportId,
+                                   scheduleCode: scheduleTypeCode,
+                                   fname: fname})
+                           .done(function(data){
+                               
+                                if (data.errorMsg != null) {
+                                    $.gritter.add({
+                                        title: 'File Error',
+                                        text: data.errorMsg,
+                                        class_name: 'gritter-error gritter-center gritter-light'
+                                    });
+                                }
+                                else if (data.fileName != null) {
+                                    window.location.href = "/CampaignTracker/public/viewFinanceReport/downloadFile"+"?fileName="+data.fileName;
+                                }
+
+                                $('#downloadButton').prop('disabled', false);
+                                $('body').css('cursor', 'auto');
+                           });
+                    }
+                } else {
+                    $.gritter.add({
+                        title: 'No Selection',
+                        text: 'You must select a report to download.',
+                        class_name: 'gritter-error gritter-center gritter-light'
+                    });
+                }
+                
+            });
+
+		});
+		
+		/* Get the rows which are currently selected */
+		function fnGetSelected( oTableLocal )
+		{
+			var aReturn = new Array();
+			var aTrs = oTableLocal.fnGetNodes();
+			
+			for ( var i=0 ; i<aTrs.length ; i++ )
+			{
+				var chkbox = $(aTrs[i]).find('td input:checkbox');
+				if (chkbox != null && chkbox.is(':checked'))
+				{
+					var rowData = oTableLocal.fnGetData(i);
+					
+					aReturn.push(rowData);
+				}
+			}
+			return aReturn;
+		}
+
+	</script>
+	
+
+                                <!-- PAGE CONTENT ENDS -->
+                            </div><!-- /.col -->
+                        </div><!-- /.row -->
+
+                    </div><!-- /.page-content -->
+                    <div id="row" class="omit-print">
+                        <div class="col-xs-12">		
+                            <div class="hr"></div>	
+                        </div>
+                        <div class="col-xs-12 col-xs-offset-4">		
+                            <ul class="nav nav-pills">
+                                <li><a href="http://mt.gov/services/">Online Services</a></li>
+                                <li><a href="http://politicalpractices.mt.gov/default.mcpx">Commissioner of Political Practices</a></li>
+                                <li><a
+                                        href="http://itsd.mt.gov/content/policy/policies/Statewide_Policy_Internet_Privacy_and_Security.pdf">Privacy
+                                        &amp; Security</a></li>
+                                <li><a
+                                        href="http://mt.gov/discover/disclaimer.mcpx#accessibility">Accessibility</a></li>
+                                <li><a href="http://politicalpractices.mt.gov/aboutus" target="_blank">Contact
+                                        Us</a></li>
+                                <li><a href="http://mt.gov/"> <img
+                                            src="/CampaignTracker/assets/images/mtgov.gif" height="26px"
+                                            alt="logo" />
+                                    </a></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                </div><!-- /.main-content -->
+                <!-- div class="ace-settings-container" id="ace-settings-container">
+                        <div class="btn btn-app btn-xs btn-warning ace-settings-btn" id="ace-settings-btn">
+                                <i class="icon-cog bigger-150"></i>
+                        </div>
+
+
+                        <div class="ace-settings-box" id="ace-settings-box">
+                                <div>
+                                        <div class="pull-left">
+                                                <select id="skin-colorpicker" class="hide">
+                                                        <option data-skin="default" value="#438EB9">#438EB9</option>
+                                                        <option data-skin="skin-1" value="#222A2D">#222A2D</option>
+                                                        <option data-skin="skin-2" value="#C6487E">#C6487E</option>
+                                                        <option data-skin="skin-3" value="#D0D0D0">#D0D0D0</option>
+                                                </select>
+                                        </div>
+                                        <span>&nbsp; Choose Skin</span>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-navbar" />
+                                        <label class="lbl" for="ace-settings-navbar"> Fixed Navbar</label>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-sidebar" />
+                                        <label class="lbl" for="ace-settings-sidebar"> Fixed Sidebar</label>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-breadcrumbs" />
+                                        <label class="lbl" for="ace-settings-breadcrumbs"> Fixed Breadcrumbs</label>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-rtl" />
+                                        <label class="lbl" for="ace-settings-rtl"> Right To Left (rtl)</label>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-add-container" />
+                                        <label class="lbl" for="ace-settings-add-container">
+                                                Inside
+                                                <b>.container</b>
+                                        </label>
+                                </div>
+                        </div>
+                </div --><!-- /#ace-settings-container -->
+
+            </div><!-- /.main-container-inner -->
+
+            <!-- / Page footer -->
+            <a href="#" id="btn-scroll-up" class="btn-scroll-up btn btn-sm btn-inverse">
+                <i class="icon-double-angle-up icon-only bigger-110"></i>
+            </a>
+        </div><!-- /.main-container -->
+
+        <!-- basic scripts -->
+
+        <!--[if !IE]> -->
+
+        <script type="text/javascript">
+            window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-2.0.3.min.js'>" + "<" + "/script>");
+        </script>
+
+        <!-- <![endif]-->
+
+        <!--[if IE]>
+                <script type="text/javascript">
+                 window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-1.10.2.min.js'>"+"<"+"/script>");
+                </script>
+        <![endif]-->
+
+        <script type="text/javascript">
+            if ("ontouchend" in document)
+                document.write("<script src='/CampaignTracker/assets/js/jquery.mobile.custom.min.js'>" + "<" + "/script>");
+        </script>
+        <script src="/CampaignTracker/assets/js/bootstrap.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/typeahead-bs2.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/chosen.jquery.min.js" type="text/javascript"></script>
+        <!-- page specific plugin scripts -->
+
+        <!-- ace scripts -->
+
+        <script src="/CampaignTracker/assets/js/ace-elements.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/ace.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery.dataTables.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery.dataTables.bootstrap.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jqGrid/jquery.jqGrid.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jqGrid/i18n/grid.locale-en.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery-ui-1.10.3.full.min.js" type="text/javascript"></script>
+
+        <script src="/CampaignTracker/assets/js/date-time/bootstrap-timepicker.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery.maskedinput.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/alphanum/jquery.alphanum.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery-fileupload/jquery.fileupload.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery-fileupload/vendor/jquery.ui.widget.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery-fileupload/jquery.iframe-transport.js" type="text/javascript"></script>
+
+        <script src="/CampaignTracker/assets/js/fuelux/fuelux.spinner.min.js" type="text/javascript"></script>
+
+        <script type="text/javascript">
+            jQuery(function ($) {
+
+                $('[data-rel=tooltip]').tooltip({container: 'body'});
+                $('.input-mask-phone').mask('(999) 999-9999');
+
+                /* Add a click handler for view committee */
+                $('#versionLink').on('click', function () {
+                            $.gritter.add({
+                                title: '<small>Campaign Electronic Reporting System</small>',
+                        text: '<b>Build:&nbsp;&nbsp;</b>2025.PROD.OKTA_b01<br/><b>System:&nbsp;&nbsp;</b>',
+                        class_name: 'gritter-success gritter-light'
+                    });
+                });
+
+            });
+
+            function dateFormatterForGrid(cellvalue, options) {
+                if (cellvalue) {
+                    return $.datepicker.formatDate("mm/dd/yy", new Date(+cellvalue));
+                } else {
+                    return '';
+                }
+            }
+
+            function handleCloseDatePicker(dates) {
+                $("#"+this.id).datepicker('setDate',convertStringToDate(dates));
+            }
+
+            function convertStringToDate(dateStr) {
+                let newDateStr = "";
+                if (dateStr) {
+                    newDateStr = dateStr;
+                }
+                newDateStr = newDateStr.replace(/_/g,"");
+                let newDate;
+                try {
+                    newDate = $.datepicker.parseDate("mm/dd/yy",newDateStr);
+                } catch(Exception) {
+                    newDate = null;
+                }
+
+                return newDate;
+            }
+
+            function formatCurrency(amtStr) {
+                amtStr += '';
+                if (!amtStr || amtStr.length === 0) {
+                    return "";
+                }
+                x = amtStr.split('.');
+                var x1 = x[0];
+                var x2 = "";
+                if (x.length > 1) {
+                    x2 = x[1];
+                }
+                while (x2.length < 2) {
+                    x2 += "0";
+                }
+                if (x1.length >= 1) {
+                }
+                x1 = x1.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                return x1 + "." + x2;
+            }
+
+            function ajaxErrorCallback(jqXHR, textStatus, errorThrown) {
+
+                $.aceToaster.add({
+                    placement: 'tr',
+                    title: 'No Selection',
+                    body: 'An error occurred... Look at the console (F12 or Ctrl+Shift+I, Console tab) for more information!',
+
+                    icon: '<i class="far fa-exclamation-triangle fa-2x text-danger ml-2 mr-1"></i>',
+
+                    className: 'bgc-danger-tp2 brc-secondary-tp4 rounded-sm',
+                    headerClass: 'bg-transparent border-0 text-120 text-dark-m3 font-bolder',
+                    bodyClass: 'pt-0',
+                    delay: 3000
+                });
+
+                console.log('jqXHR:');
+                console.log(jqXHR);
+                console.log('textStatus:');
+                console.log(textStatus);
+                console.log('errorThrown:');
+                console.log(errorThrown);
+
+            }
+        </script>
+
+        <script src="/CampaignTracker/assets/js/jquery.gritter.min.js" type="text/javascript"></script>		
+    </body>
+</html>
+

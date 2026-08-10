@@ -35,12 +35,37 @@ export interface HttpRequest {
   body?: string;
   /** Extra request headers. The transport supplies the user agent. */
   headers?: Record<string, string>;
+  /**
+   * Redirect handling. Defaults to `'follow'`, which is right for a document.
+   *
+   * `'manual'` exists for a source that sets a cookie on a redirect: `fetch`
+   * exposes only the final response's headers, so a `Set-Cookie` on a 302 is
+   * invisible to a caller that let the transport follow it. CERS mints its
+   * session exactly that way, and following blindly produced a search that
+   * returned zero rows while reporting HTTP 200 — a silent wrong answer, which
+   * is worse than an error.
+   */
+  redirect?: RedirectMode;
 }
 
 export interface HttpResponse {
   status: number;
   /** Header names lowercased. */
   headers: Record<string, string>;
+  /**
+   * Every `Set-Cookie` value, unfolded.
+   *
+   * `headers` is a flat map and a response may set several cookies, so exactly
+   * one of them survives there — the last one wins and the rest are gone. CERS
+   * sets three at once, `JSESSIONID` among them, and losing it made every
+   * search run in a fresh session and return zero rows under HTTP 200. Cookies
+   * therefore have their own field rather than being read out of `headers`.
+   *
+   * Optional because a transport with no cookie concept — every fixture double
+   * in this repo — legitimately reports none, and absent is the honest value
+   * for that. `createPoliteTransport` always populates it.
+   */
+  setCookies?: string[];
   bytes: Uint8Array;
   /** The URL after redirects. */
   finalUrl: string;
@@ -114,6 +139,19 @@ function realSleep(ms: number): Promise<void> {
 }
 
 /**
+ * Splits a folded `Set-Cookie` header back into individual cookies.
+ *
+ * The fallback for a transport whose headers object predates `getSetCookie`.
+ * It splits on the comma that precedes a `name=` pair rather than on every
+ * comma, because an `Expires=Wed, 09 Jun 2027 …` attribute contains one and
+ * splitting naively truncates that cookie and invents another.
+ */
+export function splitSetCookieHeader(header: string | undefined): string[] {
+  if (header === undefined || header === '') return [];
+  return header.split(/,\s*(?=[^;=\s]+=)/);
+}
+
+/**
  * The politeness lives here rather than in the adapter so that a fixture-backed
  * transport runs at test speed without the adapter having a "skip the delay"
  * switch that could ever be flipped in production. One request in flight at a
@@ -153,7 +191,7 @@ export function createPoliteTransport(options: PoliteTransportOptions = {}): Htt
       const init: FetchLikeInit = {
         method: request.method,
         headers,
-        redirect: 'follow',
+        redirect: request.redirect ?? 'follow',
         signal: controller.signal,
       };
       if (request.method === 'POST' && request.body !== undefined) {
@@ -165,6 +203,13 @@ export function createPoliteTransport(options: PoliteTransportOptions = {}): Htt
       response.headers.forEach((value, name) => {
         flat[name.toLowerCase()] = value;
       });
+      // `getSetCookie` is the only API that returns them unfolded. It is
+      // guarded rather than assumed because `FetchLike` is deliberately narrow
+      // and a test double supplies its own Headers-shaped object.
+      const setCookies =
+        typeof response.headers.getSetCookie === 'function'
+          ? response.headers.getSetCookie()
+          : splitSetCookieHeader(flat['set-cookie']);
 
       // 304 carries no body; asking for one is not an error, it is just empty.
       const bytes =
@@ -173,6 +218,7 @@ export function createPoliteTransport(options: PoliteTransportOptions = {}): Htt
       return {
         status: response.status,
         headers: flat,
+        setCookies,
         bytes,
         finalUrl: response.url === '' ? request.url : response.url,
       };

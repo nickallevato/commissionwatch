@@ -4,6 +4,7 @@ import { asDocumentKind } from "./adapters/types";
 import type { DocumentRef, MeetingRef, SourceAdapter } from "./adapters/types";
 import { snapshotFromDrafts } from "../agenda-diff";
 import { extractAgendaItems, type FieldConfidenceMap } from "./agenda-items";
+import { isCampaignFinanceKind, recordCampaignFinance } from "./campaign-finance";
 import { extractDocumentText } from "./document-text";
 import { UnsupportedDocumentError } from "./pdf-text";
 import type { ArtifactRef, HandlerRegistry, StageResult } from "./worker";
@@ -132,6 +133,16 @@ export function parseDocumentRefMetadata(metadata: unknown): DocumentRef {
   }
   if (typeof ref.expectedContentType === "string") {
     parsed.expectedContentType = ref.expectedContentType;
+  }
+  // Adapter-specific chain parameters. Narrowed to strings rather than trusted,
+  // because this came back out of a jsonb column and a nested object here would
+  // be a shape nobody validated reaching an adapter.
+  if (isRecord(ref.metadata)) {
+    const carried: Record<string, string> = {};
+    for (const [key, value] of Object.entries(ref.metadata)) {
+      if (typeof value === "string") carried[key] = value;
+    }
+    if (Object.keys(carried).length > 0) parsed.metadata = carried;
   }
   return parsed;
 }
@@ -486,12 +497,33 @@ export function createIngestionHandlers(
         }
       }
 
+      // Documents that belong to no meeting. Campaign-finance filings are the
+      // first of these: a filed C-5 belongs to a candidacy and a reporting
+      // period, and there is no meeting anywhere in it. They are enqueued for
+      // `fetch` with no meeting id, so they are stored, content-addressed and
+      // citable exactly like any other artifact — and the alternative was to
+      // invent a meeting per filing period so this loop would accept them,
+      // which would have put a fabricated public record in `meetings`.
+      let standalone = 0;
+      if (source.adapter.discoverDocuments !== undefined) {
+        const refs = await source.adapter.discoverDocuments(since);
+        for (const document of refs) {
+          standalone += 1;
+          await ctx.enqueue("fetch", {
+            url: document.url,
+            documentType: document.kind,
+            metadata: { ref: { ...document } },
+          });
+        }
+      }
+
       return {
         counts: {
           meetings_seen: meetings.length,
           meetings_inserted: inserted,
           documents_seen: documents,
           meetings_unattributed: unattributed,
+          standalone_documents_seen: standalone,
         },
       };
     },
@@ -574,16 +606,45 @@ export function createIngestionHandlers(
       }
 
       if (isNew) {
+        // The ref's own metadata travels on, so a stage that reads stored bytes
+        // still knows what record they are. It carries no URL and cannot be
+        // turned into one — the capability split is about dereferencing, not
+        // about forgetting what was fetched.
         await ctx.enqueue("parse", {
           sha256: fetched.sha256,
           meetingId: ctx.target.meetingId,
           documentType: ctx.target.documentType,
+          ...(ref.metadata === undefined
+            ? {}
+            : { metadata: { ...ref.metadata, sourceUrl: fetched.sourceUrl } }),
         });
       }
       return { counts };
     },
 
     async parse(ctx): Promise<StageResult> {
+      // A record that is not a meeting document routes first, on the record
+      // kind its own adapter stamped. Nothing here sniffs the bytes: a stored
+      // artifact's meaning comes from the ref that asked for it, and guessing
+      // it from the content would let a JSON agenda become a campaign filing.
+      const recordKind = isRecord(ctx.target.metadata)
+        ? ctx.target.metadata.recordKind
+        : undefined;
+      if (isCampaignFinanceKind(recordKind)) {
+        const source = await resolveSource(db, registry, ctx.runId);
+        return {
+          counts: await recordCampaignFinance(
+            {
+              db,
+              sourceId: source.sourceId,
+              artifactId: ctx.artifact.id,
+              metadata: ctx.target.metadata,
+            },
+            ctx.content,
+          ),
+        };
+      }
+
       const meetingId = ctx.target.meetingId;
       if (meetingId === undefined) {
         // Nothing to attach items to. Not an error and not a retry: a document

@@ -1,0 +1,4468 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8"><![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9"><![endif]-->
+<!--[if gt IE 8]><!--><html class="no-js"><!--<![endif]-->
+    
+
+
+
+
+
+
+
+
+   
+
+   
+
+   
+
+   
+
+   
+
+   
+
+   
+      
+   
+
+
+
+    <head>
+
+        
+
+        
+        
+        
+        
+
+        
+        
+            
+            
+            
+            
+            
+            
+            
+        
+
+        
+
+        
+        
+        
+
+        
+        
+        
+
+        
+
+        
+        
+        
+
+        
+        
+        
+
+        	
+
+        
+        
+        
+        
+        
+        
+        
+        
+
+        
+        
+        
+
+        
+        
+
+        
+        
+        
+        
+        
+        
+
+        <meta charset="utf-8" />
+        <meta name="description" content="" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        
+        
+        
+
+        <title>Campaign Electronic Reporting System (search)</title>
+
+        
+        
+        
+        
+
+        <!--[if IE 7]>
+          <link rel="stylesheet" href="/CampaignTracker/assets/css/font-awesome-ie7.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <![endif]-->
+
+        <!--[if lte IE 8]>
+            <link rel="stylesheet" href="/CampaignTracker/assets/css/ace-ie.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <![endif]-->
+
+        <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+
+        <!--[if lt IE 9]>
+            <script src="/CampaignTracker/assets/js/html5shiv.js" type="text/javascript"></script>
+            <script src="/CampaignTracker/assets/js/respond.min.js" type="text/javascript"></script>
+        <![endif]-->
+
+        <!-- basic styles -->
+
+        <link href="/CampaignTracker/assets/css/bootstrap.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/font-awesome.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/ui.jqgrid.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/jquery-ui-1.10.3.full.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/jquery.gritter.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/coppPrint.css" rel="stylesheet" type="text/css" media="print"/>
+
+        <!-- page specific plugin styles -->
+
+        <!-- fonts -->
+        <link href="/CampaignTracker/assets/css/ace-fonts.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+
+        <!-- ace styles -->		
+        <link href="/CampaignTracker/assets/css/ace.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/ace-rtl.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/ace-skins.min.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/chosen.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+        <link href="/CampaignTracker/assets/css/datepicker.css" media="aural, braille, handheld, projection, screen, tty, tv" rel="stylesheet" type="text/css" />
+
+        <!-- ace settings handler -->
+        <script src="/CampaignTracker/assets/js/ace-extra.min.js" type="text/javascript"></script>
+        <style>
+            p {
+                -webkit-font-smoothing: antialiased;
+            }
+        </style>
+    </head>
+
+    <body class="navbar-fixed breadcrumbs-fixed">
+
+        <div class="navbar navbar-fixed-top" id="navbar">
+            <script type="text/javascript">
+                try {
+                    ace.settings.check('navbar', 'fixed')
+                } catch (e) {
+                }
+            </script>
+
+            <div class="navbar-container omit-print" id="navbar-container">
+                <div class="navbar-header pull-left">
+                    <a href="#" class="navbar-brand">
+                        <!-- small><i class="icon-leaf"></i>Ace Admin</small -->
+                        <small><img src="/CampaignTracker/assets/images/app-logo.jpg"  height="26px" alt="logo" />&nbsp;&nbsp;Campaign Electronic Reporting System</small>						
+                    </a><!-- /.brand -->
+                </div><!-- /.navbar-header -->
+
+                <div class="navbar-header pull-right" role="navigation">
+                    <ul class="nav ace-nav">
+
+                        
+                        	
+                            <li><a href="/CampaignTracker/app/welcome"> Sign In
+                                    <i class="icon-signin"></i>
+                                </a></li>
+                            
+
+                    </ul><!-- /.ace-nav -->
+                </div><!-- /.navbar-header -->
+            </div><!-- /.container -->
+        </div>
+
+        <div class="main-container" id="main-container">
+            <script type="text/javascript">
+                try {
+                    ace.settings.check('main-container', 'fixed')
+                } catch (e) {
+                }
+            </script>
+
+            <div class="main-container-inner">
+                <a class="menu-toggler" id="menu-toggler" href="#">
+                    <span class="menu-text"></span>
+                </a>
+
+                <div class="sidebar sidebar-fixed omit-print" id="sidebar">
+                    <script type="text/javascript">
+                        try {
+                            ace.settings.check('sidebar', 'fixed')
+                        } catch (e) {
+                        }
+                    </script>
+
+                    <ul class="nav nav-list">
+                        <li>
+                            <a href="/CampaignTracker/">
+                                <i class="icon-dashboard"></i>
+                                <span class="menu-text"> Dashboard </span>
+                            </a>
+                        </li>
+
+                        <li>
+                            <a href="#" class="dropdown-toggle">
+                                <i class="icon-edit"></i>
+                                <span class="menu-text"> Candidate </span>
+
+                                <b class="arrow icon-angle-down"></b>
+                            </a>
+                            <ul class="submenu">
+                                <li>
+                                    <a href="/CampaignTracker/public/search/candidateSearch">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Candidate
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="/CampaignTracker/public/search/searchCandidateContributions">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Contributions
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="/CampaignTracker/public/search/searchCandidateExpenditures">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Expenditures
+                                    </a>
+                                </li>
+
+                            </ul>
+                        </li>
+
+                        <li>
+                            <a href="#" class="dropdown-toggle">
+                                <i class="icon-edit"></i>
+                                <span class="menu-text"> Committee </span>
+
+                                <b class="arrow icon-angle-down"></b>
+                            </a>
+                            <ul class="submenu">
+                                <li>
+                                    <a href="/CampaignTracker/public/search/committeeSearch">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Committee
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="/CampaignTracker/public/search/searchCommitteeContributions">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Contributions
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="/CampaignTracker/public/search/searchCommitteeExpenditures">
+                                        <i class="icon-double-angle-right"></i>
+                                        Search Expenditures
+                                    </a>
+                                </li>
+
+                            </ul>
+                        </li>
+
+                        
+
+                        	
+
+                        <li>
+                            <a href="#" class="dropdown-toggle">
+                                <img src="/CampaignTracker/assets/images/stateSeal.gif"  height="26px" alt="logo" />
+                                <span class="menu-text"> State of Montana </span>
+
+                                <b class="arrow icon-angle-down"></b>
+                            </a>
+
+                            <ul class="submenu">
+                                <li><a href="http://mt.gov/services/" target="_blank">Online Services</a></li>
+                                <li><a href="http://politicalpractices.mt.gov/default.mcpx" target="_blank">Commissioner of Political Practices</a></li>
+                                <li><a
+                                        href="http://itsd.mt.gov/content/policy/policies/Statewide_Policy_Internet_Privacy_and_Security.pdf" target="_blank">Privacy
+                                        &amp; Security</a></li>
+                                <li><a
+                                        href="http://mt.gov/discover/disclaimer.mcpx#accessibility" target="_blank">Accessibility</a></li>
+                                <li><a href="http://politicalpractices.mt.gov/aboutus" target="_blank">Contact
+                                        Us</a></li>
+                                <li><a href="http://mt.gov/" target="_blank"> <img
+                                            src="/CampaignTracker/assets/images/mtgov.gif" height="26px"
+                                            alt="logo" />
+                                    </a></li>
+                            </ul>
+                        </li>
+
+                    </ul><!-- /.nav-list -->
+
+                    <div class="sidebar-collapse" id="sidebar-collapse">
+                        <i class="icon-double-angle-left" data-icon1="icon-double-angle-left" data-icon2="icon-double-angle-right"></i>
+                    </div>
+
+                    <script type="text/javascript">
+                        try {
+                            ace.settings.check('sidebar', 'collapsed')
+                        } catch (e) {
+                        }
+                    </script>
+                </div>
+
+                <div class="main-content">
+                    <div class="breadcrumbs breadcrumbs-fixed omit-print" id="breadcrumbs">
+                        <script type="text/javascript">
+                            try {
+                                ace.settings.check('breadcrumbs', 'fixed')
+                            } catch (e) {
+                            }
+                        </script>
+
+                        <ul class="breadcrumb">
+                            <li>
+                                <i class="icon-home home-icon"></i>
+                                <a href="/CampaignTracker/app/welcome">Welcome</a>
+                            </li>
+                        </ul><!-- .breadcrumb -->
+
+                        <div class="pull-right">
+                            <i class="icon-key key-icon"></i>
+                            
+                                
+                                    <a id="oktaHomeLink" href="https://mtgov.okta.com/" target="_blank">Okta Home</a>&nbsp;&nbsp;&nbsp;&nbsp;
+                                
+                                							
+                            		
+                            <i class="icon-shield shield-icon"></i>
+                            <a id="versionLink" href="#">Version</a>&nbsp;&nbsp;&nbsp;&nbsp;                                
+                        </div>
+                    </div>
+
+                    <div class="page-content">
+                        <div class="row">
+                            <div class="col-xs-12">
+                                <!-- PAGE CONTENT BEGINS -->
+                                
+
+	
+
+
+
+
+
+<div class="omit-print">
+
+	
+	
+		
+	
+
+</div>
+
+	
+	<div class="page-header">
+		<h1>
+			Public Access Search
+			<small>
+				<i class="icon-double-angle-right"></i>
+				Search for candidates and committees.
+			</small>
+		</h1>
+	</div><!-- /.page-header -->
+            
+  	<div class="space-4"></div>
+
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+
+
+<!--[if IE 7]>
+	  <link href="/CampaignTracker/assets/css/font-awesome-ie7.min.css" media="all" rel="stylesheet" type="text/css" />
+<![endif]-->
+
+<!--[if lte IE 8]>
+	  <link href="/CampaignTracker/assets/css/ace-ie.min.css" media="all" rel="stylesheet" type="text/css" />
+<![endif]-->
+
+<!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+	<!--[if lt IE 9]>
+		<script src="/CampaignTracker/assets/js/html5shiv.js" type="text/javascript"></script>
+		<script src="/CampaignTracker/assets/js/respond.min.js" type="text/javascript"></script>
+<![endif]-->
+
+<div class="tabbable tabs-top">
+	<ul class="nav nav-tabs" id="searchTabId">
+		<li class="active">
+			<a data-toggle="tab" href="#candidateSearch">Candidate Search</a>
+		</li>
+
+        <li>
+            <a data-toggle="tab" href="#committeeSearch">Committee Search</a>
+        </li>
+
+        <li>
+            <a data-toggle="tab" href="#contributionSearch">Contribution Search</a>
+        </li>
+
+        <li>
+            <a data-toggle="tab" href="#expenditureSearch">Expenditure Search</a>
+        </li>
+        <li>
+            <a data-toggle="tab" href="#searchHelp" style="color:red;">How to Search CERS</a>
+        </li>
+        
+	</ul>
+
+	<div class="tab-content">
+		<div id="candidateSearch" class="tab-pane in active">
+			<form id="searchCandidatesForm" class="form-horizontal" action="/CampaignTracker/public/search" method="post">
+				<div class="row">
+					<div class="col-xs-6">
+						<div class="form-group">
+							<label class="col-sm-4 control-label no-padding-right" for="lastNameCandSearch"> Last Name </label>
+							<div class="col-sm-8">
+								<input id="lastNameCandSearch" name="lastName" type="text" class="col-sm-12" value=""/>
+							</div>
+						</div>
+						
+						<div class="space-4"></div>
+						
+						<div class="form-group">
+							<label class="col-sm-4 control-label no-padding-right" for="firstNameCandSearch"> First Name </label>
+							<div class="col-sm-8">
+								<input id="firstNameCandSearch" name="firstName" type="text" class="col-sm-12" value=""/>
+							</div>
+						</div>
+						
+						<div class="space-4"></div>
+						
+						<div class="form-group">
+							<label class="col-sm-4 control-label no-padding-right" for="middleInitialSearch"> Middle Initial </label>
+							<div class="col-sm-8">
+								<input id="middleInitialSearch" name="middleInitial" type="text" class="col-sm-12" value=""/>
+							</div>
+						</div>
+						
+						<div class="form-group">
+							<label class="col-sm-4 control-label no-padding-right">Election Year</label>
+							<div class="col-sm-8">
+									<input id="spinner1" name="electionYear" type="text" class="input-mini" value=""/>
+							</div>
+						</div>
+						
+					</div>
+					<div class="col-xs-6">
+					
+						
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="candidateTypeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="candidateTypeCodeControlLabel" for="candidateTypeCode">Campaign Type</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="candidateTypeCode" name="candidateTypeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="CT">City</option><option value="CN">County</option><option value="SC">School</option><option value="SD">State District</option><option value="SW">Statewide</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+						
+						
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="officeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="officeCodeControlLabel" for="officeCode">Office Sought</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="officeCode" name="officeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="1">Alderman</option><option value="2">Attorney General</option><option value="3">Chief Executive</option><option value="4">Chief of Police</option><option value="5">City Alderman</option><option value="6">City Council</option><option value="7">City Judge</option><option value="8">City Treasurer</option><option value="9">Clerk of District Court</option><option value="10">Clerk of the Supreme Court</option><option value="11">College Trustee</option><option value="12">Councilman</option><option value="13">County Assessor</option><option value="14">County Assessor/Clerk and Recorder</option><option value="15">County Assessor/Sheriff</option><option value="16">County Assessor/Treasurer</option><option value="17">County Assessor/Treasurer/Supt. of Schools</option><option value="18">County Attorney</option><option value="19">County Attorney/Public Administrator</option><option value="20">County Auditor</option><option value="21">County Chief of Law Enforcement</option><option value="22">County Clerk &amp; Recorder/Superintendent of Schools</option><option value="23">County Clerk &amp; Recorder/Superintendent/Assessor</option><option value="24">County Clerk &amp; Recorder/Surveyor</option><option value="25">County Clerk &amp; Recorder/Treasurer</option><option value="26">County Clerk and Recorder</option><option value="27">County Clerk of District Court/Clerk &amp; Recorder</option><option value="28">County Clerk of District Court/Supt. of Schools</option><option value="29">County Commissioner</option><option value="30">County Coroner</option><option value="31">County Coroner/Sheriff</option><option value="32">County Coroner/Sheriff/Public Administrator</option><option value="33">County Sheriff</option><option value="34">County Superintendent of Schools</option><option value="35">County Surveyor</option><option value="36">County Treasurer</option><option value="37">County Treasurer/Clerk of District Court</option><option value="38">County Treasurer/Superintendent of Schools</option><option value="39">District Judge, District 01 Dept. 01</option><option value="40">District Judge, District 01 Dept. 02</option><option value="41">District Judge, District 01 Dept. 03</option><option value="266">District Judge, District 01 Dept. 04</option><option value="42">District Judge, District 02 Dept. 01</option><option value="43">District Judge, District 02 Dept. 02</option><option value="44">District Judge, District 03</option><option value="45">District Judge, District 04 Dept. 01</option><option value="46">District Judge, District 04 Dept. 02</option><option value="47">District Judge, District 04 Dept. 03</option><option value="48">District Judge, District 04 Dept. 04</option><option value="272">District Judge, District 04 Dept. 05</option><option value="49">District Judge, District 05</option><option value="50">District Judge, District 06</option><option value="51">District Judge, District 07 Dept. 01</option><option value="52">District Judge, District 07 Dept. 02</option><option value="53">District Judge, District 08 Dept. 01</option><option value="54">District Judge, District 08 Dept. 02</option><option value="55">District Judge, District 08 Dept. 03</option><option value="56">District Judge, District 08 Dept. 04</option><option value="57">District Judge, District 09</option><option value="58">District Judge, District 10</option><option value="59">District Judge, District 11 Dept. 01</option><option value="60">District Judge, District 11 Dept. 02</option><option value="61">District Judge, District 11 Dept. 03</option><option value="265">District Judge, District 11 Dept. 04</option><option value="273">District Judge, District 11 Dept. 05</option><option value="62">District Judge, District 12</option><option value="63">District Judge, District 13 Dept. 01</option><option value="64">District Judge, District 13 Dept. 02</option><option value="65">District Judge, District 13 Dept. 03</option><option value="66">District Judge, District 13 Dept. 04</option><option value="67">District Judge, District 13 Dept. 05</option><option value="268">District Judge, District 13 Dept. 06</option><option value="269">District Judge, District 13 Dept. 07</option><option value="271">District Judge, District 13 Dept. 08</option><option value="275">District Judge, District 13 Dept. 09</option><option value="276">District Judge, District 13 Dept. 10</option><option value="68">District Judge, District 14</option><option value="264">District Judge, District 14 Dept. 06</option><option value="69">District Judge, District 15</option><option value="70">District Judge, District 16 Dept. 01</option><option value="71">District Judge, District 16 Dept. 02</option><option value="72">District Judge, District 17</option><option value="73">District Judge, District 18 Dept. 01</option><option value="74">District Judge, District 18 Dept. 02</option><option value="270">District Judge, District 18 Dept. 03</option><option value="274">District Judge, District 18 Dept. 04</option><option value="75">District Judge, District 19</option><option value="76">District Judge, District 20 Dept. 01</option><option value="77">District Judge, District 20 Dept. 02</option><option value="267">District Judge, District 21 Dept. 01</option><option value="79">District Judge, District 21 Dept. 02</option><option value="80">District Judge, District 22</option><option value="258">Exploratory</option><option value="259">Exploratory</option><option value="260">Exploratory</option><option value="261">Exploratory</option><option value="262">Exploratory</option><option value="81">Governor</option><option value="82">Hospital District Trustee</option><option value="83">House District No. 01</option><option value="84">House District No. 02</option><option value="85">House District No. 03</option><option value="86">House District No. 04</option><option value="87">House District No. 05</option><option value="88">House District No. 06</option><option value="89">House District No. 07</option><option value="90">House District No. 08</option><option value="91">House District No. 09</option><option value="92">House District No. 10</option><option value="93">House District No. 100</option><option value="94">House District No. 11</option><option value="95">House District No. 12</option><option value="96">House District No. 13</option><option value="97">House District No. 14</option><option value="98">House District No. 15</option><option value="99">House District No. 16</option><option value="100">House District No. 17</option><option value="101">House District No. 18</option><option value="102">House District No. 19</option><option value="103">House District No. 20</option><option value="104">House District No. 21</option><option value="105">House District No. 22</option><option value="106">House District No. 23</option><option value="107">House District No. 24</option><option value="108">House District No. 25</option><option value="109">House District No. 26</option><option value="110">House District No. 27</option><option value="111">House District No. 28</option><option value="112">House District No. 29</option><option value="113">House District No. 30</option><option value="114">House District No. 31</option><option value="115">House District No. 32</option><option value="116">House District No. 33</option><option value="117">House District No. 34</option><option value="118">House District No. 35</option><option value="119">House District No. 36</option><option value="120">House District No. 37</option><option value="121">House District No. 38</option><option value="122">House District No. 39</option><option value="123">House District No. 40</option><option value="124">House District No. 41</option><option value="125">House District No. 42</option><option value="126">House District No. 43</option><option value="127">House District No. 44</option><option value="128">House District No. 45</option><option value="129">House District No. 46</option><option value="130">House District No. 47</option><option value="131">House District No. 48</option><option value="132">House District No. 49</option><option value="133">House District No. 50</option><option value="134">House District No. 51</option><option value="135">House District No. 52</option><option value="136">House District No. 53</option><option value="137">House District No. 54</option><option value="138">House District No. 55</option><option value="139">House District No. 56</option><option value="140">House District No. 57</option><option value="141">House District No. 58</option><option value="142">House District No. 59</option><option value="143">House District No. 60</option><option value="144">House District No. 61</option><option value="145">House District No. 62</option><option value="146">House District No. 63</option><option value="147">House District No. 64</option><option value="148">House District No. 65</option><option value="149">House District No. 66</option><option value="150">House District No. 67</option><option value="151">House District No. 68</option><option value="152">House District No. 69</option><option value="153">House District No. 70</option><option value="154">House District No. 71</option><option value="155">House District No. 72</option><option value="156">House District No. 73</option><option value="157">House District No. 74</option><option value="158">House District No. 75</option><option value="159">House District No. 76</option><option value="160">House District No. 77</option><option value="161">House District No. 78</option><option value="162">House District No. 79</option><option value="163">House District No. 80</option><option value="164">House District No. 81</option><option value="165">House District No. 82</option><option value="166">House District No. 83</option><option value="167">House District No. 84</option><option value="168">House District No. 85</option><option value="169">House District No. 86</option><option value="170">House District No. 87</option><option value="171">House District No. 88</option><option value="172">House District No. 89</option><option value="173">House District No. 90</option><option value="174">House District No. 91</option><option value="175">House District No. 92</option><option value="176">House District No. 93</option><option value="177">House District No. 94</option><option value="178">House District No. 95</option><option value="179">House District No. 96</option><option value="180">House District No. 97</option><option value="181">House District No. 98</option><option value="182">House District No. 99</option><option value="183">Justice of the Peace</option><option value="184">Lieutenant Governor</option><option value="185">Mayor</option><option value="186">Public Administrator</option><option value="187">Public Service Commission District No. 01</option><option value="188">Public Service Commission District No. 02</option><option value="189">Public Service Commission District No. 03</option><option value="190">Public Service Commission District No. 04</option><option value="191">Public Service Commission District No. 05</option><option value="192">School Trustee</option><option value="193">Secretary of State</option><option value="194">Senate District No. 01</option><option value="195">Senate District No. 02</option><option value="196">Senate District No. 03</option><option value="197">Senate District No. 04</option><option value="198">Senate District No. 05</option><option value="199">Senate District No. 06</option><option value="200">Senate District No. 07</option><option value="201">Senate District No. 08</option><option value="202">Senate District No. 09</option><option value="203">Senate District No. 10</option><option value="204">Senate District No. 11</option><option value="205">Senate District No. 12</option><option value="206">Senate District No. 13</option><option value="207">Senate District No. 14</option><option value="208">Senate District No. 15</option><option value="209">Senate District No. 16</option><option value="210">Senate District No. 17</option><option value="211">Senate District No. 18</option><option value="212">Senate District No. 19</option><option value="213">Senate District No. 20</option><option value="214">Senate District No. 21</option><option value="215">Senate District No. 22</option><option value="216">Senate District No. 23</option><option value="217">Senate District No. 24</option><option value="218">Senate District No. 25</option><option value="219">Senate District No. 26</option><option value="220">Senate District No. 27</option><option value="221">Senate District No. 28</option><option value="222">Senate District No. 29</option><option value="223">Senate District No. 30</option><option value="224">Senate District No. 31</option><option value="225">Senate District No. 32</option><option value="226">Senate District No. 33</option><option value="227">Senate District No. 34</option><option value="228">Senate District No. 35</option><option value="229">Senate District No. 36</option><option value="230">Senate District No. 37</option><option value="231">Senate District No. 38</option><option value="232">Senate District No. 39</option><option value="233">Senate District No. 40</option><option value="234">Senate District No. 41</option><option value="235">Senate District No. 42</option><option value="236">Senate District No. 43</option><option value="237">Senate District No. 44</option><option value="238">Senate District No. 45</option><option value="239">Senate District No. 46</option><option value="240">Senate District No. 47</option><option value="241">Senate District No. 48</option><option value="242">Senate District No. 49</option><option value="243">Senate District No. 50</option><option value="244">State Auditor</option><option value="245">Superintendent of Public Instruction</option><option value="246">Supreme Court Chief Justice</option><option value="247">Supreme Court Justice No. 01</option><option value="248">Supreme Court Justice No. 02</option><option value="249">Supreme Court Justice No. 03</option><option value="250">Supreme Court Justice No. 04</option><option value="251">Supreme Court Justice No. 05</option><option value="252">Supreme Court Justice No. 06</option><option value="253">Supt. of Schools</option><option value="254">Treasurer</option><option value="255">Treasurer/Clerk &amp; Recorder</option><option value="256">Trustee</option><option value="257">Unknown</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+						
+						
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="countyCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="countyCodeControlLabel" for="countyCode">County</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="countyCode" name="countyCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="3242">Beaverhead</option><option value="3243">Big Horn</option><option value="3244">Blaine</option><option value="3245">Broadwater</option><option value="3246">Carbon</option><option value="3247">Carter</option><option value="3248">Cascade</option><option value="3249">Chouteau</option><option value="3250">Custer</option><option value="3251">Daniels</option><option value="3252">Dawson</option><option value="3253">Deer Lodge</option><option value="3254">Fallon</option><option value="3255">Fergus</option><option value="3256">Flathead</option><option value="3257">Gallatin</option><option value="3258">Garfield</option><option value="3259">Glacier</option><option value="3260">Golden Valley</option><option value="3261">Granite</option><option value="3262">Hill</option><option value="3263">Jefferson</option><option value="3264">Judith Basin</option><option value="3265">Lake</option><option value="3266">Lewis &amp; Clark</option><option value="3267">Liberty</option><option value="3268">Lincoln</option><option value="3269">Madison</option><option value="3270">McCone</option><option value="3271">Meagher</option><option value="3272">Mineral</option><option value="3273">Missoula</option><option value="3274">Musselshell</option><option value="3275">Park</option><option value="3276">Petroleum</option><option value="3277">Phillips</option><option value="3278">Pondera</option><option value="3279">Powder River</option><option value="3280">Powell</option><option value="3281">Prairie</option><option value="3282">Ravalli</option><option value="3283">Richland</option><option value="3284">Roosevelt</option><option value="3285">Rosebud</option><option value="3286">Sanders</option><option value="3287">Sheridan</option><option value="3288">Silver Bow</option><option value="3289">Stillwater</option><option value="3290">Sweet Grass</option><option value="3291">Teton</option><option value="3292">Toole</option><option value="3293">Treasure</option><option value="3298">Unknown</option><option value="3294">Valley</option><option value="3295">Wheatland</option><option value="3296">Wibaux</option><option value="3297">Yellowstone</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+						
+						
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="partyCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="partyCodeControlLabel" for="partyCode">Political Party</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="partyCode" name="partyCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="CP">Constitution</option><option value="DM">Democratic</option><option value="GR">Green</option><option value="IN">Independent</option><option value="LB">Libertarian</option><option value="NL">Natural Law</option><option value="NP">Non-Partisan</option><option value="RF">Reform</option><option value="FP">Republican</option><option value="UN">Unknown</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+							
+					</div>								
+				</div>
+				
+				
+				<div class="hr hr-24"></div>
+				
+				<div class="clearfix form-actions">
+					<div class="col-md-offset-2 col-md-9">
+					
+						
+						
+						<button id="searchCandidatesButton" class="btn btn-xs btn-info" type="button">
+							<i class="icon-search bigger-110"></i>
+							Search Candidate
+						</button>
+						
+						&nbsp; &nbsp; &nbsp;
+						<button id="resetCandidateSearchButton" class="btn btn-xs" type="button">
+							<i class="icon-undo bigger-110"></i>
+							Reset
+						</button>
+					</div>
+				</div>
+				
+			</form>
+			
+		</div>
+
+		<div id="committeeSearch" class="tab-pane">
+			<form id="searchCommitteesForm" class="form-horizontal" action="/CampaignTracker/public/search" method="post">
+									
+				<div class="row">
+					<div class="col-xs-6">
+						<div class="form-group">							
+							<label class="col-sm-4 control-label no-padding-right" for="committeeNameSearch"> Committee Name </label>
+							<div class="col-sm-8">
+								<input id="committeeNameSearch" name="committeeName" type="text" class="col-sm-12" value=""/>
+							</div>
+						</div>
+							
+						<div class="form-group">
+							<label class="col-sm-4 control-label no-padding-right">Election Year</label>
+							<div class="col-sm-8">
+									<input id="spinner2" name="electionYear" type="text" class="input-mini" value=""/>
+							</div>
+						</div>
+					</div>
+					<div class="col-xs-6">
+						
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="committeeTypeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="committeeTypeCodeControlLabel" for="committeeTypeCode">Committee Type</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="committeeTypeCode" name="committeeTypeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="BI">Ballot Issue</option><option value="DB">Disbanded Montana PAC</option><option value="DP">Disbanded Montana Party</option><option value="FA">Federal Action</option><option value="FP">Federal Party</option><option value="IN">Incidental</option><option value="IL">Incidental - Local Government</option><option value="PA">Independent</option><option value="JF">Joint Fundraising Committee</option><option value="MP">Minor Party Qualification</option><option value="PP">Political Party</option><option value="UN">Undetermined</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+						
+					</div>
+				</div>		
+													
+				<div class="clearfix form-actions">
+					<div class="col-md-offset-2 col-md-9">
+					
+						
+						<button id="searchCommitteesButton" class="btn btn-xs btn-info" type="button">
+							<i class="icon-search bigger-110"></i>
+							Search Committee
+						</button>
+
+						&nbsp; &nbsp; &nbsp;
+						<button id="resetCommitteeSearchButton" class="btn btn-xs" type="button">
+							<i class="icon-undo bigger-110"></i>
+							Reset
+						</button>
+					</div>
+				</div>
+			</form>
+		</div>
+
+        <div id="contributionSearch" class="tab-pane">
+            <form id="searchContributionsForm" class="form-horizontal" action="/CampaignTracker/public/search" method="post">
+                <input id="contrFinancialSearchType" name="financialSearchType" type="hidden" value=""/>
+                <div class="row">
+                    <div class="col-xs-6">                   
+
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+ 	  
+   
+   
+
+
+<div class="form-group " id="contrSearchTypeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="contrSearchTypeCodeControlLabel" for="contrSearchTypeCode">Search Type</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="contrSearchTypeCode" name="contrSearchTypeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="CANDIDATE">Candidate</option><option value="CONTRIBUTOR">Contributor (Candidate)</option><option value="COMMITTEE">Committee</option><option value="CONTRIBUTOR2">Contributor (Committee)</option>
+               
+               
+            
+         </select>
+      
+   
+   
+	  <div id="contrSearchTypeCodeErrorDivId" class="" style="display: none">
+	      <span class="help-block">
+	         <span id="contrSearchTypeCodeIconSpanId" class=""></span>
+	         
+	      </span>
+	  </div>
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+                    
+                        <div id="searchContrCandidateGroupDiv">
+                            <div class="form-group">
+                                <h5 class="col-sm-4 control-label no-padding-left blue">Candidate</h5>
+                             </div>
+	                        <div class="form-group">
+	                            <label class="col-sm-4 control-label no-padding-right" for="contrCanLastNameSearch"> Last Name </label>
+	                            <div class="col-sm-8">
+	                                <input id="contrCanLastNameSearch" name="contrCanLastName" type="text" class="col-sm-12" value=""/>
+	                            </div>
+	                        </div>
+                        
+                            <div class="space-4"></div>
+                        
+	                        <div class="form-group">
+	                            <label class="col-sm-4 control-label no-padding-right" for="contrCanFirstNameSearch"> First Name </label>
+	                            <div class="col-sm-8">
+	                                <input id="contrCanFirstNameSearch" name="contrCanFirstName" type="text" class="col-sm-12" value=""/>
+	                            </div>
+	                        </div>
+                        
+                        </div>
+
+                        <div id="searchContrCommitteeGroupDiv">
+                            <div class="form-group">
+                                <h5 class="col-sm-4 control-label no-padding-left blue">Committee</h5>
+                             </div>
+                            <div class="form-group">
+                                <label class="col-sm-4 control-label no-padding-right" for="contrCommitteeNameSearch"> Name </label>
+                                <div class="col-sm-8">
+                                    <input id="contrCommitteeNameSearch" name="contrCommitteeName" type="text" class="col-sm-12" value=""/>
+                                </div>
+                            </div>
+                                                
+                        </div>
+
+	                    <div id="searchContributorGroupDiv" style="display: none">
+                            <div class="form-group">
+                                <h5 class="col-sm-4 control-label no-padding-left blue">Contributor</h5>
+                             </div>
+	                         <div class="form-group">
+	                             <label class="col-sm-4 control-label no-padding-right" for="contrLastNameSearch"> Entity or Last Name </label>
+	                             <div class="col-sm-8">
+	                                 <input id="contrLastNameSearch" name="contributorLastName" type="text" class="col-sm-12" value=""/>
+	                             </div>
+	                         </div>
+	                     
+	                        <div class="space-4"></div>
+	                     
+		                    <div class="form-group">
+		                         <label class="col-sm-4 control-label no-padding-right" for="contrFirstNameSearch"> First Name </label>
+		                         <div class="col-sm-8">
+		                             <input id="contrFirstNameSearch" name="contributorFirstName" type="text" class="col-sm-12" value=""/>
+		                         </div>
+		                    </div>
+	
+	                         <div id="searchContributorPartyGroupDiv" style="display: none">
+		                         <div class="form-group">
+	                                <h5 class="col-sm-4 control-label no-padding-left blue"> - OR - </h5>
+		                         </div>
+	                             
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="contrPartyCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="contrPartyCodeControlLabel" for="contrPartyCode">Political Party</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="contrPartyCode" name="contrPartyCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="CP">Constitution</option><option value="DM">Democratic</option><option value="GR">Green</option><option value="IN">Independent</option><option value="LB">Libertarian</option><option value="NL">Natural Law</option><option value="NP">Non-Partisan</option><option value="RF">Reform</option><option value="FP">Republican</option><option value="UN">Unknown</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+	                         </div>
+	                         
+	                   </div>                                              
+                    </div>
+                    
+                    <div class="col-xs-6">
+                    
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="contrCandidateTypeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="contrCandidateTypeCodeControlLabel" for="contrCandidateTypeCode">Campaign Type</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="contrCandidateTypeCode" name="contrCandidateTypeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="CT">City</option><option value="CN">County</option><option value="SC">School</option><option value="SD">State District</option><option value="SW">Statewide</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="contrOfficeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="contrOfficeCodeControlLabel" for="contrOfficeCode">Office Sought</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="contrOfficeCode" name="contrOfficeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="1">Alderman</option><option value="2">Attorney General</option><option value="3">Chief Executive</option><option value="4">Chief of Police</option><option value="5">City Alderman</option><option value="6">City Council</option><option value="7">City Judge</option><option value="8">City Treasurer</option><option value="9">Clerk of District Court</option><option value="10">Clerk of the Supreme Court</option><option value="11">College Trustee</option><option value="12">Councilman</option><option value="13">County Assessor</option><option value="14">County Assessor/Clerk and Recorder</option><option value="15">County Assessor/Sheriff</option><option value="16">County Assessor/Treasurer</option><option value="17">County Assessor/Treasurer/Supt. of Schools</option><option value="18">County Attorney</option><option value="19">County Attorney/Public Administrator</option><option value="20">County Auditor</option><option value="21">County Chief of Law Enforcement</option><option value="22">County Clerk &amp; Recorder/Superintendent of Schools</option><option value="23">County Clerk &amp; Recorder/Superintendent/Assessor</option><option value="24">County Clerk &amp; Recorder/Surveyor</option><option value="25">County Clerk &amp; Recorder/Treasurer</option><option value="26">County Clerk and Recorder</option><option value="27">County Clerk of District Court/Clerk &amp; Recorder</option><option value="28">County Clerk of District Court/Supt. of Schools</option><option value="29">County Commissioner</option><option value="30">County Coroner</option><option value="31">County Coroner/Sheriff</option><option value="32">County Coroner/Sheriff/Public Administrator</option><option value="33">County Sheriff</option><option value="34">County Superintendent of Schools</option><option value="35">County Surveyor</option><option value="36">County Treasurer</option><option value="37">County Treasurer/Clerk of District Court</option><option value="38">County Treasurer/Superintendent of Schools</option><option value="39">District Judge, District 01 Dept. 01</option><option value="40">District Judge, District 01 Dept. 02</option><option value="41">District Judge, District 01 Dept. 03</option><option value="266">District Judge, District 01 Dept. 04</option><option value="42">District Judge, District 02 Dept. 01</option><option value="43">District Judge, District 02 Dept. 02</option><option value="44">District Judge, District 03</option><option value="45">District Judge, District 04 Dept. 01</option><option value="46">District Judge, District 04 Dept. 02</option><option value="47">District Judge, District 04 Dept. 03</option><option value="48">District Judge, District 04 Dept. 04</option><option value="272">District Judge, District 04 Dept. 05</option><option value="49">District Judge, District 05</option><option value="50">District Judge, District 06</option><option value="51">District Judge, District 07 Dept. 01</option><option value="52">District Judge, District 07 Dept. 02</option><option value="53">District Judge, District 08 Dept. 01</option><option value="54">District Judge, District 08 Dept. 02</option><option value="55">District Judge, District 08 Dept. 03</option><option value="56">District Judge, District 08 Dept. 04</option><option value="57">District Judge, District 09</option><option value="58">District Judge, District 10</option><option value="59">District Judge, District 11 Dept. 01</option><option value="60">District Judge, District 11 Dept. 02</option><option value="61">District Judge, District 11 Dept. 03</option><option value="265">District Judge, District 11 Dept. 04</option><option value="273">District Judge, District 11 Dept. 05</option><option value="62">District Judge, District 12</option><option value="63">District Judge, District 13 Dept. 01</option><option value="64">District Judge, District 13 Dept. 02</option><option value="65">District Judge, District 13 Dept. 03</option><option value="66">District Judge, District 13 Dept. 04</option><option value="67">District Judge, District 13 Dept. 05</option><option value="268">District Judge, District 13 Dept. 06</option><option value="269">District Judge, District 13 Dept. 07</option><option value="271">District Judge, District 13 Dept. 08</option><option value="275">District Judge, District 13 Dept. 09</option><option value="276">District Judge, District 13 Dept. 10</option><option value="68">District Judge, District 14</option><option value="264">District Judge, District 14 Dept. 06</option><option value="69">District Judge, District 15</option><option value="70">District Judge, District 16 Dept. 01</option><option value="71">District Judge, District 16 Dept. 02</option><option value="72">District Judge, District 17</option><option value="73">District Judge, District 18 Dept. 01</option><option value="74">District Judge, District 18 Dept. 02</option><option value="270">District Judge, District 18 Dept. 03</option><option value="274">District Judge, District 18 Dept. 04</option><option value="75">District Judge, District 19</option><option value="76">District Judge, District 20 Dept. 01</option><option value="77">District Judge, District 20 Dept. 02</option><option value="267">District Judge, District 21 Dept. 01</option><option value="79">District Judge, District 21 Dept. 02</option><option value="80">District Judge, District 22</option><option value="258">Exploratory</option><option value="259">Exploratory</option><option value="260">Exploratory</option><option value="261">Exploratory</option><option value="262">Exploratory</option><option value="81">Governor</option><option value="82">Hospital District Trustee</option><option value="83">House District No. 01</option><option value="84">House District No. 02</option><option value="85">House District No. 03</option><option value="86">House District No. 04</option><option value="87">House District No. 05</option><option value="88">House District No. 06</option><option value="89">House District No. 07</option><option value="90">House District No. 08</option><option value="91">House District No. 09</option><option value="92">House District No. 10</option><option value="93">House District No. 100</option><option value="94">House District No. 11</option><option value="95">House District No. 12</option><option value="96">House District No. 13</option><option value="97">House District No. 14</option><option value="98">House District No. 15</option><option value="99">House District No. 16</option><option value="100">House District No. 17</option><option value="101">House District No. 18</option><option value="102">House District No. 19</option><option value="103">House District No. 20</option><option value="104">House District No. 21</option><option value="105">House District No. 22</option><option value="106">House District No. 23</option><option value="107">House District No. 24</option><option value="108">House District No. 25</option><option value="109">House District No. 26</option><option value="110">House District No. 27</option><option value="111">House District No. 28</option><option value="112">House District No. 29</option><option value="113">House District No. 30</option><option value="114">House District No. 31</option><option value="115">House District No. 32</option><option value="116">House District No. 33</option><option value="117">House District No. 34</option><option value="118">House District No. 35</option><option value="119">House District No. 36</option><option value="120">House District No. 37</option><option value="121">House District No. 38</option><option value="122">House District No. 39</option><option value="123">House District No. 40</option><option value="124">House District No. 41</option><option value="125">House District No. 42</option><option value="126">House District No. 43</option><option value="127">House District No. 44</option><option value="128">House District No. 45</option><option value="129">House District No. 46</option><option value="130">House District No. 47</option><option value="131">House District No. 48</option><option value="132">House District No. 49</option><option value="133">House District No. 50</option><option value="134">House District No. 51</option><option value="135">House District No. 52</option><option value="136">House District No. 53</option><option value="137">House District No. 54</option><option value="138">House District No. 55</option><option value="139">House District No. 56</option><option value="140">House District No. 57</option><option value="141">House District No. 58</option><option value="142">House District No. 59</option><option value="143">House District No. 60</option><option value="144">House District No. 61</option><option value="145">House District No. 62</option><option value="146">House District No. 63</option><option value="147">House District No. 64</option><option value="148">House District No. 65</option><option value="149">House District No. 66</option><option value="150">House District No. 67</option><option value="151">House District No. 68</option><option value="152">House District No. 69</option><option value="153">House District No. 70</option><option value="154">House District No. 71</option><option value="155">House District No. 72</option><option value="156">House District No. 73</option><option value="157">House District No. 74</option><option value="158">House District No. 75</option><option value="159">House District No. 76</option><option value="160">House District No. 77</option><option value="161">House District No. 78</option><option value="162">House District No. 79</option><option value="163">House District No. 80</option><option value="164">House District No. 81</option><option value="165">House District No. 82</option><option value="166">House District No. 83</option><option value="167">House District No. 84</option><option value="168">House District No. 85</option><option value="169">House District No. 86</option><option value="170">House District No. 87</option><option value="171">House District No. 88</option><option value="172">House District No. 89</option><option value="173">House District No. 90</option><option value="174">House District No. 91</option><option value="175">House District No. 92</option><option value="176">House District No. 93</option><option value="177">House District No. 94</option><option value="178">House District No. 95</option><option value="179">House District No. 96</option><option value="180">House District No. 97</option><option value="181">House District No. 98</option><option value="182">House District No. 99</option><option value="183">Justice of the Peace</option><option value="184">Lieutenant Governor</option><option value="185">Mayor</option><option value="186">Public Administrator</option><option value="187">Public Service Commission District No. 01</option><option value="188">Public Service Commission District No. 02</option><option value="189">Public Service Commission District No. 03</option><option value="190">Public Service Commission District No. 04</option><option value="191">Public Service Commission District No. 05</option><option value="192">School Trustee</option><option value="193">Secretary of State</option><option value="194">Senate District No. 01</option><option value="195">Senate District No. 02</option><option value="196">Senate District No. 03</option><option value="197">Senate District No. 04</option><option value="198">Senate District No. 05</option><option value="199">Senate District No. 06</option><option value="200">Senate District No. 07</option><option value="201">Senate District No. 08</option><option value="202">Senate District No. 09</option><option value="203">Senate District No. 10</option><option value="204">Senate District No. 11</option><option value="205">Senate District No. 12</option><option value="206">Senate District No. 13</option><option value="207">Senate District No. 14</option><option value="208">Senate District No. 15</option><option value="209">Senate District No. 16</option><option value="210">Senate District No. 17</option><option value="211">Senate District No. 18</option><option value="212">Senate District No. 19</option><option value="213">Senate District No. 20</option><option value="214">Senate District No. 21</option><option value="215">Senate District No. 22</option><option value="216">Senate District No. 23</option><option value="217">Senate District No. 24</option><option value="218">Senate District No. 25</option><option value="219">Senate District No. 26</option><option value="220">Senate District No. 27</option><option value="221">Senate District No. 28</option><option value="222">Senate District No. 29</option><option value="223">Senate District No. 30</option><option value="224">Senate District No. 31</option><option value="225">Senate District No. 32</option><option value="226">Senate District No. 33</option><option value="227">Senate District No. 34</option><option value="228">Senate District No. 35</option><option value="229">Senate District No. 36</option><option value="230">Senate District No. 37</option><option value="231">Senate District No. 38</option><option value="232">Senate District No. 39</option><option value="233">Senate District No. 40</option><option value="234">Senate District No. 41</option><option value="235">Senate District No. 42</option><option value="236">Senate District No. 43</option><option value="237">Senate District No. 44</option><option value="238">Senate District No. 45</option><option value="239">Senate District No. 46</option><option value="240">Senate District No. 47</option><option value="241">Senate District No. 48</option><option value="242">Senate District No. 49</option><option value="243">Senate District No. 50</option><option value="244">State Auditor</option><option value="245">Superintendent of Public Instruction</option><option value="246">Supreme Court Chief Justice</option><option value="247">Supreme Court Justice No. 01</option><option value="248">Supreme Court Justice No. 02</option><option value="249">Supreme Court Justice No. 03</option><option value="250">Supreme Court Justice No. 04</option><option value="251">Supreme Court Justice No. 05</option><option value="252">Supreme Court Justice No. 06</option><option value="253">Supt. of Schools</option><option value="254">Treasurer</option><option value="255">Treasurer/Clerk &amp; Recorder</option><option value="256">Trustee</option><option value="257">Unknown</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+                                               
+                        
+                        <div id="contrContributionTypeCodeDiv" style="display: none">                         
+                            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="contrContributorTypeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="contrContributorTypeCodeControlLabel" for="contrContributorTypeCode">Contribution Type</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="contrContributorTypeCode" name="contrContributorTypeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+                                               
+                        </div>
+                        
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="contrAmountRangeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="contrAmountRangeCodeControlLabel" for="contrAmountRangeCode">Contribution Amount</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="contrAmountRangeCode" name="contrAmountRangeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="R1">Less than $500</option><option value="R2">$500 to $1,000</option><option value="R3">$1,000.01 to $5,000</option><option value="R4">$5,000.01 to $10,000</option><option value="R5">$10,000.01 and above</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+                                                   
+                        <div class="form-group">
+                            <label class="col-sm-4 control-label no-padding-right">Election Year</label>
+                            <div class="col-sm-8">
+                                    <input id="spinner3" name="electionYear" type="text" class="input-mini" value=""/>
+                            </div>
+                        </div>
+                       
+                        <div id="contrReportSearchDateRangeControlGroupDiv" style="display: none">
+                            <div class="form-group">
+                                    <h5 class="col-sm-6 control-label no-padding-left blue">Reporting Date Range</h5>
+                            </div>
+	                        <div class="form-group">
+	                            
+	                                
+	                            
+	                            
+	                            
+	                            <div class="" id="contrSearchFromDateControlGroupDiv">
+	                                <label class="col-sm-4 control-label no-padding-right" id="contrSearchFromDateControlLabel" for="contrSearchFromDate">*From</label>
+	                                <div class="col-sm-6">
+	                                    <div class="input-group date" data-date="" data-date-format="mm/dd/yyyy" id="contrSearchFromDatePickerDiv">
+		                                    <input id="contrSearchFromDate" name="contrSearchFromDate" name="contrSearchFromDate" placeholder="From" type="text" class="form-control input-group-sm" value=""/>
+		                                    <span class="input-group-addon">
+	                                            <span id="contrSearchFromDateCalendarId" class="icon-calendar"></span>
+	                                        </span>
+                                        </div>
+	                                    <div id="contrSearchFromDateErrorDivId" class="" style="display: none">
+	                                        <span class="help-block">
+	                                            <span id="contrSearchFromDateIconSpanId" class="">
+	                                            </span>
+	                                        </span>
+	                                    </div>                              
+	                                </div>
+	                            </div>
+	                        </div>
+	                        <div class="form-group">
+	                            
+	                                
+	                            
+	                            
+	                            
+	                            
+	                            <div class="" id="contrSearchToDateControlGroupDiv">
+	                                <label class="col-sm-4 control-label no-padding-right" id="contrSearchToDateControlLabel" for="contrSearchToDate">*To</label>
+	                                <div class="col-sm-6">
+	                                    <div class="input-group date" data-date="" data-date-format="mm/dd/yyyy" id="contrSearchToDatePickerDiv">
+		                                    <input id="contrSearchToDate" name="contrSearchToDate" name="contrSearchToDate" placeholder="To" type="text" class="form-control input-group-sm" value=""/>
+		                                    <span class="input-group-addon">
+	                                            <span id="contrSearchToDateCalendarId" class="icon-calendar"></span>
+	                                        </span>
+                                        </div>
+	                                    <div id="contrSearchToDateErrorDivId" class="" style="display: none">
+	                                        <span class="help-block">
+	                                            <span id="contrSearchToDateIconSpanId" class="">
+	                                            </span>
+	                                        </span>
+	                                    </div>
+	                                </div>
+	                            </div>
+	                        </div>
+                        </div>   
+                    </div>                              
+                </div>
+                                
+                <div class="hr hr-24"></div>
+                
+                <div class="clearfix form-actions">
+                    <div class="col-md-offset-2 col-md-9">
+                    
+                        <button id="searchContributionsButton" class="btn btn-xs btn-info" type="button">
+                            <i class="icon-search bigger-110"></i>
+                            Search
+                        </button>
+                        
+                        &nbsp; &nbsp; &nbsp;
+                        <button id="resetContributionSearchButton" class="btn btn-xs" type="button">
+                            <i class="icon-undo bigger-110"></i>
+                            Reset
+                        </button>
+                    </div>
+                </div>
+                
+            </form>
+            
+        </div>
+
+        <div id="expenditureSearch" class="tab-pane">
+            <form id="searchExpendituresForm" class="form-horizontal" action="/CampaignTracker/public/search" method="post">
+                <input id="independentExpendSearchHidden" name="independentExpendSearch" type="hidden" value="false"/>                  
+                <input id="electioneeringCommSearchHidden" name="electioneeringCommSearch" type="hidden" value="false"/>                  
+                <input id="expendFinancialSearchType" name="financialSearchType" type="hidden" value=""/>
+                <div class="row">
+                    <div class="col-xs-6">                   
+
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+ 	  
+   
+   
+
+
+<div class="form-group " id="expendSearchTypeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="expendSearchTypeCodeControlLabel" for="expendSearchTypeCode">Search Type</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="expendSearchTypeCode" name="expendSearchTypeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="CANDIDATE">Candidate</option><option value="PAYEE">Payee (Candidate)</option><option value="COMMITTEE">Committee</option><option value="PAYEE2">Payee (Committee)</option>
+               
+               
+            
+         </select>
+      
+   
+   
+	  <div id="expendSearchTypeCodeErrorDivId" class="" style="display: none">
+	      <span class="help-block">
+	         <span id="expendSearchTypeCodeIconSpanId" class=""></span>
+	         
+	      </span>
+	  </div>
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+                    
+                        <div id="searchExpendCandidateGroupDiv">
+                            <div class="form-group">
+                                <h5 class="col-sm-4 control-label no-padding-left blue">Candidate</h5>
+                             </div>
+                            <div class="form-group">
+                                <label class="col-sm-4 control-label no-padding-right" for="expendCanLastNameSearch"> Last Name </label>
+                                <div class="col-sm-8">
+                                    <input id="expendCanLastNameSearch" name="expendCanLastName" type="text" class="col-sm-12" value=""/>
+                                </div>
+                            </div>
+                        
+                            <div class="space-4"></div>
+                        
+                            <div class="form-group">
+                                <label class="col-sm-4 control-label no-padding-right" for="expendCanFirstNameSearch"> First Name </label>
+                                <div class="col-sm-8">
+                                    <input id="expendCanFirstNameSearch" name="expendCanFirstName" type="text" class="col-sm-12" value=""/>
+                                </div>
+                            </div>
+                        
+                        </div>
+
+                        <div id="searchExpendCommitteeGroupDiv">
+                            <div class="form-group">
+                                <h5 class="col-sm-4 control-label no-padding-left blue">Committee</h5>
+                             </div>
+                            <div class="form-group">
+                                <label class="col-sm-4 control-label no-padding-right" for="expendCommitteeNameSearch"> Name </label>
+                                <div class="col-sm-8">
+                                    <input id="expendCommitteeNameSearch" name="expendCommitteeName" type="text" class="col-sm-12" value=""/>
+                                </div>
+                            </div>
+                                                
+                        </div>
+
+                        <div id="searchExpendPayeeGroupDiv" style="display: none">
+                            <div class="form-group">
+                                <h5 class="col-sm-4 control-label no-padding-left blue">Payee</h5>
+                             </div>
+                             <div class="form-group">
+                                 <label class="col-sm-4 control-label no-padding-right" for="payeeLastNameSearch"> Entity or Last Name </label>
+                                 <div class="col-sm-8">
+                                     <input id="payeeLastNameSearch" name="payeeLastName" type="text" class="col-sm-12" value=""/>
+                                 </div>
+                             </div>
+                         
+                            <div class="space-4"></div>
+                         
+                            <div class="form-group">
+                                 <label class="col-sm-4 control-label no-padding-right" for="payeeFirstNameSearch"> First Name </label>
+                                 <div class="col-sm-8">
+                                     <input id="payeeFirstNameSearch" name="payeeFirstName" type="text" class="col-sm-12" value=""/>
+                                 </div>
+                            </div>
+    
+                             <div id="searchExpendPayeePartyGroupDiv" style="display: none">                             
+	                             <div class="form-group">
+	                                <h5 class="col-sm-4 control-label no-padding-left blue"> - OR - </h5>
+	                             </div>
+	                             
+	                             
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="expendPartyCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="expendPartyCodeControlLabel" for="expendPartyCode">Political Party</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="expendPartyCode" name="expendPartyCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="CP">Constitution</option><option value="DM">Democratic</option><option value="GR">Green</option><option value="IN">Independent</option><option value="LB">Libertarian</option><option value="NL">Natural Law</option><option value="NP">Non-Partisan</option><option value="RF">Reform</option><option value="FP">Republican</option><option value="UN">Unknown</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+                             </div>
+                       </div>                                              
+                    </div>
+                    
+                    <div class="col-xs-6">
+                    
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="expendCandidateTypeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="expendCandidateTypeCodeControlLabel" for="expendCandidateTypeCode">Campaign Type</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="expendCandidateTypeCode" name="expendCandidateTypeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="CT">City</option><option value="CN">County</option><option value="SC">School</option><option value="SD">State District</option><option value="SW">Statewide</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="expendOfficeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="expendOfficeCodeControlLabel" for="expendOfficeCode">Office Sought</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="expendOfficeCode" name="expendOfficeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="1">Alderman</option><option value="2">Attorney General</option><option value="3">Chief Executive</option><option value="4">Chief of Police</option><option value="5">City Alderman</option><option value="6">City Council</option><option value="7">City Judge</option><option value="8">City Treasurer</option><option value="9">Clerk of District Court</option><option value="10">Clerk of the Supreme Court</option><option value="11">College Trustee</option><option value="12">Councilman</option><option value="13">County Assessor</option><option value="14">County Assessor/Clerk and Recorder</option><option value="15">County Assessor/Sheriff</option><option value="16">County Assessor/Treasurer</option><option value="17">County Assessor/Treasurer/Supt. of Schools</option><option value="18">County Attorney</option><option value="19">County Attorney/Public Administrator</option><option value="20">County Auditor</option><option value="21">County Chief of Law Enforcement</option><option value="22">County Clerk &amp; Recorder/Superintendent of Schools</option><option value="23">County Clerk &amp; Recorder/Superintendent/Assessor</option><option value="24">County Clerk &amp; Recorder/Surveyor</option><option value="25">County Clerk &amp; Recorder/Treasurer</option><option value="26">County Clerk and Recorder</option><option value="27">County Clerk of District Court/Clerk &amp; Recorder</option><option value="28">County Clerk of District Court/Supt. of Schools</option><option value="29">County Commissioner</option><option value="30">County Coroner</option><option value="31">County Coroner/Sheriff</option><option value="32">County Coroner/Sheriff/Public Administrator</option><option value="33">County Sheriff</option><option value="34">County Superintendent of Schools</option><option value="35">County Surveyor</option><option value="36">County Treasurer</option><option value="37">County Treasurer/Clerk of District Court</option><option value="38">County Treasurer/Superintendent of Schools</option><option value="39">District Judge, District 01 Dept. 01</option><option value="40">District Judge, District 01 Dept. 02</option><option value="41">District Judge, District 01 Dept. 03</option><option value="266">District Judge, District 01 Dept. 04</option><option value="42">District Judge, District 02 Dept. 01</option><option value="43">District Judge, District 02 Dept. 02</option><option value="44">District Judge, District 03</option><option value="45">District Judge, District 04 Dept. 01</option><option value="46">District Judge, District 04 Dept. 02</option><option value="47">District Judge, District 04 Dept. 03</option><option value="48">District Judge, District 04 Dept. 04</option><option value="272">District Judge, District 04 Dept. 05</option><option value="49">District Judge, District 05</option><option value="50">District Judge, District 06</option><option value="51">District Judge, District 07 Dept. 01</option><option value="52">District Judge, District 07 Dept. 02</option><option value="53">District Judge, District 08 Dept. 01</option><option value="54">District Judge, District 08 Dept. 02</option><option value="55">District Judge, District 08 Dept. 03</option><option value="56">District Judge, District 08 Dept. 04</option><option value="57">District Judge, District 09</option><option value="58">District Judge, District 10</option><option value="59">District Judge, District 11 Dept. 01</option><option value="60">District Judge, District 11 Dept. 02</option><option value="61">District Judge, District 11 Dept. 03</option><option value="265">District Judge, District 11 Dept. 04</option><option value="273">District Judge, District 11 Dept. 05</option><option value="62">District Judge, District 12</option><option value="63">District Judge, District 13 Dept. 01</option><option value="64">District Judge, District 13 Dept. 02</option><option value="65">District Judge, District 13 Dept. 03</option><option value="66">District Judge, District 13 Dept. 04</option><option value="67">District Judge, District 13 Dept. 05</option><option value="268">District Judge, District 13 Dept. 06</option><option value="269">District Judge, District 13 Dept. 07</option><option value="271">District Judge, District 13 Dept. 08</option><option value="275">District Judge, District 13 Dept. 09</option><option value="276">District Judge, District 13 Dept. 10</option><option value="68">District Judge, District 14</option><option value="264">District Judge, District 14 Dept. 06</option><option value="69">District Judge, District 15</option><option value="70">District Judge, District 16 Dept. 01</option><option value="71">District Judge, District 16 Dept. 02</option><option value="72">District Judge, District 17</option><option value="73">District Judge, District 18 Dept. 01</option><option value="74">District Judge, District 18 Dept. 02</option><option value="270">District Judge, District 18 Dept. 03</option><option value="274">District Judge, District 18 Dept. 04</option><option value="75">District Judge, District 19</option><option value="76">District Judge, District 20 Dept. 01</option><option value="77">District Judge, District 20 Dept. 02</option><option value="267">District Judge, District 21 Dept. 01</option><option value="79">District Judge, District 21 Dept. 02</option><option value="80">District Judge, District 22</option><option value="258">Exploratory</option><option value="259">Exploratory</option><option value="260">Exploratory</option><option value="261">Exploratory</option><option value="262">Exploratory</option><option value="81">Governor</option><option value="82">Hospital District Trustee</option><option value="83">House District No. 01</option><option value="84">House District No. 02</option><option value="85">House District No. 03</option><option value="86">House District No. 04</option><option value="87">House District No. 05</option><option value="88">House District No. 06</option><option value="89">House District No. 07</option><option value="90">House District No. 08</option><option value="91">House District No. 09</option><option value="92">House District No. 10</option><option value="93">House District No. 100</option><option value="94">House District No. 11</option><option value="95">House District No. 12</option><option value="96">House District No. 13</option><option value="97">House District No. 14</option><option value="98">House District No. 15</option><option value="99">House District No. 16</option><option value="100">House District No. 17</option><option value="101">House District No. 18</option><option value="102">House District No. 19</option><option value="103">House District No. 20</option><option value="104">House District No. 21</option><option value="105">House District No. 22</option><option value="106">House District No. 23</option><option value="107">House District No. 24</option><option value="108">House District No. 25</option><option value="109">House District No. 26</option><option value="110">House District No. 27</option><option value="111">House District No. 28</option><option value="112">House District No. 29</option><option value="113">House District No. 30</option><option value="114">House District No. 31</option><option value="115">House District No. 32</option><option value="116">House District No. 33</option><option value="117">House District No. 34</option><option value="118">House District No. 35</option><option value="119">House District No. 36</option><option value="120">House District No. 37</option><option value="121">House District No. 38</option><option value="122">House District No. 39</option><option value="123">House District No. 40</option><option value="124">House District No. 41</option><option value="125">House District No. 42</option><option value="126">House District No. 43</option><option value="127">House District No. 44</option><option value="128">House District No. 45</option><option value="129">House District No. 46</option><option value="130">House District No. 47</option><option value="131">House District No. 48</option><option value="132">House District No. 49</option><option value="133">House District No. 50</option><option value="134">House District No. 51</option><option value="135">House District No. 52</option><option value="136">House District No. 53</option><option value="137">House District No. 54</option><option value="138">House District No. 55</option><option value="139">House District No. 56</option><option value="140">House District No. 57</option><option value="141">House District No. 58</option><option value="142">House District No. 59</option><option value="143">House District No. 60</option><option value="144">House District No. 61</option><option value="145">House District No. 62</option><option value="146">House District No. 63</option><option value="147">House District No. 64</option><option value="148">House District No. 65</option><option value="149">House District No. 66</option><option value="150">House District No. 67</option><option value="151">House District No. 68</option><option value="152">House District No. 69</option><option value="153">House District No. 70</option><option value="154">House District No. 71</option><option value="155">House District No. 72</option><option value="156">House District No. 73</option><option value="157">House District No. 74</option><option value="158">House District No. 75</option><option value="159">House District No. 76</option><option value="160">House District No. 77</option><option value="161">House District No. 78</option><option value="162">House District No. 79</option><option value="163">House District No. 80</option><option value="164">House District No. 81</option><option value="165">House District No. 82</option><option value="166">House District No. 83</option><option value="167">House District No. 84</option><option value="168">House District No. 85</option><option value="169">House District No. 86</option><option value="170">House District No. 87</option><option value="171">House District No. 88</option><option value="172">House District No. 89</option><option value="173">House District No. 90</option><option value="174">House District No. 91</option><option value="175">House District No. 92</option><option value="176">House District No. 93</option><option value="177">House District No. 94</option><option value="178">House District No. 95</option><option value="179">House District No. 96</option><option value="180">House District No. 97</option><option value="181">House District No. 98</option><option value="182">House District No. 99</option><option value="183">Justice of the Peace</option><option value="184">Lieutenant Governor</option><option value="185">Mayor</option><option value="186">Public Administrator</option><option value="187">Public Service Commission District No. 01</option><option value="188">Public Service Commission District No. 02</option><option value="189">Public Service Commission District No. 03</option><option value="190">Public Service Commission District No. 04</option><option value="191">Public Service Commission District No. 05</option><option value="192">School Trustee</option><option value="193">Secretary of State</option><option value="194">Senate District No. 01</option><option value="195">Senate District No. 02</option><option value="196">Senate District No. 03</option><option value="197">Senate District No. 04</option><option value="198">Senate District No. 05</option><option value="199">Senate District No. 06</option><option value="200">Senate District No. 07</option><option value="201">Senate District No. 08</option><option value="202">Senate District No. 09</option><option value="203">Senate District No. 10</option><option value="204">Senate District No. 11</option><option value="205">Senate District No. 12</option><option value="206">Senate District No. 13</option><option value="207">Senate District No. 14</option><option value="208">Senate District No. 15</option><option value="209">Senate District No. 16</option><option value="210">Senate District No. 17</option><option value="211">Senate District No. 18</option><option value="212">Senate District No. 19</option><option value="213">Senate District No. 20</option><option value="214">Senate District No. 21</option><option value="215">Senate District No. 22</option><option value="216">Senate District No. 23</option><option value="217">Senate District No. 24</option><option value="218">Senate District No. 25</option><option value="219">Senate District No. 26</option><option value="220">Senate District No. 27</option><option value="221">Senate District No. 28</option><option value="222">Senate District No. 29</option><option value="223">Senate District No. 30</option><option value="224">Senate District No. 31</option><option value="225">Senate District No. 32</option><option value="226">Senate District No. 33</option><option value="227">Senate District No. 34</option><option value="228">Senate District No. 35</option><option value="229">Senate District No. 36</option><option value="230">Senate District No. 37</option><option value="231">Senate District No. 38</option><option value="232">Senate District No. 39</option><option value="233">Senate District No. 40</option><option value="234">Senate District No. 41</option><option value="235">Senate District No. 42</option><option value="236">Senate District No. 43</option><option value="237">Senate District No. 44</option><option value="238">Senate District No. 45</option><option value="239">Senate District No. 46</option><option value="240">Senate District No. 47</option><option value="241">Senate District No. 48</option><option value="242">Senate District No. 49</option><option value="243">Senate District No. 50</option><option value="244">State Auditor</option><option value="245">Superintendent of Public Instruction</option><option value="246">Supreme Court Chief Justice</option><option value="247">Supreme Court Justice No. 01</option><option value="248">Supreme Court Justice No. 02</option><option value="249">Supreme Court Justice No. 03</option><option value="250">Supreme Court Justice No. 04</option><option value="251">Supreme Court Justice No. 05</option><option value="252">Supreme Court Justice No. 06</option><option value="253">Supt. of Schools</option><option value="254">Treasurer</option><option value="255">Treasurer/Clerk &amp; Recorder</option><option value="256">Trustee</option><option value="257">Unknown</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+                                                
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+      
+      
+         
+         
+            
+         
+      
+
+      
+
+      
+      
+
+      
+      
+      
+      
+   
+   
+
+
+
+
+
+
+   
+   
+      
+      
+   
+
+
+
+	
+
+
+
+
+
+
+   
+      
+   
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+
+   
+   
+ 	  
+   
+
+
+<div class="form-group " id="expendAmountRangeCodeControlGroupDiv">
+
+   
+
+   
+   	  
+   
+
+   
+
+	<label class="col-sm-4 control-label no-padding-right" id="expendAmountRangeCodeControlLabel" for="expendAmountRangeCode">Expenditure Amount</label>
+ 	
+	   
+	   	<div class="col-sm-8">
+	   
+	   
+	
+   
+      
+      
+         <select id="expendAmountRangeCode" name="expendAmountRangeCode" class="form-control col-sm-8">
+            <option value="">- Please Select -</option>
+            
+               
+                  <option value="R1">Less than $500</option><option value="R2">$500 to $1,000</option><option value="R3">$1,000.01 to $5,000</option><option value="R4">$5,000.01 to $10,000</option><option value="R5">$10,000.01 and above</option>
+               
+               
+            
+         </select>
+      
+   
+   
+   
+   
+   	
+	   
+	      </div>
+	   
+	   
+	
+   
+</div>
+
+                                                   
+                        <div class="form-group">
+                            <label class="col-sm-4 control-label no-padding-right">Election Year</label>
+                            <div class="col-sm-8">
+                                    <input id="spinner4" name="electionYear" type="text" class="input-mini" value=""/>
+                            </div>
+                        </div>
+                        
+                        <div id="expendReportSearchDateRangeControlGroupDiv" style="display: none">
+                            <div class="form-group">
+                                    <h5 class="col-sm-6 control-label no-padding-left blue">Reporting Date Range</h5>
+                            </div>
+                            <div class="form-group">
+                                
+                                    
+                                
+                                
+                                
+                                <div class="" id="expendSearchFromDateControlGroupDiv">
+                                    <label class="col-sm-4 control-label no-padding-right" id="expendSearchFromDateControlLabel" for="expendSearchFromDate">*From</label>
+                                    <div class="col-sm-6">
+                                        <div class="input-group date" data-date="" data-date-format="mm/dd/yyyy" id="expendSearchFromDatePickerDiv">
+                                            <input id="expendSearchFromDate" name="expendSearchFromDate" name="expendSearchFromDate" placeholder="From" type="text" class="form-control input-group-sm" value=""/>
+                                            <span class="input-group-addon">
+                                                <span id="expendSearchFromDateCalendarId" class="icon-calendar"></span>
+                                            </span>
+                                        </div>
+                                        <div id="expendSearchFromDateErrorDivId" class="" style="display: none">
+                                            <span class="help-block">
+                                                <span id="expendSearchFromDateIconSpanId" class="">
+                                                </span>
+                                            </span>
+                                        </div>                              
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                
+                                    
+                                
+                                
+                                
+                                
+                                <div class="" id="expendSearchToDateControlGroupDiv">
+                                    <label class="col-sm-4 control-label no-padding-right" id="expendSearchToDateControlLabel" for="expendSearchToDate">*To</label>
+                                    <div class="col-sm-6">
+                                        <div class="input-group date" data-date="" data-date-format="mm/dd/yyyy" id="expendSearchToDatePickerDiv">
+                                            <input id="expendSearchToDate" name="expendSearchToDate" name="expendSearchToDate" placeholder="To" type="text" class="form-control input-group-sm" value=""/>
+                                            <span class="input-group-addon">
+                                                <span id="expendSearchToDateCalendarId" class="icon-calendar"></span>
+                                            </span>
+                                        </div>
+                                        <div id="expendSearchToDateErrorDivId" class="" style="display: none">
+                                            <span class="help-block">
+                                                <span id="expendSearchToDateIconSpanId" class="">
+                                                </span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>   
+                        
+                        <div class="form-group" id="expendIndependentGroupDiv" style="display: none">
+                           <label class="col-sm-4 control-label no-padding-right">&nbsp;</label>
+                           <span class="help-inline col-sm-8">
+                               <label class="middle">
+                                   <input class="ace" type="checkbox" id="independentExpendSearchCheckBox" />
+                                   <span class="lbl">&nbsp;&nbsp;Search Independent Expenditures</span>
+                               </label>
+                           </span> 
+                       </div>
+
+                        <!-- NOTE: Due to changes in MT campaign finance reporting laws, Electioneering Communications is not being tracked at this time. -->                    
+                        <div class="form-group" id="electioneeringCommGroupDiv" style="display: none">
+                           <label class="col-sm-4 control-label no-padding-right">&nbsp;</label>
+                           <span class="help-inline col-sm-8">
+                               <label class="middle">
+                                   <input class="ace" type="checkbox" id="electioneeringCommSearchCheckBox" />
+                                   <span class="lbl">&nbsp;&nbsp;Search Electioneering Communications</span>
+                               </label>
+                           </span> 
+                       </div>
+                         
+                    </div>                              
+                </div>
+                                
+                <div class="hr hr-24"></div>
+                
+                <div class="clearfix form-actions">
+                    <div class="col-md-offset-2 col-md-9">
+                    
+                        <button id="searchExpendituresButton" class="btn btn-xs btn-info" type="button">
+                            <i class="icon-search bigger-110"></i>
+                            Search
+                        </button>
+                        
+                        &nbsp; &nbsp; &nbsp;
+                        <button id="resetExpenditureSearchButton" class="btn btn-xs" type="button">
+                            <i class="icon-undo bigger-110"></i>
+                            Reset
+                        </button>
+                    </div>
+                </div>
+                
+            </form>
+            
+        </div>
+        <!-- help tab -->
+        <div id="searchHelp" class="tab-pane">
+            <div id="searchHelpText" class="panel-body">	
+
+                <div id="helpAccordionId" class="accordion-style1 panel-group">
+                    <div class="panel panel-default">
+                        <div class="panel-heading">
+                            <h4 class="panel-title">
+                                <a class="accordion-toggle" data-toggle="collapse" data-parent="#helpAccordionId" href="#collapseHelp">
+                                    <i class="icon-angle-down bigger-110" data-icon-hide="icon-angle-right" data-icon-show="icon-angle-down"></i>
+                                    &nbsp;<b>How to Search CERS</b>
+                                </a>
+                            </h4>
+                        </div>
+
+                        <div class="panel-collapse collapse in" id="collapseHelp">
+                            <div class="panel-body">
+                                
+                                                    <div class="row">
+                                 <div class="col-sm-12">
+
+                                        <p>Montana's campaign finance laws ensure that the public can engage with a transparent reporting of money in elections. 
+                                           The Campaign Electronic Reporting System (CERS) is a publicly accessible database where candidates and committees report the money they receive and spend to promote and oppose candidates and ballot issues. 
+                                           CERS’ campaign finance information can be found through four tabs: 
+                                        </p>
+                                  </div>
+                             </div>
+                                <div id="candidateHelpAccordionId" class="accordion-style1 panel-group">
+                                    <div class="panel panel-default">
+                                        <div class="panel-heading">
+                                            <h4 class="panel-title">
+                                                <a class="accordion-toggle collapsed" data-toggle="collapse" data-parent="#candidateHelpAccordionId" href="#candidateTips">
+
+                                                    <i class="icon-angle-right bigger-110" data-icon-hide="icon-angle-down" data-icon-show="icon-angle-right"></i>
+                                                    &nbsp;<b>Candidate Search</b>
+                                                </a>
+                                            </h4>
+                                        </div>
+
+                                        <div class="panel-collapse collapse in" id="candidateTips">
+                                            <div class="panel-body">
+
+                                                <div class="row">
+                                                    <div class="col-sm-12">
+
+                                                         <p>Information pertaining to contributions received by candidates can be directly searched here. Users may search for contributions received by an individual candidate’s campaign by searching for the candidate’s name. Broader searches may be run by filtering for Campaign Type, Office Sought, Contribution Type, Contribution Amount, or Election Year instead of name. </p>
+
+                                                    </div>
+
+                                                </div>
+                                               
+                                          </div>
+                                        </div>
+                                    </div><!-- panel body -->
+                                </div> <!--accordion -->
+                                <div id="committeeHelpAccordionId" class="accordion-style1 panel-group">
+                                    <div class="panel panel-default">
+                                        <div class="panel-heading">
+                                            <h4 class="panel-title">
+                                                <a class="accordion-toggle collapsed" data-toggle="collapse" data-parent="#committeeHelpAccordionId" href="#committeeTips">
+
+                                                    <i class="icon-angle-right bigger-110" data-icon-hide="icon-angle-down" data-icon-show="icon-angle-right"></i>
+                                                    &nbsp;<b>Committee Search</b>
+                                                </a>
+                                            </h4>
+                                        </div>
+
+                                        <div class="panel-collapse collapse in" id="committeeTips">
+                                            <div class="panel-body">
+
+                                                <div class="row">
+                                                    <div class="col-sm-12">
+
+                                                         <p>Information on money given to and spent by committees can be accessed via the Committee Search tab. The Committee Search lets users view a committee’s registration or financial reports. Users may search by committee name, the election year, or the committee type. If multiple committees come up, make sure to select the check box of the relevant committee. Broader searches may be run by filtering for Committee Type or Election Year instead of name.</p>
+
+                                                    </div>
+
+                                                </div>
+                                               
+                                          </div>
+                                        </div>
+                                    </div><!-- panel body -->
+                                </div> <!--accordion -->
+                                 <div id="contributionHelpAccordionId" class="accordion-style1 panel-group">
+                                    <div class="panel panel-default">
+                                        <div class="panel-heading">
+                                            <h4 class="panel-title">
+                                                <a class="accordion-toggle collapsed" data-toggle="collapse" data-parent="#contributionHelpAccordionId" href="#contributionTips">
+
+                                                    <i class="icon-angle-right bigger-110" data-icon-hide="icon-angle-down" data-icon-show="icon-angle-right"></i>
+                                                    &nbsp;<b>Contribution Search</b>
+                                                </a>
+                                            </h4>
+                                        </div>
+
+                                        <div class="panel-collapse collapse in" id="contributionTips">
+                                            <div class="panel-body">
+
+                                                <div class="row">
+                                                    <div class="col-sm-12">
+
+                                                         <p> To directly access data about contributions received by candidates or committees without having to comb through each individual finance report, use the Contribution Search function. The Contribution Search includes a “Search Type” dropdown menu to access contribution information for a: </p>
+
+                                                    </div>
+
+                                                </div>
+                                                 <div class="row">
+                                                    <div class="col-sm-11 col-sm-offset-1">
+                                                        <ul>
+                                                            <li><b>Candidate.</b> </li>
+                                                            <li><b>Contributor (Candidate).</b> This search option allows users to access information about the individual donors to candidate campaigns. If the name of the contributor is known, users may search by their name to view all recorded candidate. Broader searches may be run by filtering for Political Party, Campaign Type, Office Sought, Contribution Amount, Election Year, or Reporting Date Range instead of name. </li>
+                                                            <li><b>Committee.</b>  Information about contributions given to committees can be directly searched here. Users may search for this information for individual committees by searching for the committee’s name. Broader searches may be run by filtering for Contribution Type, Contribution Amount, or Election Year instead of name. </li>
+                                                            <li><b>Contributor (Committee).</b> This search option allows users to access information about individuals or committees who have given money to committees. If the name of the contributor is known, users may search by name to view all the recorded contributions they have given to committees. Broader searches may be run by filtering for Contribution Amount or Election Year instead of name.</li>
+                                                         </ul>
+                                                    </div>
+
+                                                </div>
+                                               
+                                          </div>
+                                        </div>
+                                    </div><!-- panel body -->
+                                </div> <!--accordion -->
+                                <div id="expenditureHelpAccordionId" class="accordion-style1 panel-group">
+                                    <div class="panel panel-default">
+                                        <div class="panel-heading">
+                                            <h4 class="panel-title">
+                                                <a class="accordion-toggle collapsed" data-toggle="collapse" data-parent="#expenditureHelpAccordionId" href="#expenditureTips">
+
+                                                    <i class="icon-angle-right bigger-110" data-icon-hide="icon-angle-down" data-icon-show="icon-angle-right"></i>
+                                                    &nbsp;<b>Expenditure Search</b>
+                                                </a>
+                                            </h4>
+                                        </div>
+
+                                        <div class="panel-collapse collapse in" id="expenditureTips">
+                                            <div class="panel-body">
+
+                                                <div class="row">
+                                                    <div class="col-sm-12">
+
+                                                         <p>To directly access data about expenditures made (money spent) by candidates or committees without having to comb through each individual finance report, use the Expenditure Search function. The Expenditure Search includes a “Search Type” dropdown menu to access contribution information for a:</p>
+
+                                                    </div>
+
+                                                </div>
+                                                 <div class="row">
+                                                    <div class="col-sm-11 col-sm-offset-1">
+                                                        <ul>
+                                                            <li><b>Candidate. </b> Information about expenditures made (money spent) by candidates can be directly searched here. Users may search for expenditures made by an individual candidate’s campaign by searching for the candidate’s name. Broader searches may be run by filtering for Office Sought, Expenditure Amount, or Election Year instead of name.</li> 
+                                                            <li><b>Payee (Candidate).</b> This search shows what entity or business a candidate paid for campaign-related expenses. If the name of the entity paid by a candidate’s campaign is known, users may search  by the entity’s name to view all recorded expenditures made to them. Broader searches may be run by filtering for Political Party, Campaign Type, Office Sought, Expenditure Amount, Election Year, or Reporting Date Range instead of name.</li>
+                                                            <li><b>Committee.</b> Information pertaining to expenditures made (money spent) by committees can be directly searched here. Users may search for this information for individual committees by searching for the committee’s name. Broader searches may be run by filtering for Expenditure Amount or Election Year instead of name. Independent Expenditures may also be individually searched.</li>
+                                                            <li><b>Payee (Committee). </b> This search shows what entity or business a committee paid for elections-related expenditures (expenses). If the name of the entity an expenditure was made to is known, users may search them by name to view all recorded expenditures made to them. Broader searches may be run by filtering for Expenditure Amount or Election Year instead of name. Independent Expenditures may also be individually searched.</li></i>
+                                                        </ul>
+                                                    </div>
+
+                                                </div>
+                                               
+                                          </div>
+                                        </div>
+                                    </div><!-- panel body -->
+                                </div> <!--accordion -->
+                            
+
+                            
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="searchTipAccordionId" class="accordion-style1 panel-group">
+                    <div class="panel panel-default">
+                        <div class="panel-heading">
+                            <h4 class="panel-title">
+                                <a class="accordion-toggle collapsed" data-toggle="collapse" data-parent="#searchTipAccordionId" href="#searchTips">
+                                    
+                                    <i class="icon-angle-right bigger-110" data-icon-hide="icon-angle-down" data-icon-show="icon-angle-right"></i>
+                                    &nbsp;<b>Search Tips</b>
+                                </a>
+                            </h4>
+                        </div>
+
+                        <div class="panel-collapse collapse in" id="searchTips">
+                            <div class="panel-body">
+                                
+                                <div class="row">
+                                    <div class="col-sm-12">
+
+                                         <p>* Note that only five records appear at a time. To increase search results, select the dropdown Display tab to display up to 100 results per page (see image below). </p>
+                                         <p>* To view contribution or expenditure search results in an Excel spreadsheet, click the “Download” icon from the search result menu.</p>
+                                         <p>* Please note that there is NOT a way to download or view contribution and expenditure information for all candidates and committees at one time. Because each election will have hundreds or thousands of candidates running for office and hundreds or thousands of political committees supporting or opposing them, there is too much information in the system for it to all be pulled in a single batch! Searches are limited to one candidate or committee for one election year at a time.</p>
+                                         <p>* Keep in mind that data takes time to load. Make sure your browser screen does not time out while this data processes and do not refresh your browser. </p>
+                                         
+                                    </div>
+				
+                                </div>
+                                <div class="row">
+                                    <div class="col-sm-11 col-sm-offset-1">
+                                        <img src="/CampaignTracker/assets/images/search-results-example.png" />
+                                    </div>
+                                </div>
+                             
+
+                            </div>
+                        </div>
+                </div><!-- panel body -->
+
+             </div>
+       
+
+</div>
+
+    <!-- page specific plugin scripts -->
+  	   
+    
+    
+	
+
+	<!--[if !IE]> -->
+
+		<script type="text/javascript">
+			window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-2.0.3.min.js'>"+"<"+"/script>");
+		</script>
+
+	<!-- <![endif]-->
+
+	<!--[if IE]>
+			<script type="text/javascript">
+			 window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-1.10.2.min.js'>"+"<"+"/script>");
+			</script>
+	<![endif]-->
+			
+	<script type="text/javascript">
+			if("ontouchend" in document) document.write("<script src='/CampaignTracker/assets/js/jquery.mobile.custom.min.js'>"+"<"+"/script>");
+	</script>
+			
+<script type="text/javascript">
+	
+    var tabName = "";
+    
+	jQuery(function($) {		
+        
+		$('#searchTabId a[data-toggle="tab"]').on('click', function (e) {
+            tabName = $(e.target).attr('href');
+            tabName = tabName.replace(/#/g,"");
+            
+            determineFocus();
+        });
+		
+		$('#searchTabId a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
+            tabName = $(e.target).attr('href');
+            tabName = tabName.replace(/#/g,"");
+            
+            determineFocus();
+        });
+		
+		var electionYearVal = "";
+		var maxElectionYearVal = 2024;
+	    if ('2026' != "") {
+	        electionYearVal = parseInt('2026');	        
+	        maxElectionYearVal = electionYearVal + 10;
+	    }   
+	    
+        $('#spinner1').ace_spinner({value:electionYearVal,min:2000,max:maxElectionYearVal,step:1, btn_up_class:'btn-info' , btn_down_class:'btn-info'})
+        .on('change', function(){
+            //alert(this.value)
+        });
+        $('#spinner2').ace_spinner({value:electionYearVal,min:2000,max:maxElectionYearVal,step:1, btn_up_class:'btn-info' , btn_down_class:'btn-info'})
+        .on('change', function(){
+            //alert(this.value)
+        });
+        $('#spinner3').ace_spinner({value:electionYearVal,min:2000,max:maxElectionYearVal,step:1, btn_up_class:'btn-info' , btn_down_class:'btn-info'})
+        .on('change', function(){
+            //alert(this.value)
+        });
+        $('#spinner4').ace_spinner({value:electionYearVal,min:2000,max:maxElectionYearVal,step:1, btn_up_class:'btn-info' , btn_down_class:'btn-info'})
+        .on('change', function(){
+            //alert(this.value)
+        });
+        
+		
+        //Blank out election year spinners
+        document.getElementById("spinner1").value = "";
+        document.getElementById("spinner2").value = "";
+        document.getElementById("spinner3").value = "";
+        document.getElementById("spinner4").value = "";
+        
+		/* Add a click handler for search candidate registration */
+		$('#searchCandidatesButton').on('click', function() {
+			$('body').css('cursor', 'wait');
+			$('#searchCandidatesForm').get(0).setAttribute('action','searchResults/searchCandidates');
+			$('#searchCandidatesForm').submit();
+		} );
+
+		$("#searchCandidatesForm").keypress(function(event) {
+		    if (event.which == 13) {
+		        event.preventDefault();
+		        $('body').css('cursor', 'wait');
+	            $('#searchCandidatesForm').get(0).setAttribute('action','searchResults/searchCandidates');
+	            $('#searchCandidatesForm').submit();
+		    }
+		});
+		
+		/* Add a click handler for new candidate registration */
+		$('#newCandidateButton').on('click', function() {
+			$('#searchCandidatesForm').get(0).setAttribute('action','/CampaignTracker/app/candidateRegistration/newCandidate');
+			$('#searchCandidatesForm').submit();
+		} );
+
+		/* Add a click handler for search committee registrations */
+		$('#searchCommitteesButton').on('click', function() {
+			$('body').css('cursor', 'wait');
+			$('#searchCommitteesForm').get(0).setAttribute('action','searchResults/searchCommittees');
+			$('#searchCommitteesForm').submit();
+		} );
+		
+        $("#searchCommitteesForm").keypress(function(event) {
+            if (event.which == 13) {
+                event.preventDefault();
+                $('body').css('cursor', 'wait');
+                $('#searchCommitteesForm').get(0).setAttribute('action','searchResults/searchCommittees');
+                $('#searchCommitteesForm').submit();
+            }
+        });
+        
+        //initially hide the search tips panel
+         $('#searchTips').collapse('hide');
+         //initially hide the how to serach CERS subpanels
+         $('#candidateTips').collapse('hide');
+         $('#committeeTips').collapse('hide');
+         $('#contributionTips').collapse('hide');
+         $('#expenditureTips').collapse('hide');
+         
+         
+         //close either searchTips or collapseHelp when one of them is opened
+         $("#collapseHelp").on('show.bs.collapse', function () {
+            $('#searchTips').collapse('hide');
+         });
+         $("#searchTips").on('show.bs.collapse', function () {
+            $('#collapseHelp').collapse('hide');
+         });
+		
+		/* Add a click handler for new committee registration */
+		$('#newCommitteeButton').on('click', function() {
+			$('#searchCommitteesForm').get(0).setAttribute('action','/CampaignTracker/app/committeeRegistration/newCommittee');
+			$('#searchCommitteesForm').submit();
+		} );
+
+	    /* Add a click handler for search contributions */
+        $('#searchContributionsButton').on('click', function() {
+        	$('body').css('cursor', 'wait');
+            $('#contrFinancialSearchType').val("CONTR");
+            $('#searchContributionsForm').get(0).setAttribute('action','searchResults/searchFinancials');
+            $('#searchContributionsForm').submit();
+        } );
+	    
+        $("#searchContributionsForm").keypress(function(event) {
+            if (event.which == 13) {
+                event.preventDefault();
+                $('body').css('cursor', 'wait');
+                $('#contrFinancialSearchType').val("CONTR");
+                $('#searchContributionsForm').get(0).setAttribute('action','searchResults/searchFinancials');
+                $('#searchContributionsForm').submit();
+            }
+        });
+        
+        /* Add a click handler for the search independent expenditures checkbox */
+        $('#independentExpendSearchCheckBox').change(function() {
+            var cb = $('#independentExpendSearchCheckBox').is(':checked');
+            $("#independentExpendSearchHidden").val(cb);
+        });
+        
+        /* Add a click handler for the search electioneering communications checkbox */
+        $('#electioneeringCommSearchCheckBox').change(function() {
+            var cb = $('#electioneeringCommSearchCheckBox').is(':checked');
+            $("#electioneeringCommSearchHidden").val(cb);
+        });
+
+        /* Add a click handler for search expenditures */
+        $('#searchExpendituresButton').on('click', function() {
+        	$('body').css('cursor', 'wait');
+        	
+        	$('#expendFinancialSearchType').val("EXPEND");
+            $('#searchExpendituresForm').get(0).setAttribute('action','searchResults/searchFinancials');
+            $('#searchExpendituresForm').submit();
+        } );
+
+        $("#searchExpendituresForm").keypress(function(event) {
+            if (event.which == 13) {
+                event.preventDefault();
+                $('body').css('cursor', 'wait');
+                $('#expendFinancialSearchType').val("EXPEND");
+                $('#searchExpendituresForm').get(0).setAttribute('action','searchResults/searchFinancials');
+                $('#searchExpendituresForm').submit();
+            }
+        });
+
+        /* Add a click handler for selecting candidate or contributor search */
+        $('#contrSearchTypeCode').change(function() {
+        	
+        	populateContributionTypeList();
+        	
+        	displayContributionSearchType();    
+         } );
+        
+        /* Add a click handler for selecting candidate or expenditure search */
+        $('#expendSearchTypeCode').change(function() {        
+        	displayExpenditureSearchType();                            
+        } );
+
+        var contrSearchTypeVal = "";        
+        if (contrSearchTypeVal != null && contrSearchTypeVal != "") {
+        	$("#contrSearchTypeCode").val(contrSearchTypeVal);
+        } else {
+        	$("#contrSearchTypeCode").val("CANDIDATE");
+        }
+        
+        displayContributionSearchType(); 
+
+        var expendSearchTypeVal = "";
+        if (expendSearchTypeVal != null && expendSearchTypeVal != "") {
+            $("#expendSearchTypeCode").val(expendSearchTypeVal);
+        } else {
+            $("#expendSearchTypeCode").val("CANDIDATE");
+        }
+        displayExpenditureSearchType(); 
+                
+        $("#resetCandidateSearchButton").on('click', function() {        	            	
+            	$( '#searchCandidatesForm' ).find('input').each(function() {
+                    $(this).val('');
+                });
+            	
+            	$( '#searchCandidatesForm' ).find('select').each(function() {
+                    $(this).val('');
+                }); 
+            	
+            	determineFocus();
+        });
+
+        
+        $("#resetCommitteeSearchButton").on('click', function() {                           
+                $( '#searchCommitteesForm' ).find('input').each(function() {
+                    $(this).val('');
+                });
+                
+                $( '#searchCommitteesForm' ).find('select').each(function() {
+                    $(this).val('');
+                }); 
+                
+                determineFocus();
+        });
+ 
+        $("#resetContributionSearchButton").on('click', function() {                           
+            $( '#searchContributionsForm' ).find('input').each(function() {
+                $(this).val('');
+            });
+            
+            $( '#searchContributionsForm' ).find('select').each(function() {
+                $(this).val('');
+            }); 
+            
+            resetSearchErrorFields();
+            determineFocus();
+        });
+
+        $("#resetExpenditureSearchButton").on('click', function() {                           
+            $( '#searchExpendituresForm' ).find('input').each(function() {
+                $(this).val('');
+            });
+            
+            $( '#searchExpendituresForm' ).find('select').each(function() {
+                $(this).val('');
+            }); 
+            
+            $('#independentExpendSearchHidden').val(false);
+            $("#independentExpendSearchCheckBox").prop('checked',false);
+
+            $('#electioneeringCommSearchHidden').val(false);
+            $("#electioneeringCommSearchCheckBox").prop('checked',false);
+
+            resetSearchErrorFields();
+            determineFocus();
+            
+        });
+ 
+        $( "#contrSearchFromDate" ).datepicker({
+            dateFormat: 'mm/dd/yy', 
+            onClose: handleCloseDatePicker,
+            beforeShow: function() {
+                setTimeout(function(){
+                    $('.ui-datepicker').css('z-index', 9999);
+                }, 0);
+            }
+        }).mask('99/99/9999');
+
+        $('#contrSearchFromDateCalendarId').click(function(){                          
+            $('#contrSearchFromDate').datepicker('show');
+        });
+
+        $( "#contrSearchToDate" ).datepicker({
+            dateFormat: 'mm/dd/yy',
+            onClose: handleCloseDatePicker,
+            beforeShow: function() {
+                setTimeout(function(){
+                    $('.ui-datepicker').css('z-index', 9999);
+                }, 0);
+            }
+        }).mask('99/99/9999');
+
+        $('#contrSearchToDateCalendarId').click(function(){                            
+            $('#contrSearchToDate').datepicker('show');
+        });
+
+        $( "#expendSearchFromDate" ).datepicker({
+            dateFormat: 'mm/dd/yy', 
+            onClose: handleCloseDatePicker,
+            beforeShow: function() {
+                setTimeout(function(){
+                    $('.ui-datepicker').css('z-index', 9999);
+                }, 0);
+            }
+        }).mask('99/99/9999');
+
+        $('#expendSearchFromDateCalendarId').click(function(){                          
+            $('#expendSearchFromDate').datepicker('show');
+        });
+
+        $( "#expendSearchToDate" ).datepicker({
+            dateFormat: 'mm/dd/yy',
+            onClose: handleCloseDatePicker,
+            beforeShow: function() {
+                setTimeout(function(){
+                    $('.ui-datepicker').css('z-index', 9999);
+                }, 0);
+            }
+        }).mask('99/99/9999');
+
+        $('#expendSearchToDateCalendarId').click(function(){                            
+            $('#expendSearchToDate').datepicker('show');
+        });
+
+		/* Add a change handler for the committee type selection field */
+	    $('#committeeTypeCode').change(handleCommitteeTypeChange);
+	    
+	    populateContributionTypeList();
+	    
+	    
+	}); //End JQuery
+	
+
+    function handleCommitteeTypeChange() {
+        
+        var e = document.getElementById("committeeTypeCode");
+        var sel = "";
+        if (e != null &&  e.selectedIndex != null) {
+             sel = e.options[e.selectedIndex].value;
+        }
+        
+        if (sel == "PA" || sel == "PP" || sel == "FA" || sel == "FP") {
+            document.getElementById("spinner2").value = "";
+        } else {
+            var electionYear = $("#spinner2").val();
+            
+            if (electionYear == "") {
+                document.getElementById("spinner2").value = parseInt('2026');
+            }
+        }
+    }
+
+    function displayContributionSearchType() {
+        
+		document.getElementById('contrCandidateTypeCodeControlGroupDiv').style.display = "none";
+        document.getElementById('contrReportSearchDateRangeControlGroupDiv').style.display = "none";
+        document.getElementById('contrContributionTypeCodeDiv').style.display = "none";
+		
+    	if ($("#contrSearchTypeCode option:selected").val() == 'CANDIDATE') {
+    		document.getElementById('contrContributionTypeCodeDiv').style.display = "block";
+    		
+            document.getElementById('searchContrCandidateGroupDiv').style.display = "block";                
+            document.getElementById('searchContrCommitteeGroupDiv').style.display = "none";                
+            document.getElementById('searchContributorGroupDiv').style.display = "none";
+            document.getElementById('contrOfficeCodeControlGroupDiv').style.display = "block";           
+           
+            $("#contrLastNameSearch").val("");
+            $("#contrFirstNameSearch").val("");
+            $("#contrCommitteeNameSearch").val("");
+            $("#contrPartyCode").val("");
+                        
+        } else if ($("#contrSearchTypeCode option:selected").val() == 'COMMITTEE') {
+        	
+            document.getElementById('contrContributionTypeCodeDiv').style.display = "block";
+            document.getElementById('searchContrCommitteeGroupDiv').style.display = "block";                
+            document.getElementById('searchContrCandidateGroupDiv').style.display = "none";                
+            document.getElementById('searchContributorGroupDiv').style.display = "none";
+            document.getElementById('contrOfficeCodeControlGroupDiv').style.display = "none";
+
+            $("#contrLastNameSearch").val("");
+            $("#contrFirstNameSearch").val("");
+            $("#contrPartyCode").val("");
+            $("#contrCanLastNameSearch").val("");
+            $("#contrCanFirstNameSearch").val("");
+            
+        } else if ($("#contrSearchTypeCode option:selected").val() == 'CONTRIBUTOR' || $("#contrSearchTypeCode option:selected").val() == 'CONTRIBUTOR2') {
+            document.getElementById('searchContrCandidateGroupDiv').style.display = "none";
+            document.getElementById('searchContrCommitteeGroupDiv').style.display = "none";    
+            document.getElementById('searchContributorPartyGroupDiv').style.display = "none";
+
+            document.getElementById('searchContributorGroupDiv').style.display = "block";
+            
+            if ($("#contrSearchTypeCode option:selected").val() == 'CONTRIBUTOR') {
+                document.getElementById('searchContributorPartyGroupDiv').style.display = "block";
+                document.getElementById('contrOfficeCodeControlGroupDiv').style.display = "block";
+                document.getElementById('contrCandidateTypeCodeControlGroupDiv').style.display = "block";
+                document.getElementById('contrReportSearchDateRangeControlGroupDiv').style.display = "block";
+
+            }
+            else {
+                document.getElementById('contrOfficeCodeControlGroupDiv').style.display = "none";
+            }
+            
+            $("#contrCanLastNameSearch").val("");
+            $("#contrCanFirstNameSearch").val("");
+            $("#contrCommitteeNameSearch").val("");
+            
+       } else {
+            document.getElementById('searchContrCandidateGroupDiv').style.display = "none";
+            document.getElementById('searchContrCommitteeGroupDiv').style.display = "none";                
+            document.getElementById('searchContributorGroupDiv').style.display = "none";
+            document.getElementById('contrOfficeCodeControlGroupDiv').style.display = "none";
+            
+            $("#contrLastNameSearch").val("");
+            $("#contrFirstNameSearch").val("");
+            $("#contrPartyCode").val("");
+            $("#contrCanLastNameSearch").val("");
+            $("#contrCanFirstNameSearch").val("");
+            $("#contrCommitteeNameSearch").val("");
+
+        }
+     }
+
+    function displayExpenditureSearchType() {
+        
+        document.getElementById('expendIndependentGroupDiv').style.display = "none";
+        document.getElementById('electioneeringCommGroupDiv').style.display = "none";
+        document.getElementById('expendCandidateTypeCodeControlGroupDiv').style.display = "none";
+        document.getElementById('expendReportSearchDateRangeControlGroupDiv').style.display = "none";
+
+    	if ($("#expendSearchTypeCode option:selected").val() == 'CANDIDATE') {
+            document.getElementById('searchExpendCandidateGroupDiv').style.display = "block";                
+            document.getElementById('searchExpendCommitteeGroupDiv').style.display = "none";                
+            document.getElementById('searchExpendPayeeGroupDiv').style.display = "none";
+            document.getElementById('expendOfficeCodeControlGroupDiv').style.display = "block";
+
+            $("#expendCommitteeNameSearch").val("");
+            $("#payeeLastNameSearch").val("");
+            $("#payeeFirstNameSearch").val("");
+            $("#expendPartyCode").val("");
+            
+        } else if ($("#expendSearchTypeCode option:selected").val() == 'COMMITTEE') {
+            document.getElementById('searchExpendCommitteeGroupDiv').style.display = "block";      
+            document.getElementById('expendIndependentGroupDiv').style.display = "block";
+            
+            //NOTE: Due to changes in MT campaign reporting laws, Electioneering Communications is not being tracked at this time.  
+            //Do not display electioneering communications.
+            //document.getElementById('electioneeringCommGroupDiv').style.display = "block";
+            
+            document.getElementById('searchExpendCandidateGroupDiv').style.display = "none";
+            document.getElementById('searchExpendPayeeGroupDiv').style.display = "none";
+            document.getElementById('expendOfficeCodeControlGroupDiv').style.display = "none";
+            
+            $("#expendCanLastNameSearch").val("");
+            $("#expendCanFirstNameSearch").val("");
+            $("#payeeLastNameSearch").val("");
+            $("#payeeFirstNameSearch").val("");
+            $("#expendPartyCode").val("");
+            
+        } else if ($("#expendSearchTypeCode option:selected").val() == 'PAYEE' || $("#expendSearchTypeCode option:selected").val() == 'PAYEE2') {
+            document.getElementById('searchExpendCandidateGroupDiv').style.display = "none";
+            document.getElementById('searchExpendCommitteeGroupDiv').style.display = "none";      
+            document.getElementById('searchExpendPayeePartyGroupDiv').style.display = "none";
+
+            document.getElementById('searchExpendPayeeGroupDiv').style.display = "block";
+            
+            if ($("#expendSearchTypeCode option:selected").val() == 'PAYEE') {
+                document.getElementById('searchExpendPayeePartyGroupDiv').style.display = "block";
+                document.getElementById('expendOfficeCodeControlGroupDiv').style.display = "block";
+                document.getElementById('expendCandidateTypeCodeControlGroupDiv').style.display = "block";
+                document.getElementById('expendReportSearchDateRangeControlGroupDiv').style.display = "block";
+
+            }
+            else {
+                document.getElementById('expendIndependentGroupDiv').style.display = "block";
+                
+                //NOTE: Due to changes in MT campaign reporting laws, Electioneering Communications is not being tracked at this time.  
+                //Do not display electioneering communications.
+                //document.getElementById('electioneeringCommGroupDiv').style.display = "block";
+                
+                document.getElementById('expendOfficeCodeControlGroupDiv').style.display = "none";
+            }
+            	
+            $("#expendCanLastNameSearch").val("");
+            $("#expendCanFirstNameSearch").val("");
+            $("#expendCommitteeNameSearch").val("");
+                        
+        } else {
+        	
+            document.getElementById('searchExpendCandidateGroupDiv').style.display = "none";
+            document.getElementById('searchExpendPayeeGroupDiv').style.display = "none";
+            document.getElementById('searchExpendCommitteeGroupDiv').style.display = "none";                
+            document.getElementById('expendOfficeCodeControlGroupDiv').style.display = "none";
+            
+            $("#payeeLastNameSearch").val("");
+            $("#payeeFirstNameSearch").val("");
+            $("#expendPartyCode").val("");
+            $("#expendCanLastNameSearch").val("");
+            $("#expendCanFirstNameSearch").val("");
+            $("#expendCommitteeNameSearch").val("");
+        }
+    	
+    	
+    }
+    
+    function determineFocus() {
+        if (tabName == "candidateSearch") {               
+            $("#lastNameCandSearch").focus();
+        } else if (tabName == "committeeSearch") {              
+            $("#committeeNameSearch").focus();
+        } else if (tabName == "contributionSearch") {
+            $("#contrSearchTypeCode").focus();
+        } else if (tabName == "expenditureSearch") {
+            $("#expendSearchTypeCode").focus();
+        } else {
+        	$("#lastNameCandSearch").focus();
+        }
+
+    }
+    
+    function resetSearchErrorFields() {
+    	
+        $("#contrSearchTypeCodeControlGroupDiv").removeClass('has-error');
+        $("#contrSearchTypeCodeControlGroupDiv").removeClass('has-warning');
+        document.getElementById('contrSearchTypeCodeErrorDivId').style.display = "none";
+
+        $("#expendSearchTypeCodeControlGroupDiv").removeClass('has-error');
+        $("#expendSearchTypeCodeControlGroupDiv").removeClass('has-warning');
+        document.getElementById('expendSearchTypeCodeErrorDivId').style.display = "none";
+
+        $("#contrSearchFromDateControlGroupDiv").removeClass('has-error');
+        $("#contrSearchFromDateControlGroupDiv").removeClass('has-warning');
+        document.getElementById('contrSearchFromDateErrorDivId').style.display = "none";
+
+        $("#contrSearchToDateControlGroupDiv").removeClass('has-error');
+        $("#contrSearchToDateControlGroupDiv").removeClass('has-warning');
+        document.getElementById('contrSearchToDateErrorDivId').style.display = "none";
+
+        $("#expendSearchFromDateControlGroupDiv").removeClass('has-error');
+        $("#expendSearchFromDateControlGroupDiv").removeClass('has-warning');
+        document.getElementById('expendSearchFromDateErrorDivId').style.display = "none";
+
+        $("#expendSearchToDateControlGroupDiv").removeClass('has-error');
+        $("#expendSearchToDateControlGroupDiv").removeClass('has-warning');
+        document.getElementById('expendSearchToDateErrorDivId').style.display = "none";
+
+    }
+
+    function populateContributionTypeList() {
+        
+        if ($("#contrSearchTypeCode").val() == "CANDIDATE") {
+            formTypes = "'C5'";
+        } else {
+            formTypes = "'C4','C6'";
+        }
+        
+        $("#contrContributorTypeCode").empty();
+        $("#contrContributorTypeCode").append($("<option />").val("").text(" - Please Select - "));
+        $.ajax({
+            url: "searchResults/contributionTypeList",
+            dataType: "json",
+            data: {formTypes:formTypes
+              },
+            error: function(res, status) {
+              alert(res.status+" : "+res.statusText+". Status: "+status);
+            },
+            success: function( data ) {                 
+                $.each(data.aaData, function() {
+                    $("#contrContributorTypeCode").append($("<option />").val(this.codeValue).text(this.description));
+                });
+                
+                var contributionTypeVal = "";
+                if (contributionTypeVal != null && contributionTypeVal != "") {
+                    $("#contrContributorTypeCode").val(contributionTypeVal);
+                }        
+
+            }
+          });
+    }
+
+</script>
+
+
+									    
+    <!-- page specific plugin scripts -->
+  	   
+    
+    
+	
+
+	<!--[if !IE]> -->
+
+		<script type="text/javascript">
+			window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-2.0.3.min.js'>"+"<"+"/script>");
+		</script>
+
+	<!-- <![endif]-->
+
+	<!--[if IE]>
+			<script type="text/javascript">
+			 window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-1.10.2.min.js'>"+"<"+"/script>");
+			</script>
+	<![endif]-->
+			
+	<script type="text/javascript">
+			if("ontouchend" in document) document.write("<script src='/CampaignTracker/assets/js/jquery.mobile.custom.min.js'>"+"<"+"/script>");
+	</script>
+		
+	<script type="text/javascript">
+		
+		jQuery(function($) {
+			$('body').css('cursor', 'auto');
+			$('#searchTabId a[href="#candidateSearch"]').tab('show');
+			
+			var srchTabName = $("#searchTabId li.active a").attr("href");
+            srchTabName = srchTabName.replace(/#/g,"");
+            
+            if (srchTabName == "candidateSearch") {               
+                $("#lastNameCandSearch").focus();
+            } else if (srchTabName == "committeeSearch") {              
+                $("#committeeNameSearch").focus();
+            } else if (srchTabName == "contributionSearch") {
+                $("#contrSearchTypeCode").focus();
+            } else if (srchTabName == "expenditureSearch") {
+                $("#expendSearchTypeCode").focus();
+            }
+			
+		});
+						
+	</script>
+	
+
+                                <!-- PAGE CONTENT ENDS -->
+                            </div><!-- /.col -->
+                        </div><!-- /.row -->
+
+                    </div><!-- /.page-content -->
+                    <div id="row" class="omit-print">
+                        <div class="col-xs-12">		
+                            <div class="hr"></div>	
+                        </div>
+                        <div class="col-xs-12 col-xs-offset-4">		
+                            <ul class="nav nav-pills">
+                                <li><a href="http://mt.gov/services/">Online Services</a></li>
+                                <li><a href="http://politicalpractices.mt.gov/default.mcpx">Commissioner of Political Practices</a></li>
+                                <li><a
+                                        href="http://itsd.mt.gov/content/policy/policies/Statewide_Policy_Internet_Privacy_and_Security.pdf">Privacy
+                                        &amp; Security</a></li>
+                                <li><a
+                                        href="http://mt.gov/discover/disclaimer.mcpx#accessibility">Accessibility</a></li>
+                                <li><a href="http://politicalpractices.mt.gov/aboutus" target="_blank">Contact
+                                        Us</a></li>
+                                <li><a href="http://mt.gov/"> <img
+                                            src="/CampaignTracker/assets/images/mtgov.gif" height="26px"
+                                            alt="logo" />
+                                    </a></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                </div><!-- /.main-content -->
+                <!-- div class="ace-settings-container" id="ace-settings-container">
+                        <div class="btn btn-app btn-xs btn-warning ace-settings-btn" id="ace-settings-btn">
+                                <i class="icon-cog bigger-150"></i>
+                        </div>
+
+
+                        <div class="ace-settings-box" id="ace-settings-box">
+                                <div>
+                                        <div class="pull-left">
+                                                <select id="skin-colorpicker" class="hide">
+                                                        <option data-skin="default" value="#438EB9">#438EB9</option>
+                                                        <option data-skin="skin-1" value="#222A2D">#222A2D</option>
+                                                        <option data-skin="skin-2" value="#C6487E">#C6487E</option>
+                                                        <option data-skin="skin-3" value="#D0D0D0">#D0D0D0</option>
+                                                </select>
+                                        </div>
+                                        <span>&nbsp; Choose Skin</span>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-navbar" />
+                                        <label class="lbl" for="ace-settings-navbar"> Fixed Navbar</label>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-sidebar" />
+                                        <label class="lbl" for="ace-settings-sidebar"> Fixed Sidebar</label>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-breadcrumbs" />
+                                        <label class="lbl" for="ace-settings-breadcrumbs"> Fixed Breadcrumbs</label>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-rtl" />
+                                        <label class="lbl" for="ace-settings-rtl"> Right To Left (rtl)</label>
+                                </div>
+
+                                <div>
+                                        <input type="checkbox" class="ace ace-checkbox-2" id="ace-settings-add-container" />
+                                        <label class="lbl" for="ace-settings-add-container">
+                                                Inside
+                                                <b>.container</b>
+                                        </label>
+                                </div>
+                        </div>
+                </div --><!-- /#ace-settings-container -->
+
+            </div><!-- /.main-container-inner -->
+
+            <!-- / Page footer -->
+            <a href="#" id="btn-scroll-up" class="btn-scroll-up btn btn-sm btn-inverse">
+                <i class="icon-double-angle-up icon-only bigger-110"></i>
+            </a>
+        </div><!-- /.main-container -->
+
+        <!-- basic scripts -->
+
+        <!--[if !IE]> -->
+
+        <script type="text/javascript">
+            window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-2.0.3.min.js'>" + "<" + "/script>");
+        </script>
+
+        <!-- <![endif]-->
+
+        <!--[if IE]>
+                <script type="text/javascript">
+                 window.jQuery || document.write("<script src='/CampaignTracker/assets/js/jquery-1.10.2.min.js'>"+"<"+"/script>");
+                </script>
+        <![endif]-->
+
+        <script type="text/javascript">
+            if ("ontouchend" in document)
+                document.write("<script src='/CampaignTracker/assets/js/jquery.mobile.custom.min.js'>" + "<" + "/script>");
+        </script>
+        <script src="/CampaignTracker/assets/js/bootstrap.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/typeahead-bs2.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/chosen.jquery.min.js" type="text/javascript"></script>
+        <!-- page specific plugin scripts -->
+
+        <!-- ace scripts -->
+
+        <script src="/CampaignTracker/assets/js/ace-elements.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/ace.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery.dataTables.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery.dataTables.bootstrap.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jqGrid/jquery.jqGrid.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jqGrid/i18n/grid.locale-en.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery-ui-1.10.3.full.min.js" type="text/javascript"></script>
+
+        <script src="/CampaignTracker/assets/js/date-time/bootstrap-timepicker.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery.maskedinput.min.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/alphanum/jquery.alphanum.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery-fileupload/jquery.fileupload.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery-fileupload/vendor/jquery.ui.widget.js" type="text/javascript"></script>
+        <script src="/CampaignTracker/assets/js/jquery-fileupload/jquery.iframe-transport.js" type="text/javascript"></script>
+
+        <script src="/CampaignTracker/assets/js/fuelux/fuelux.spinner.min.js" type="text/javascript"></script>
+
+        <script type="text/javascript">
+            jQuery(function ($) {
+
+                $('[data-rel=tooltip]').tooltip({container: 'body'});
+                $('.input-mask-phone').mask('(999) 999-9999');
+
+                /* Add a click handler for view committee */
+                $('#versionLink').on('click', function () {
+                            $.gritter.add({
+                                title: '<small>Campaign Electronic Reporting System</small>',
+                        text: '<b>Build:&nbsp;&nbsp;</b>2025.PROD.OKTA_b01<br/><b>System:&nbsp;&nbsp;</b>Production',
+                        class_name: 'gritter-success gritter-light'
+                    });
+                });
+
+            });
+
+            function dateFormatterForGrid(cellvalue, options) {
+                if (cellvalue) {
+                    return $.datepicker.formatDate("mm/dd/yy", new Date(+cellvalue));
+                } else {
+                    return '';
+                }
+            }
+
+            function handleCloseDatePicker(dates) {
+                $("#"+this.id).datepicker('setDate',convertStringToDate(dates));
+            }
+
+            function convertStringToDate(dateStr) {
+                let newDateStr = "";
+                if (dateStr) {
+                    newDateStr = dateStr;
+                }
+                newDateStr = newDateStr.replace(/_/g,"");
+                let newDate;
+                try {
+                    newDate = $.datepicker.parseDate("mm/dd/yy",newDateStr);
+                } catch(Exception) {
+                    newDate = null;
+                }
+
+                return newDate;
+            }
+
+            function formatCurrency(amtStr) {
+                amtStr += '';
+                if (!amtStr || amtStr.length === 0) {
+                    return "";
+                }
+                x = amtStr.split('.');
+                var x1 = x[0];
+                var x2 = "";
+                if (x.length > 1) {
+                    x2 = x[1];
+                }
+                while (x2.length < 2) {
+                    x2 += "0";
+                }
+                if (x1.length >= 1) {
+                }
+                x1 = x1.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                return x1 + "." + x2;
+            }
+
+            function ajaxErrorCallback(jqXHR, textStatus, errorThrown) {
+
+                $.aceToaster.add({
+                    placement: 'tr',
+                    title: 'No Selection',
+                    body: 'An error occurred... Look at the console (F12 or Ctrl+Shift+I, Console tab) for more information!',
+
+                    icon: '<i class="far fa-exclamation-triangle fa-2x text-danger ml-2 mr-1"></i>',
+
+                    className: 'bgc-danger-tp2 brc-secondary-tp4 rounded-sm',
+                    headerClass: 'bg-transparent border-0 text-120 text-dark-m3 font-bolder',
+                    bodyClass: 'pt-0',
+                    delay: 3000
+                });
+
+                console.log('jqXHR:');
+                console.log(jqXHR);
+                console.log('textStatus:');
+                console.log(textStatus);
+                console.log('errorThrown:');
+                console.log(errorThrown);
+
+            }
+        </script>
+
+        <script src="/CampaignTracker/assets/js/jquery.gritter.min.js" type="text/javascript"></script>		
+    </body>
+</html>
+
