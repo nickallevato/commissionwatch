@@ -21,9 +21,20 @@ import type { Knex } from "knex";
  * whose job is to decide.
  */
 
-/** Constrains a `meetings` query to rows an operator has published. */
-export function whereMeetingPublished<T extends Knex.QueryBuilder>(query: T): T {
-  query.whereNotNull("published_at");
+/**
+ * Constrains a `meetings` query to rows an operator has published.
+ *
+ * `column` exists for the joined queries P6's search builds: a search over
+ * agenda items reaches the wall through `meetings`, which is not the query's
+ * own table, and an unqualified `published_at` in a four-table join is a column
+ * reference waiting to become ambiguous. Passing the qualified name is how those
+ * paths use *this* rule rather than retyping it as a `whereRaw`.
+ */
+export function whereMeetingPublished<T extends Knex.QueryBuilder>(
+  query: T,
+  column = "published_at",
+): T {
+  query.whereNotNull(column);
   return query;
 }
 

@@ -13,6 +13,7 @@ import subscriptionsRouter from "./routes/subscriptions";
 import notificationsRouter from "./routes/notifications";
 import alertsRouter from "./routes/alerts";
 import smsRouter from "./routes/sms";
+import searchRouter from "./routes/search";
 import adminRouter from "./routes/admin";
 import { errorHandler } from "./middleware/errorHandler";
 
@@ -60,6 +61,9 @@ app.use("/api/meetings", meetingsRouter);
 app.use("/api/members", membersRouter);
 app.use("/api/votes", votesRouter);
 app.use("/api/anomalies", anomaliesRouter);
+// P6 · full-text search. Public and unauthenticated like the rest of the read
+// API, and restricted to published records inside the service.
+app.use("/api/search", searchRouter);
 app.use("/api/ingestion", ingestionRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/notifications", notificationsRouter);
