@@ -5,6 +5,7 @@ import { HomePage } from "./pages/HomePage";
 import { MeetingsPage } from "./pages/MeetingsPage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
 import { MembersPage } from "./pages/MembersPage";
+import { SearchPage } from "./pages/SearchPage";
 import { VotesPage } from "./pages/VotesPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
@@ -45,6 +46,7 @@ export function App() {
           <Route path="meetings" element={<MeetingsPage />} />
           <Route path="meetings/:id" element={<MeetingDetailPage />} />
           <Route path="members" element={<MembersPage />} />
+          <Route path="search" element={<SearchPage />} />
           <Route path="votes" element={<VotesPage />} />
           <Route path="anomalies" element={<AnomaliesPage />} />
           <Route path="methodology" element={<MethodologyPage />} />

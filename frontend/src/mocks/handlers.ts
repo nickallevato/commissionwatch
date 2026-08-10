@@ -204,4 +204,90 @@ export const handlers = [
 
     return list(filtered);
   }),
+
+  /**
+   * P6 · `GET /api/search`.
+   *
+   * A substring match over the fixtures, not a reimplementation of Postgres.
+   * The point of this handler is the *shape* — the discriminated union, the
+   * `{ data, total, query }` envelope, and matches delimited with the same
+   * control characters `ts_headline` uses — so the page is exercised against
+   * what the API really returns. Ranking and stemming are the backend's
+   * problem and are asserted there, against a real database.
+   *
+   * Only published meetings are searched here too. The wall is enforced in the
+   * backend and tested there; mirroring it means no frontend test can be
+   * written against a fixture the real API would never serve.
+   */
+  http.get("/api/search", ({ request }) => {
+    const url = new URL(request.url);
+    const query = (url.searchParams.get("q") ?? "").trim();
+    if (query === "") return HttpResponse.json({ data: [], total: 0, query });
+
+    const needle = query.toLowerCase();
+    const hit = (value: string | null | undefined): boolean =>
+      typeof value === "string" && value.toLowerCase().includes(needle);
+
+    /** Wraps every occurrence of the term the way ts_headline delimits a match. */
+    const mark = (value: string | null | undefined): string => {
+      if (typeof value !== "string" || value === "") return "";
+      const parts = value.split(new RegExp(`(${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
+      return parts
+        .map((part) => (part.toLowerCase() === needle ? `\u0002${part}\u0003` : part))
+        .join("");
+    };
+
+    const published = new Set(
+      meetings.filter((m) => m.published_at !== null).map((m) => m.id),
+    );
+    const results: unknown[] = [];
+
+    for (const item of agendaItems) {
+      if (!published.has(item.meeting_id)) continue;
+      if (!hit(item.title) && !hit(item.description)) continue;
+      const meeting = meetings.find((m) => m.id === item.meeting_id);
+      results.push({
+        kind: "agenda_item",
+        id: item.id,
+        title: item.title,
+        snippet: mark(item.description ?? item.title),
+        rank: hit(item.title) ? 1 : 0.4,
+        meeting_id: item.meeting_id,
+        meeting_date: meeting?.date ?? "",
+        commission_name: meeting?.commission?.name ?? "",
+        jurisdiction_name: meeting?.commission?.jurisdiction?.name ?? "",
+        item_number: item.item_number,
+      });
+    }
+
+    for (const meeting of meetings) {
+      if (meeting.published_at === null || !hit(meeting.location)) continue;
+      results.push({
+        kind: "meeting",
+        id: meeting.id,
+        title: meeting.commission?.name ?? "Commission meeting",
+        snippet: mark(meeting.location),
+        rank: 0.2,
+        meeting_id: meeting.id,
+        meeting_date: meeting.date,
+        commission_name: meeting.commission?.name ?? "",
+        jurisdiction_name: meeting.commission?.jurisdiction?.name ?? "",
+      });
+    }
+
+    for (const member of members) {
+      if (!hit(member.name) && !hit(member.title)) continue;
+      results.push({
+        kind: "member",
+        id: member.id,
+        title: member.name,
+        snippet: mark(member.title),
+        rank: hit(member.name) ? 1 : 0.4,
+        jurisdiction_name: member.jurisdiction?.name ?? "",
+      });
+    }
+
+    results.sort((a, b) => (b as { rank: number }).rank - (a as { rank: number }).rank);
+    return HttpResponse.json({ data: results, total: results.length, query });
+  }),
 ];

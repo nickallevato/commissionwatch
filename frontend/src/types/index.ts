@@ -386,3 +386,72 @@ export type CorrectionTargetTable =
   | "meetings"
   | "agenda_items"
   | "meeting_documents";
+
+// ---------------------------------------------------------------------------
+// P6 · Full-text search
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors `backend/src/services/search.ts`. Discriminated on `kind`, because
+ * the four record types answer different questions and a flat shape would make
+ * every renderer guess which fields are meaningful.
+ */
+export type SearchKind = "agenda_item" | "meeting" | "member" | "document";
+
+interface SearchResultBase {
+  kind: SearchKind;
+  id: string;
+  title: string;
+  /**
+   * The matching passage. Matches are wrapped in U+0002/U+0003 — control
+   * characters, not markup — so the page marks them itself and never injects
+   * server-supplied HTML from a scraped PDF.
+   */
+  snippet: string;
+  rank: number;
+}
+
+export interface AgendaItemSearchResult extends SearchResultBase {
+  kind: "agenda_item";
+  meeting_id: string;
+  meeting_date: string;
+  commission_name: string;
+  jurisdiction_name: string;
+  item_number: number;
+}
+
+export interface MeetingSearchResult extends SearchResultBase {
+  kind: "meeting";
+  meeting_id: string;
+  meeting_date: string;
+  commission_name: string;
+  jurisdiction_name: string;
+}
+
+export interface MemberSearchResult extends SearchResultBase {
+  kind: "member";
+  jurisdiction_name: string;
+}
+
+export interface DocumentSearchResult extends SearchResultBase {
+  kind: "document";
+  meeting_id: string;
+  meeting_date: string;
+  commission_name: string;
+  jurisdiction_name: string;
+  document_type: string;
+  sha256: string;
+}
+
+export type SearchResult =
+  | AgendaItemSearchResult
+  | MeetingSearchResult
+  | MemberSearchResult
+  | DocumentSearchResult;
+
+/** `/api/search` answers `{ data, total, query }` — not the bare list envelope. */
+export interface SearchResponse {
+  data: SearchResult[];
+  total: number;
+  query: string;
+}

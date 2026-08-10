@@ -24,6 +24,9 @@ const navItems: NavItem[] = [
   { to: "/meetings", label: "Meetings" },
   { to: "/members", label: "Officials" },
   { to: "/votes", label: "Votes" },
+  // P6. Search sits with the record it searches, not in the utility row: the
+  // archive is the product, and a reader arriving with a question starts here.
+  { to: "/search", label: "Search" },
   { to: "/methodology", label: "Methodology" },
   { to: "/subscribe", label: "Alerts" },
 ];

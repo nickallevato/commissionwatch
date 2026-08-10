@@ -41,6 +41,8 @@ describe("Layout", () => {
       ["Meetings", "/meetings"],
       ["Officials", "/members"],
       ["Votes", "/votes"],
+      // P6: search over the published record.
+      ["Search", "/search"],
       ["Methodology", "/methodology"],
       // B-e: the public self-serve alerts page. The admin routes are
       // deliberately absent — an operator door does not belong in a public
