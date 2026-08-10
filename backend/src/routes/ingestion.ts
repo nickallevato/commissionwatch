@@ -1,5 +1,6 @@
 import { Router } from "express";
 import db from "../config/database";
+import { buildPublicStatus } from "../services/ingestion-status";
 
 /**
  * The public, read-only view of when this site last fetched anything.
@@ -49,6 +50,25 @@ export async function readLastSuccessfulSweep(): Promise<string | null> {
 router.get("/status", async (_req, res, next) => {
   try {
     res.json({ lastSuccessfulSweepAt: await readLastSuccessfulSweep() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Every registered source, for the public status page.
+ *
+ * Public and unauthenticated on purpose: this describes *our* ingestion, not
+ * anybody's record, and a reader is entitled to know whether the thing
+ * reporting on their city's record-keeping is itself working. Nothing here
+ * reads `meetings`, and the projection carries figures rather than text — see
+ * `services/ingestion-status.ts` for why the run's error string stops at the
+ * console.
+ */
+router.get("/sources", async (_req, res, next) => {
+  try {
+    const status = await buildPublicStatus(db);
+    res.json({ ...status, total: status.sources.length });
   } catch (error) {
     next(error);
   }

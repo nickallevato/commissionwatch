@@ -149,6 +149,16 @@ export function Layout() {
             >
               Request a record
             </Link>
+            {/* The colophon, not the masthead nav. `/status` is an account of
+              this site's own collection rather than a part of the record, and
+              it belongs beside the methodology and the licence for the same
+              reason those do. */}
+            <Link
+              to="/status"
+              className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
+            >
+              Collection status
+            </Link>
             <Link
               to="/data-license"
               className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}

@@ -58,6 +58,21 @@ export const handlers = [
     HttpResponse.json({ lastSuccessfulSweepAt: null }),
   ),
 
+  /**
+   * The public status page's read. Empty by default, for the same reason as
+   * the sweep line above: an empty registry is the honest state of the
+   * database this project actually runs, and `StatusPage.test.tsx` installs
+   * its own handler when it wants sources.
+   */
+  http.get("/api/ingestion/sources", () =>
+    HttpResponse.json({
+      generated_at: new Date().toISOString(),
+      last_successful_sweep_at: null,
+      total: 0,
+      sources: [],
+    }),
+  ),
+
   http.get("/api/meetings", ({ request }) => {
     const url = new URL(request.url);
     const jurisdictionId = url.searchParams.get("jurisdiction_id");

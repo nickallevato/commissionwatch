@@ -455,3 +455,45 @@ export interface SearchResponse {
   total: number;
   query: string;
 }
+
+// ---------------------------------------------------------------------------
+// The public status page — `GET /api/ingestion/sources`
+// ---------------------------------------------------------------------------
+
+/**
+ * A run as a reader sees it: the figures, never the text.
+ *
+ * `PressroomSource.latest_run` carries the run's id and its raw error string.
+ * Neither survives into the public projection — the error is free text written
+ * by whatever threw and routinely quotes a document URL, and a run id opens
+ * only a console route that 401s. `services/ingestion-status.ts` on the backend
+ * is where that narrowing happens, and a test proves it.
+ */
+export interface PublicStatusRun {
+  status: IngestionRunStatus;
+  started_at: string;
+  finished_at: string | null;
+  records: number;
+  failures: number;
+}
+
+export interface PublicStatusSource {
+  adapter_key: string;
+  jurisdiction: { name: string; state: string };
+  enabled: boolean;
+  disabled_reason: string | null;
+  cron_expression: string;
+  expected_interval_hours: number | null;
+  last_success_at: string | null;
+  lifetime_records: number;
+  silence: SilenceWatch;
+  verdict: SourceVerdict;
+  latest_run: PublicStatusRun | null;
+}
+
+export interface PublicStatus {
+  generated_at: string;
+  last_successful_sweep_at: string | null;
+  total: number;
+  sources: PublicStatusSource[];
+}

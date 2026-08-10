@@ -328,11 +328,14 @@ export function MethodologyPage() {
               That is the intended way to read this site.
             </Prose>
             <p className="mt-4 text-sm text-muted">
-              A per-source table — every crawler, its URL, its cadence and its
-              current health — publishes here when the ingestion registry ships.
-              Until it does, this paragraph is the honest version: two
-              jurisdictions, crawled on a schedule, with gaps where the crawl
-              has not reached.
+              The per-source table — every source, its cadence, when it last
+              succeeded and whether it has gone quiet — is published on{" "}
+              <Link className="cite" to="/status">
+                Collection status
+              </Link>
+              . Every figure there is read from this site&rsquo;s own ingestion
+              records, including the sources that are switched off and the ones
+              that have never run.
             </p>
 
             <h3

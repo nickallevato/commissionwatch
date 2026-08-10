@@ -14,6 +14,9 @@ const ROUTED_PATHS = [
   "/data-license",
   // P7. The statutory route this page promises, now a page rather than prose.
   "/public-records",
+  // The per-source table this page used to promise "when the ingestion registry
+  // ships". It has shipped, so the promise is now a link.
+  "/status",
 ];
 
 describe("MethodologyPage", () => {

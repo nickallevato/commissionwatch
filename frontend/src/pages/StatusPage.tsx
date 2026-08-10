@@ -1,0 +1,375 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import type { PublicStatus, PublicStatusSource } from "@/types";
+
+/**
+ * `/status` — what this site has and has not collected, in public.
+ *
+ * A watchdog site that goes quiet looks exactly like a city that has gone
+ * quiet. This page is the difference. Every figure on it is read from
+ * `ingestion_sources` and `ingestion_runs` at load: there is no maintained
+ * list here, because a status page maintained by hand is a status page that
+ * lies eventually, and this project's whole claim is that it does not do that.
+ *
+ * Four rules the page holds to, each of which has a way of quietly eroding:
+ *
+ * 1. **Nothing is filtered.** A source that has never run is shown as never
+ *    run. A source that is switched off is shown switched off, with the reason.
+ *    An absence you can see is a commitment; an absence you cannot is a quiet
+ *    failure, and omitting the sources that embarrass us is how the second one
+ *    happens.
+ * 2. **Silence is a state.** A source past its own expected interval reads
+ *    *Suspect*, with both numbers printed so a reader can disagree with the
+ *    verdict without leaving the page. A stalled scraper and a quiet month at
+ *    City Hall must not render identically.
+ * 3. **Figures, not text.** The API hands back record counts and failure
+ *    counts, never a run's error string — that string is written by whatever
+ *    threw and can quote a document belonging to a meeting no operator has
+ *    published. Counts are ours to publish; content is not.
+ * 4. **The collection disclosure stays whole.** The vendor-`robots.txt`
+ *    exception is summarised here and stated in full on the Methodology page,
+ *    and the project rule is that the exception is valid only while it is
+ *    disclosed. Weakening either page ends the exception.
+ *
+ * Front-of-house, so the ground is `paper` and the chrome is the ordinary site
+ * chrome. `PressroomShell` is the console's, and this is not the console.
+ */
+
+const VERDICT_LABEL: Record<PublicStatusSource["verdict"], string> = {
+  disabled: "Disabled",
+  never_run: "Never run",
+  failing: "Failing",
+  suspect: "Suspect",
+  healthy: "Healthy",
+};
+
+/** Only `healthy` gets the green. Everything else is red or plain. */
+const VERDICT_CLASS: Record<PublicStatusSource["verdict"], string> = {
+  disabled: "text-muted",
+  never_run: "text-accent",
+  failing: "text-accent",
+  suspect: "text-accent",
+  healthy: "text-pass",
+};
+
+function formatStamp(value: string | null): string {
+  if (value === null) return "Never";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Never";
+  return parsed.toLocaleString();
+}
+
+type LoadResult = { ok: true; status: PublicStatus } | { ok: false };
+
+export function StatusPage() {
+  const [status, setStatus] = useState<PublicStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const fetchStatus = useCallback(async (): Promise<LoadResult> => {
+    try {
+      const res = await fetch("/api/ingestion/sources");
+      if (!res.ok) return { ok: false };
+      return { ok: true, status: (await res.json()) as PublicStatus };
+    } catch {
+      return { ok: false };
+    }
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    void (async () => {
+      const result = await fetchStatus();
+      if (ignore) return;
+      if (result.ok) {
+        setStatus(result.status);
+        setError("");
+      } else {
+        // Said plainly. A status page that fails to load and renders an empty
+        // table is claiming there is nothing to report.
+        setError("The collection status could not be loaded, so this page is not reporting on it.");
+      }
+      setLoading(false);
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [fetchStatus]);
+
+  const sources = status?.sources ?? [];
+
+  return (
+    <div>
+      <p className="kicker">Collection status</p>
+      <h1 className="headline text-3xl sm:text-4xl mt-1">What this site has collected</h1>
+      <div className="rule-hi mt-4" role="presentation" />
+
+      <p className="mt-5 max-w-prose text-sm leading-relaxed text-ink-soft">
+        Every figure on this page is read from this site&rsquo;s own ingestion
+        records when the page loads. Nothing here is maintained by hand. A
+        source that has never run says so; a source that is switched off says
+        why; a source that has gone quiet past its own expected interval is
+        marked suspect rather than left looking calm.
+      </p>
+
+      {error && (
+        <p
+          role="alert"
+          className="mt-6 max-w-prose border-l-2 border-accent bg-paper px-4 py-3 text-sm text-ink-soft"
+        >
+          {error}
+        </p>
+      )}
+
+      <section className="mt-10" aria-labelledby="last-sweep">
+        <h2 id="last-sweep" className="label-sm">
+          Last successful sweep
+        </h2>
+        <p className="figure mt-2 text-2xl text-ink tabular">
+          {loading
+            ? "—"
+            : status === null || status.last_successful_sweep_at === null
+              ? "No sweep yet"
+              : formatStamp(status.last_successful_sweep_at)}
+        </p>
+        {!loading && status !== null && status.last_successful_sweep_at === null && (
+          <p className="mt-2 max-w-prose text-sm leading-relaxed text-accent">
+            No source has completed a sweep that reached the database. Nothing on
+            this site has been collected automatically.
+          </p>
+        )}
+      </section>
+
+      <section className="mt-12" aria-labelledby="sources">
+        <h2 id="sources" className="font-display text-xl font-semibold text-ink">
+          Sources
+        </h2>
+
+        {loading ? (
+          <p className="mt-3 label-sm" role="status">
+            Loading collection status…
+          </p>
+        ) : sources.length === 0 ? (
+          <div className="mt-4 border-l-2 border-accent bg-paper-sunk px-4 py-3">
+            <p className="text-sm text-ink">No ingestion source is registered.</p>
+            <p className="mt-2 max-w-prose text-sm leading-relaxed text-accent">
+              Nothing is being watched. That is a configuration gap, not a quiet week.
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="mt-3 max-w-prose text-sm text-muted">
+              {sources.length} registered {sources.length === 1 ? "source" : "sources"}, including
+              the ones that are switched off and the ones that have never run.
+            </p>
+
+            {/* Wide table, narrow phone. The scroll belongs to the table's own
+                container so the page body never scrolls sideways. */}
+            <div className="mt-4 overflow-x-auto border border-rule bg-paper">
+              <table className="w-full min-w-[52rem] border-collapse text-left">
+                <caption className="sr-only">
+                  Every registered ingestion source, its verdict, the records it has ever produced,
+                  its last successful sweep and its silence watch
+                </caption>
+                <thead>
+                  <tr className="border-b border-rule">
+                    <th scope="col" className="label-sm px-4 py-3">Source</th>
+                    <th scope="col" className="label-sm px-4 py-3">State</th>
+                    <th scope="col" className="label-sm px-4 py-3">Records collected</th>
+                    <th scope="col" className="label-sm px-4 py-3">Last success</th>
+                    <th scope="col" className="label-sm px-4 py-3">Silence watch</th>
+                    <th scope="col" className="label-sm px-4 py-3">Latest run</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rule">
+                  {sources.map((source) => (
+                    <SourceRow key={source.adapter_key} source={source} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* ------------------------------------------------- collection conduct */}
+      <section className="mt-12 max-w-prose" aria-labelledby="conduct">
+        <h2 id="conduct" className="font-display text-xl font-semibold text-ink">
+          How this site collects
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+          Everything collected here is public record, published by the city or
+          the county on its own site. It is fetched slowly — at most one request
+          every few seconds, never several at once — by a program that identifies
+          itself by name and gives an address a human can reply to. It never
+          pretends to be a browser. A document that has not changed is not
+          fetched again. No CAPTCHA is solved, no browser fingerprint or TLS
+          signature is altered, and no proxy is rotated: where a source would
+          need any of that, this project stops and asks for the record instead.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+          There is one exception, and it is stated rather than left to be found.
+          Bozeman&rsquo;s agendas and minutes are published through a vendor,
+          Granicus, whose{" "}
+          <code className="font-mono text-sm">robots.txt</code> reads{" "}
+          <code className="font-mono text-sm">Disallow: /</code> for every client
+          except four named search engines.{" "}
+          <strong className="font-semibold text-ink">
+            CommissionWatch fetches those records anyway
+          </strong>
+          , at the ten-second crawl delay that same file publishes. A blanket
+          vendor robots file is written to manage search-engine crawlers, and a
+          city&rsquo;s legal obligation to publish its records does not transfer
+          to its hosting vendor&rsquo;s convention.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+          <strong className="font-semibold text-ink">
+            That exception is valid only while it is disclosed.
+          </strong>{" "}
+          If this disclosure is ever taken down, the exception ends with it — a
+          transparency project does not get to carry a published policy it
+          knowingly breaks. And if a records custodian asks this project to stop,
+          it stops. The full account is on the{" "}
+          <Link className="cite" to="/methodology#robots">
+            Methodology page
+          </Link>
+          .
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+          One host is refused outright and is never fetched:{" "}
+          <code className="font-mono text-sm">bozemanmt.gov</code> returns a
+          blanket block to every client, including this one. Where a source is
+          switched off above, the reason is printed with it.
+        </p>
+      </section>
+
+      <section className="mt-10 max-w-prose" aria-labelledby="ask">
+        <h2 id="ask" className="font-display text-xl font-semibold text-ink">
+          Or ask for the record directly
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+          Nothing on this page is a substitute for the statutory route, and that
+          route is offered to you as well as used by this project. Where a
+          document is referenced in the published record and is not in it,{" "}
+          <Link className="cite" to="/public-records">
+            Request a record
+          </Link>{" "}
+          drafts the letter for you to send under your own name. Nothing is sent
+          on your behalf and nothing you type is stored.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function SourceRow({ source }: { source: PublicStatusSource }) {
+  const zero = source.lifetime_records === 0;
+
+  return (
+    <tr className="align-top">
+      <th scope="row" className="px-4 py-4 text-left font-normal">
+        <span className="block text-sm font-semibold text-ink">{source.adapter_key}</span>
+        <span className="block text-xs text-muted">
+          {source.jurisdiction.name}, {source.jurisdiction.state}
+        </span>
+      </th>
+
+      <td className="px-4 py-4">
+        <span className={`text-sm font-semibold ${VERDICT_CLASS[source.verdict]}`}>
+          {VERDICT_LABEL[source.verdict]}
+        </span>
+        {!source.enabled && (
+          // Rule 1. The reason is in the open, not behind a disclosure: this is
+          // the page where "why is Bozeman missing?" gets its answer, and an
+          // answer a reader has to click for is an answer half of them never see.
+          <span className="mt-1.5 block max-w-[22rem] text-xs leading-relaxed text-ink-soft">
+            {source.disabled_reason ?? "No reason was recorded, which is itself a defect."}
+          </span>
+        )}
+      </td>
+
+      <td className="px-4 py-4">
+        <span
+          data-testid={`records-${source.adapter_key}`}
+          className={`figure text-base tabular ${zero ? "font-semibold text-accent" : "text-ink"}`}
+        >
+          {source.lifetime_records}
+        </span>
+        {zero && (
+          <span className="mt-1 block max-w-[16rem] text-xs leading-relaxed text-accent">
+            Nothing has ever been collected from this source.
+          </span>
+        )}
+      </td>
+
+      <td className="px-4 py-4 text-sm text-ink tabular">{formatStamp(source.last_success_at)}</td>
+
+      <td className="px-4 py-4" data-testid={`silence-${source.adapter_key}`}>
+        <SilenceCell source={source} />
+      </td>
+
+      <td className="px-4 py-4">
+        {source.latest_run === null ? (
+          <span className="text-sm text-accent">Never run</span>
+        ) : (
+          <>
+            <span className="text-sm font-semibold text-ink">{source.latest_run.status}</span>
+            <span className="mt-1 block text-xs text-muted tabular">
+              {formatStamp(source.latest_run.started_at)}
+            </span>
+            <span className="mt-1 block text-xs text-muted tabular">
+              {source.latest_run.records} collected · {source.latest_run.failures} failed
+            </span>
+          </>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * Rule 2. `Suspect` says the word and both numbers behind it.
+ *
+ * `unknown` is not `fine`. A source with no stated interval has had no
+ * expectation set, and reporting that as healthy would be claiming a source is
+ * fine because nobody said what fine meant.
+ */
+function SilenceCell({ source }: { source: PublicStatusSource }) {
+  const { verdict, hours_since_success, expected_interval_hours } = source.silence;
+
+  const detail = (
+    <span className="mt-1 block text-xs text-ink-soft tabular">
+      {hours_since_success === null
+        ? "No successful sweep on record"
+        : `${hours_since_success} h since last success`}
+      {expected_interval_hours !== null && ` · expected every ${expected_interval_hours} h`}
+    </span>
+  );
+
+  if (verdict === "suspect") {
+    return (
+      <>
+        <span className="text-sm font-semibold text-accent">Suspect</span>
+        {detail}
+      </>
+    );
+  }
+
+  if (verdict === "ok") {
+    return (
+      <>
+        <span className="text-sm text-pass">Within interval</span>
+        {detail}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <span className="text-sm text-muted">Unknown</span>
+      <span className="mt-1 block max-w-[14rem] text-xs leading-relaxed text-muted">
+        No expected interval is set for this source, so silence here means nothing either way.
+      </span>
+    </>
+  );
+}

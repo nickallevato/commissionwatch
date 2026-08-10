@@ -10,6 +10,7 @@ import { VotesPage } from "./pages/VotesPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
 import { PublicRecordsPage } from "./pages/PublicRecordsPage";
+import { StatusPage } from "./pages/StatusPage";
 import { DataLicensePage } from "./pages/DataLicensePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -55,6 +56,9 @@ export function App() {
             Unauthenticated by design: a reader exercising a public right does
             not sign in to this project first. */}
           <Route path="public-records" element={<PublicRecordsPage />} />
+          {/* The public collection status. Unauthenticated: it describes this
+            site's own ingestion, not anybody's record. */}
+          <Route path="status" element={<StatusPage />} />
           <Route path="data-license" element={<DataLicensePage />} />
           <Route path="subscribe" element={<SubscribePage />} />
 
