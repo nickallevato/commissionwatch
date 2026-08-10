@@ -290,4 +290,13 @@ export const handlers = [
     results.sort((a, b) => (b as { rank: number }).rank - (a as { rank: number }).rank);
     return HttpResponse.json({ data: results, total: results.length, query });
   }),
+
+  /**
+   * P7 · the public-records generator.
+   *
+   * Empty by default. The generator's own suite supplies its fixtures; what
+   * this handler is for is the chrome walk, which mounts every colophon
+   * destination and would otherwise hit an unhandled request on this one.
+   */
+  http.get("/api/public-records/gaps", () => list([])),
 ];

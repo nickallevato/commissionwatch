@@ -54,7 +54,35 @@ const EXTRACTION: ExtractionFixture = {
   created_at: "2026-08-09T00:00:00.000Z",
 };
 
-function baseHandlers() {
+/** P7 fixtures. Invented, and the citation deliberately is not a real one. */
+const GAP = {
+  id: "missing_minutes:11111111-2222-3333-4444-555555555555",
+  kind: "missing_minutes",
+  jurisdiction_name: "Example County",
+  summary: "No minutes are in the record for the Example Commission meeting of 2026-08-04.",
+};
+
+const VERIFIED_LAW = {
+  jurisdiction_id: "j1",
+  jurisdiction_name: "Example County",
+  law: { statute_citation: "Example Code Ann. \u00a7 0-0-0000", verified_on: "2026-08-01" },
+  verification_age_days: 9,
+  stale: false,
+  advisory: "Verified 2026-08-01.",
+};
+
+const NO_LAW = {
+  jurisdiction_id: "j2",
+  jurisdiction_name: "Nowhere County",
+  law: null,
+  verification_age_days: null,
+  stale: false,
+  advisory:
+    "No row in jurisdiction_records_law. No request can be drafted for this jurisdiction " +
+    "until a person reads the applicable subsection.",
+};
+
+function baseHandlers(options: { gaps?: unknown[]; law?: unknown[] } = {}) {
   return [
     http.get("/api/admin/records/requests", () =>
       HttpResponse.json({
@@ -70,6 +98,14 @@ function baseHandlers() {
         total: 1,
       }),
     ),
+    http.get("/api/admin/records/gaps", () => {
+      const gaps = options.gaps ?? [GAP];
+      return HttpResponse.json({ data: gaps, total: gaps.length });
+    }),
+    http.get("/api/admin/records/law", () => {
+      const law = options.law ?? [VERIFIED_LAW, NO_LAW];
+      return HttpResponse.json({ data: law, total: law.length });
+    }),
   ];
 }
 
@@ -182,5 +218,89 @@ describe("AdminRecordsPage", () => {
     expect(posted!.entities.people).toHaveLength(1);
     // Two versions on record: the correction appended, it did not overwrite.
     await waitFor(() => expect(screen.getByText("2 versions on record")).toBeInTheDocument());
+  });
+
+  /* ---- P7: the request generator ---------------------------------- */
+
+  it("names a jurisdiction with no statute on file rather than hiding it", async () => {
+    server.use(...baseHandlers());
+    renderWithProviders(<AdminRecordsPage />);
+
+    await waitFor(() => expect(screen.getByText("Nowhere County")).toBeInTheDocument());
+    expect(screen.getByText("No statute recorded")).toBeInTheDocument();
+    expect(screen.getByText(/No row in jurisdiction_records_law/)).toBeInTheDocument();
+    // The verified one reads as its citation, not as a warning.
+    expect(screen.getByText("Example Code Ann. \u00a7 0-0-0000")).toBeInTheDocument();
+  });
+
+  it("warns when a verification is more than a year old", async () => {
+    server.use(
+      ...baseHandlers({
+        law: [
+          {
+            ...VERIFIED_LAW,
+            verification_age_days: 952,
+            stale: true,
+            advisory:
+              "Last verified 2024-01-01, 952 days ago. Montana's public information sections " +
+              "are marked Temporary and carry termination dates.",
+          },
+        ],
+      }),
+    );
+    renderWithProviders(<AdminRecordsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("Verification out of date")).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/marked Temporary/)).toBeInTheDocument();
+  });
+
+  it("drafts a letter for a gap and keeps the request in draft", async () => {
+    let posted: { gap_id?: string } | null = null;
+    const letter = "2026-08-10\n\nPublic Records Custodian\nExample County";
+
+    server.use(
+      ...baseHandlers(),
+      http.post("/api/admin/records/draft-request", async ({ request }) => {
+        posted = (await request.json()) as { gap_id?: string };
+        return HttpResponse.json(
+          { letter, gap: GAP, law: {}, warnings: [], request: { id: "r2", status: "draft" } },
+          { status: 201 },
+        );
+      }),
+    );
+
+    renderWithProviders(<AdminRecordsPage />);
+    await waitFor(() => expect(screen.getByText(GAP.summary)).toBeInTheDocument());
+
+    await userEvent.type(screen.getByLabelText("Requester name"), "A. Requester");
+    await userEvent.type(screen.getByLabelText("Requester email"), "requester@example.invalid");
+    await userEvent.click(screen.getByRole("button", { name: "Draft request" }));
+
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.gap_id).toBe(GAP.id);
+    expect(await screen.findByLabelText("Draft letter")).toHaveValue(letter);
+  });
+
+  it("shows the refusal verbatim when a jurisdiction has no records law", async () => {
+    const refusal =
+      "No public-records law is on file for Nowhere County, so no letter was drafted. " +
+      "Required before a request can cite anything: statute_citation, statute_url, verified_on.";
+
+    server.use(
+      ...baseHandlers(),
+      http.post("/api/admin/records/draft-request", () =>
+        HttpResponse.json({ error: refusal, statusCode: 409 }, { status: 409 }),
+      ),
+    );
+
+    renderWithProviders(<AdminRecordsPage />);
+    await waitFor(() => expect(screen.getByText(GAP.summary)).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Draft request" }));
+
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.some((node) => /statute_citation/.test(node.textContent ?? ""))).toBe(true);
+    expect(screen.queryByLabelText("Draft letter")).toBeNull();
   });
 });

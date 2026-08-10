@@ -329,6 +329,19 @@ export function MeetingDetailPage() {
             )}
           </div>
         )}
+
+        {/* P7. Offered only where the record itself is short of something —
+          the same condition the API derives a `missing_minutes` gap from, read
+          off what this page already loaded rather than asked for again. The
+          link states an absence and nothing about why. */}
+        {!meeting.minutes_url && !findDocument(documents, "minutes") && (
+          <p className="mt-3 text-sm text-muted">
+            No minutes for this meeting are in the record.{" "}
+            <Link className="cite" to={`/public-records?meeting=${meeting.id}`}>
+              Request this record
+            </Link>
+          </p>
+        )}
       </header>
 
       {/* Stat band ----------------------------------------------------- */}

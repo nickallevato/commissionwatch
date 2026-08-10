@@ -12,6 +12,8 @@ const ROUTED_PATHS = [
   "/anomalies",
   "/methodology",
   "/data-license",
+  // P7. The statutory route this page promises, now a page rather than prose.
+  "/public-records",
 ];
 
 describe("MethodologyPage", () => {
@@ -125,6 +127,22 @@ describe("MethodologyPage", () => {
       renderWithProviders(<MethodologyPage />);
       expect(
         screen.getByText(/the exception ends\s+with it/),
+      ).toBeInTheDocument();
+    });
+
+    /**
+     * The exception is written on the promise that the statutory route is
+     * offered alongside it. P7 turned that promise into a page, so the link is
+     * part of the disclosure and not decoration — losing it would leave the
+     * exception standing on a sentence with nothing behind it.
+     */
+    it("offers the statutory route as a working destination", () => {
+      const { container } = renderWithProviders(<MethodologyPage />);
+      const link = container.querySelector('a[href="/public-records"]');
+      expect(link).not.toBeNull();
+      expect(link).toHaveTextContent("Request a record");
+      expect(
+        screen.getByText(/Nothing is sent on your behalf and\s+nothing you type is stored/),
       ).toBeInTheDocument();
     });
   });

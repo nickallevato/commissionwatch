@@ -9,6 +9,7 @@ import { SearchPage } from "./pages/SearchPage";
 import { VotesPage } from "./pages/VotesPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
+import { PublicRecordsPage } from "./pages/PublicRecordsPage";
 import { DataLicensePage } from "./pages/DataLicensePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -50,6 +51,10 @@ export function App() {
           <Route path="votes" element={<VotesPage />} />
           <Route path="anomalies" element={<AnomaliesPage />} />
           <Route path="methodology" element={<MethodologyPage />} />
+          {/* P7. The statutory route the Methodology page promises, as a page.
+            Unauthenticated by design: a reader exercising a public right does
+            not sign in to this project first. */}
+          <Route path="public-records" element={<PublicRecordsPage />} />
           <Route path="data-license" element={<DataLicensePage />} />
           <Route path="subscribe" element={<SubscribePage />} />
 

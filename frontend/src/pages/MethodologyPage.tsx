@@ -389,6 +389,18 @@ export function MethodologyPage() {
               with it: a transparency project does not get to carry a published
               policy it knowingly breaks.
             </Prose>
+            <Prose>
+              The statutory route is not only what this project falls back on —
+              it is offered to you as well. Where a document is referenced in
+              the published record and is not in it,{" "}
+              <Link className="cite" to="/public-records">
+                Request a record
+              </Link>{" "}
+              drafts the letter, naming the record and citing the statute on
+              file for that jurisdiction. Nothing is sent on your behalf and
+              nothing you type is stored: the letter is yours to send under your
+              own name.
+            </Prose>
           </section>
 
           {/* -------------------------------------------------- 3. Pipeline */}

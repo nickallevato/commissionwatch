@@ -144,6 +144,12 @@ export function Layout() {
               Methodology
             </Link>
             <Link
+              to="/public-records"
+              className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
+            >
+              Request a record
+            </Link>
+            <Link
               to="/data-license"
               className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
             >
