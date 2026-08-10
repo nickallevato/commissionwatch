@@ -676,3 +676,83 @@ export interface DisputeListing {
   total: number;
   counts: { received: number; upheld: number; declined: number };
 }
+
+// ---------------------------------------------------------------------------
+// The bulk export — `GET /api/data`
+// ---------------------------------------------------------------------------
+
+/** One licence layer as the manifest states it. Three layers, never conflated. */
+export interface DataLicenseLayer {
+  name: string;
+  url: string | null;
+  covers: string;
+}
+
+/**
+ * One exported table, as the API describes itself.
+ *
+ * `provenance` is null where the schema records no source artifact for the
+ * rows — `members`, `jurisdictions`, `commissions`. `/data` renders that
+ * absence in words rather than as a blank cell, because a blank reads as a
+ * lost source and the truth is that there never was one.
+ */
+export interface DataManifestDataset {
+  name: string;
+  description: string;
+  provenance: string | null;
+  columns: string[];
+  row_count: number;
+  json_url: string;
+  csv_url: string;
+}
+
+export interface DataManifest {
+  generated_at: string;
+  schema_migration: string | null;
+  attribution: string;
+  license: {
+    dataset: DataLicenseLayer & { attribution: string };
+    code: DataLicenseLayer;
+    documents: DataLicenseLayer;
+  };
+  republication_request: string;
+  publication_rule: string;
+  datasets: DataManifestDataset[];
+}
+
+// ---------------------------------------------------------------------------
+// The public calendar — `GET /api/calendar`
+// ---------------------------------------------------------------------------
+
+/**
+ * One meeting on the calendar.
+ *
+ * `time` is null wherever the source publishes no start time, which is most
+ * rows: Granicus states one for upcoming meetings only. It is never zero and
+ * never midnight — `meetings` holds a DATE and a nullable TIME, and a null
+ * there means the record does not say.
+ */
+export interface CalendarMeetingSummary {
+  id: string;
+  date: string;
+  time: string | null;
+  body_name: string;
+  location: string | null;
+  status: MeetingStatus;
+}
+
+export interface CalendarJurisdiction {
+  id: string;
+  name: string;
+  state: string;
+  timezone: string;
+  /** The subscribable iCal feed for this jurisdiction. */
+  ics_url: string;
+  upcoming: CalendarMeetingSummary[];
+  recent: CalendarMeetingSummary[];
+}
+
+export interface CalendarResponse {
+  data: CalendarJurisdiction[];
+  total: number;
+}

@@ -109,10 +109,29 @@ describe("site chrome links", () => {
     expect(screen.queryByText("Page Not Found")).toBeNull();
   });
 
-  it("serves the data license page at /data-license", () => {
+  it("serves the open data page at /data", () => {
+    renderAt("/data");
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Open data" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Page Not Found")).toBeNull();
+  });
+
+  it("still serves the page at its original address, /data-license", () => {
+    // The page was published at `/data-license` before `/data` existed. A site
+    // whose subject is other people's broken published claims does not break a
+    // URL it asked readers to cite.
     renderAt("/data-license");
     expect(
-      screen.getByRole("heading", { level: 1, name: "Data license" }),
+      screen.getByRole("heading", { level: 1, name: "Open data" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Page Not Found")).toBeNull();
+  });
+
+  it("serves the meeting calendar at /calendar", () => {
+    renderAt("/calendar");
+    expect(
+      screen.getByRole("heading", { level: 1, name: "When these bodies sit" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Page Not Found")).toBeNull();
   });
