@@ -397,3 +397,38 @@ jobs:
             echo "Site did not return 200 after 6 attempts." >&2
             exit 1
           } 2>&1 | tee -a /tmp/ci-output.txt
+
+      # ── The external monitor, run against what was just deployed ────────
+      # The step above proves /api/health answers 200. That is not the same as
+      # the deploy being right, and the gap between the two is where last
+      # night's incident lived: the images roll independently, so a stack
+      # serving the old API behind the new UI returns 200 from both and is
+      # invisible from outside.
+      #
+      # This is the SAME script the scheduled monitor runs — one evaluation,
+      # tested in backend/test/external-monitor.test.ts, not a second opinion
+      # written in shell. It checks the database is connected, that
+      # /api/version and /version.json agree on the sha, and that no enabled
+      # ingestion source is past its expected interval.
+      #
+      # It runs here because scheduled workflows do not currently fire on this
+      # Gitea instance — see .gitea/workflows/monitor.yml, where the evidence
+      # is recorded. A deploy is not a substitute for a periodic probe and is
+      # not offered as one; it is the trigger that exists today, aimed at the
+      # failure that actually happened.
+      - name: Probe the deployment with the external monitor
+        shell: bash
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          MONITOR_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -o pipefail
+          {
+            docker run --rm \
+              -v "$(pwd):/workspace" -w /workspace \
+              -e DISCORD_WEBHOOK_URL \
+              -e MONITOR_RUN_URL \
+              node:22-bookworm \
+              node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+                backend/src/scripts/external-monitor.ts --run
+          } 2>&1 | tee -a /tmp/ci-output.txt

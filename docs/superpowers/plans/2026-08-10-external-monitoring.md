@@ -26,7 +26,7 @@ Nothing below is assumed.
 
 | Question | How it was answered | Answer |
 |---|---|---|
-| Does this Gitea support `on: schedule`? | `GET /api/v1/version` | **1.25.5.** Scheduled workflows have existed since 1.20. Confirmed for real after the push — see "Confirming the schedule actually fires". |
+| Does this Gitea support `on: schedule`? | `GET /api/v1/version`, then the run history of every repository on the instance | **The software supports it at 1.25.5; this instance never fires it.** Eight workflows across 82 repositories declare a cron schedule and not one `schedule`-triggered run exists. See "The schedule does not fire on this Gitea" below, and what was shipped instead. |
 | Can a runner reach the site through the Caddy IP gate? | Read the `deploy-aws` job log of run 26468 | Yes, on **`dh1`**: `attempt 1: http=200` against `https://commissionwatch.bmux.sh/api/health` at 03:59 on 2026-08-10. `ubuntu-latest` has never made an outbound request to the site, so its egress address is unproven and it is not used. |
 | What do the three endpoints actually return? | `curl` against production | `/api/health` → `{"status":"ok","database":"connected",…}`; `/api/version` → `{"service":"backend","sha":"9004d34…","builtAt":…}`; `/version.json` → the same sha from the frontend image; `/api/ingestion/sources` → three sources, **all `enabled: false`**, all `last_success_at: null`, `last_successful_sweep_at: null`. |
 | Can a probe run with no `npm install`? | `docker run node:22-bookworm` | Node **v22.23.2**, which strips TypeScript types natively. `node file.ts` runs. No install, no dependency, no lockfile, nothing to go stale. |
@@ -100,7 +100,7 @@ its reader to mute it.
 - **One request per check per run**, and at most **one** retry, only on a transport error or a 5xx,
   after a 5-second pause. That absorbs a container restart and nothing more. A 4xx is not retried:
   it will say the same thing twice.
-- Four requests per run, every fifteen minutes, against our own host.
+- Four requests per run, against our own host, at whatever interval the trigger gives it.
 
 ## Files
 
@@ -109,6 +109,7 @@ its reader to mute it.
 | `backend/src/scripts/external-monitor.ts` | **New.** The whole monitor: exported pure evaluation functions, then the I/O. One file because Node's type stripping runs a single file with no local imports and no build step; splitting it would buy a build. `main()` runs only when `--run` is on the argv, so importing it in a test probes nothing. |
 | `backend/test/external-monitor.test.ts` | **New.** Fixtures for healthy, database disconnected, version skew, version sha unknown, stale source, never-run source, disabled source, and malformed responses of three kinds. Registered in `backend/package.json`'s `test` script. |
 | `.gitea/workflows/monitor.yml` | **New.** `on: schedule` every 15 minutes, plus `workflow_dispatch` so the thing can be exercised on demand instead of by waiting. |
+| `.gitea/workflows/deploy.yml` | The same probe as a post-deploy step, because the scheduler does not fire here. |
 | `docs/STATUS.md` | Gap 9 updated. |
 
 Nothing under `.github/workflows/`. Nothing in `frontend/src/pages/Admin*.tsx` or
@@ -127,13 +128,36 @@ Docker is already the tool this runner uses for the image build, so the dependen
 proven present rather than hoped for. Pinning the image pins the Node version, and the secret
 arrives in the environment rather than in the argument list.
 
-## Confirming the schedule actually fires
+## The schedule does not fire on this Gitea, and that is measured
 
-Version 1.25.5 supporting the feature is not the same as this repository firing it. Gitea registers
-schedules from the workflow file **on the default branch**, so the confirmation cannot happen before
-the push. After merging, `GET /api/v1/repos/your-org/commissionwatch/actions/runs` is queried for
-a run whose `event` is `schedule`. If none appears within a cycle, the finding is reported as a
-finding — not papered over with a workflow that never fires.
+Version 1.25.5 supporting the feature is not the same as this instance executing it, so it was
+checked after the push rather than assumed. **It does not fire.**
+
+- The workflow landed on the default branch at 04:16 UTC on 2026-08-10 and reports `state: active`
+  in `GET /actions/workflows`. The 04:30 and 04:45 ticks passed with no run.
+- Across **all 82 repositories** on `gitea.example.invalid`, **eight** workflows declare a cron
+  schedule and the number of runs ever triggered by `schedule` is **zero**. `na/minobi`'s
+  `watchdog.yml` asks for `*/5 * * * *`, has **20,493** runs, and every one of them is a `push`.
+  Somebody in this environment already believes they have a watchdog, and they do not.
+- `workflow_dispatch` fires (run 26478, this workflow, green against production) and `workflow_run`
+  fires elsewhere, so it is the scheduler specifically and not Actions.
+
+The likely cause is the instance's cron being disabled in `app.ini`. That is an operator change on
+the Gitea host, outside this repository, and it is worth making: it would light up eight workflows
+at once.
+
+**What was done instead of shipping a workflow that never fires.**
+
+1. The `schedule:` declaration stays. It is correct, costs nothing, and starts working the day the
+   instance does.
+2. `workflow_dispatch` is the trigger that works today, by one `curl` that answers 204. Anything
+   holding a token can drive it on whatever interval the operator trusts — a Tracker routine is
+   the established pattern here, and `na/minobi`'s watchdog names it as its own fallback. The exact
+   request is in the workflow's header comment.
+3. **`deploy.yml` now runs the identical probe after every deploy.** Not a substitute for a periodic
+   check and not offered as one — but it is aimed squarely at the failure that actually happened,
+   because the existing "Verify the site responds" step proves only that `/api/health` returns 200,
+   and a stack serving the old API behind the new UI returns 200 from both sides.
 
 ## Deliberately not built
 
