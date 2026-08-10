@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { PressroomCard, PressroomShell } from "@/components/PressroomShell";
+import { PressroomCard, WorkTitle } from "@/components/PressroomUI";
 import { severityLabels, severityOrder } from "@/components/severity";
 import type {
   AnomalySeverity,
@@ -201,10 +201,11 @@ export function AdminReviewPage() {
   const items = listing?.data ?? [];
 
   return (
-    <PressroomShell>
-      <p className="kicker">Pressroom</p>
-      <h1 className="headline text-3xl sm:text-4xl mt-1">Review queue</h1>
-      <div className="rule-hi mt-4" role="presentation" />
+    <>
+      <WorkTitle
+        title="Review queue"
+        stamp={listing ? `${listing.counts.pending} pending · ${listing.counts.overdue} overdue` : undefined}
+      />
 
       <p className="mt-6 max-w-prose text-sm leading-relaxed text-ink-soft">
         Nothing naming a person publishes itself. A finding here is real, stored
@@ -466,6 +467,6 @@ export function AdminReviewPage() {
           })}
         </div>
       )}
-    </PressroomShell>
+    </>
   );
 }

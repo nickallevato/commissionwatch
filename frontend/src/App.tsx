@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { Layout } from "./components/Layout";
+import { PressroomAuthLayout, PressroomLayout } from "./components/PressroomLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { HomePage } from "./pages/HomePage";
 import { MeetingsPage } from "./pages/MeetingsPage";
@@ -63,76 +64,55 @@ export function App() {
           <Route path="data-license" element={<DataLicensePage />} />
           <Route path="subscribe" element={<SubscribePage />} />
 
-          {/* The operator surface. Inside the Layout so it is recognisably the
-            same site, and deliberately absent from the masthead nav — it is
-            not a destination a reader of a public record has any use for.
-            `ProtectedRoute` is a convenience, not the boundary: every
-            /api/admin route 401s without a session regardless of what the
-            browser renders. */}
+        </Route>
+
+        {/* The operator surface has a shell of its own. It used to render
+          inside the public Layout, which meant an operator checking whether
+          the scrapers had run was reading a newspaper masthead and a reader's
+          nav. `ProtectedRoute` is a convenience, not the boundary: every
+          /api/admin route 401s without a session regardless of what the
+          browser renders. */}
+        <Route
+          element={
+            <ErrorBoundary>
+              <PressroomAuthLayout />
+            </ErrorBoundary>
+          }
+        >
           <Route path="admin/login" element={<LoginPage />} />
-          <Route
-            path="admin"
-            element={
+        </Route>
+
+        <Route
+          element={
+            <ErrorBoundary>
               <ProtectedRoute>
-                <AdminHomePage />
+                <PressroomLayout />
               </ProtectedRoute>
-            }
-          />
-          <Route
-            path="admin/channels"
-            element={
-              <ProtectedRoute>
-                <AdminChannelsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="admin/records"
-            element={
-              <ProtectedRoute>
-                <AdminRecordsPage />
-              </ProtectedRoute>
-            }
-          />
+            </ErrorBoundary>
+          }
+        >
+          <Route path="admin" element={<AdminHomePage />} />
+          <Route path="admin/channels" element={<AdminChannelsPage />} />
+          <Route path="admin/records" element={<AdminRecordsPage />} />
 
           {/* The pressroom console. `/admin/sources` is the way in; the two
             detail routes are reached from a source row and from a meeting,
-            which is why they carry an id rather than sitting in a nav. */}
-          <Route
-            path="admin/sources"
-            element={
-              <ProtectedRoute>
-                <AdminSourcesPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="admin/runs/:id"
-            element={
-              <ProtectedRoute>
-                <AdminRunDetailPage />
-              </ProtectedRoute>
-            }
-          />
+            which is why they carry an id rather than sitting in the rail. */}
+          <Route path="admin/sources" element={<AdminSourcesPage />} />
+          <Route path="admin/runs/:id" element={<AdminRunDetailPage />} />
           {/* B-a. The only screen from which a generated claim about a named
             person becomes public. */}
-          <Route
-            path="admin/review"
-            element={
-              <ProtectedRoute>
-                <AdminReviewPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="admin/meetings/:id"
-            element={
-              <ProtectedRoute>
-                <AdminMeetingDetailPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="admin/review" element={<AdminReviewPage />} />
+          <Route path="admin/meetings/:id" element={<AdminMeetingDetailPage />} />
+        </Route>
 
+        <Route
+          element={
+            <ErrorBoundary>
+              <Layout />
+            </ErrorBoundary>
+          }
+        >
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

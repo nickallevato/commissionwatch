@@ -133,7 +133,9 @@ describe("AdminSourcesPage", () => {
     );
 
     renderWithProviders(<AdminSourcesPage />);
-    await screen.findByText("gallatin_civicplus");
+    // The adapter key now appears in its own row *and* in the silence-watch
+    // bar, so waiting on the row's control is the unambiguous query.
+    await screen.findByRole("button", { name: "Sweep now: gallatin_civicplus" });
 
     await userEvent.click(screen.getByRole("button", { name: "Sweep now: gallatin_civicplus" }));
 
@@ -150,7 +152,7 @@ describe("AdminSourcesPage", () => {
     );
 
     renderWithProviders(<AdminSourcesPage />);
-    await screen.findByText("gallatin_civicplus");
+    await screen.findByRole("button", { name: "Sweep now: gallatin_civicplus" });
     await userEvent.click(screen.getByRole("button", { name: "Sweep now: gallatin_civicplus" }));
 
     expect(

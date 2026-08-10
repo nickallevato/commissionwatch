@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
-import { PressroomCard, PressroomShell } from "@/components/PressroomShell";
+import {
+  ACTION,
+  ACTION_PRIMARY,
+  ACTION_QUIET,
+  ACTION_ROW,
+  FIELD,
+  FlagBar,
+  FOCUS_RING,
+  KeyValues,
+  LogTail,
+  StatusPill,
+  WorkTitle,
+  type Severity,
+} from "@/components/PressroomUI";
 import type {
   ConfidenceLevel,
   CorrectionTargetTable,
@@ -30,19 +43,19 @@ import type {
  * bytes already stored. No request goes back out to the source.
  */
 
-const focusRing =
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+/**
+ * The mockup's three marks. `low` is the one that needs a human, so it is the
+ * one that reads Fix and takes the failure colour.
+ */
+const LEVEL_MARK: Record<ConfidenceLevel, { label: string; tone: Severity }> = {
+  high: { label: "OK", tone: "ok" },
+  medium: { label: "Check", tone: "warn" },
+  low: { label: "Fix", tone: "bad" },
+};
 
-const fieldClass =
-  "mt-1.5 block w-full border border-rule bg-paper px-3 py-2 text-sm text-ink hover:border-ink";
-
-const buttonClass =
-  "border border-ink bg-ink px-4 py-2.5 text-[11px] font-semibold uppercase tracking-label text-paper hover:bg-ink-soft disabled:opacity-50";
-
-/** low is the accent because low is the one that needs a human. */
-const LEVEL_CLASS: Record<ConfidenceLevel, string> = {
+const MARK_TEXT: Record<ConfidenceLevel, string> = {
   high: "text-pass",
-  medium: "text-ink-soft",
+  medium: "text-sev3",
   low: "text-accent",
 };
 
@@ -252,102 +265,96 @@ export function AdminMeetingDetailPage() {
     }
   }
 
+  /**
+   * Decision 8's gate, computed rather than asserted. An item with any field
+   * marked `low` is an item somebody has to look at, and publishing over one
+   * is permitted — it is just never silent.
+   */
+  const defects = (detail?.agenda_items ?? []).filter((item) =>
+    Object.values(item.field_confidence).some((mark) => mark.level === "low"),
+  );
+
+  /** The first artifact is the document the record was parsed out of. */
+  const artifact = detail?.artifacts[0] ?? null;
+  const sourceDocument = detail?.documents[0] ?? null;
+
+  /**
+   * The value the parser produced for the item most in need of a look. The raw
+   * page text is not returned by the API, and inventing it would be worse than
+   * showing the thing a correction would actually replace.
+   */
+  const extractedText = (() => {
+    const items = detail?.agenda_items ?? [];
+    const worst = items.find((item) =>
+      Object.values(item.field_confidence).some((mark) => mark.level === "low"),
+    );
+    const chosen = worst ?? items[0];
+    if (!chosen) return "Nothing was extracted from this document.";
+    return chosen.description
+      ? `${chosen.item_number}.  ${chosen.title}\n    ${chosen.description}`
+      : `${chosen.item_number}.  ${chosen.title}`;
+  })();
+
   return (
-    <PressroomShell>
-      <p className="kicker">Pressroom</p>
-      <h1 className="headline text-3xl sm:text-4xl mt-1">Meeting record</h1>
-      <div className="rule-hi mt-4" role="presentation" />
+    <>
+      <WorkTitle
+        title={
+          detail
+            ? `${detail.commission.name} — ${new Date(detail.meeting.date).toLocaleDateString()}`
+            : "Meeting record"
+        }
+        stamp={
+          detail ? (
+            <>
+              {detail.meeting.id} ·{" "}
+              {detail.meeting.published_at === null ? (
+                <StatusPill tone="plain" testId="publication-pill">
+                  Not published
+                </StatusPill>
+              ) : (
+                <StatusPill tone="ok" testId="publication-pill">
+                  Published
+                </StatusPill>
+              )}
+            </>
+          ) : undefined
+        }
+      />
 
       {error && (
-        <p
-          role="alert"
-          className="mt-6 border-l-2 border-accent bg-paper px-4 py-3 text-sm text-ink-soft"
-        >
+        <p role="alert" className="border-l-2 border-accent bg-accent-50 px-4 py-3 text-sm text-ink-soft">
           {error}
         </p>
       )}
 
       {notice && (
-        <p role="status" className="mt-6 border-l-2 border-ink bg-paper px-4 py-3 text-sm text-ink-soft">
+        <p role="status" className="border-l-2 border-ink bg-paper-sunk px-4 py-3 text-sm text-ink-soft">
           {notice}
         </p>
       )}
 
       {loading ? (
-        <p className="mt-8 label-sm" role="status">
+        <p className="label-sm" role="status">
           Loading meeting…
         </p>
       ) : detail === null ? null : (
         <>
-          <PressroomCard className="mt-8">
-            <p className="label-sm">
-              {detail.jurisdiction.name}, {detail.jurisdiction.state} · {detail.commission.name}
-            </p>
-            <h2 className="mt-2 font-display text-2xl font-semibold text-ink tabular">
-              {formatStamp(detail.meeting.date)}
-            </h2>
+          <KeyValues
+            testId="meeting-facts"
+            items={[
+              {
+                key: "Jurisdiction",
+                value: `${detail.jurisdiction.name}, ${detail.jurisdiction.state}`,
+              },
+              { key: "Status", value: detail.meeting.status },
+              { key: "Location", value: detail.meeting.location ?? "Not recorded" },
+              { key: "External id", value: detail.meeting.external_id ?? "None" },
+            ]}
+          />
 
-            <dl className="mt-5 grid gap-4 sm:grid-cols-3">
-              <div>
-                <dt className="label-sm">Status</dt>
-                <dd className="mt-1 text-sm text-ink">{detail.meeting.status}</dd>
-              </div>
-              <div>
-                <dt className="label-sm">Location</dt>
-                <dd className="mt-1 text-sm text-ink">{detail.meeting.location ?? "Not recorded"}</dd>
-              </div>
-              <div>
-                <dt className="label-sm">External id</dt>
-                <dd className="mt-1 text-sm text-ink break-words">
-                  {detail.meeting.external_id ?? "None"}
-                </dd>
-              </div>
-            </dl>
-          </PressroomCard>
-
-          {/* Decision 8. */}
-          <PressroomCard className="mt-6">
-            <h2 className="font-display text-xl font-semibold text-ink">Publication</h2>
-            {detail.meeting.published_at === null ? (
-              <>
-                <p data-testid="publication-state" className="mt-2 text-sm font-semibold text-accent">
-                  Ingested, not published
-                </p>
-                <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
-                  This record exists here and nowhere else. Ingestion produced a
-                  candidate; publishing it is a decision, and the reason you give
-                  is kept with it. Publishing over a known defect is allowed —
-                  say so in the reason.
-                </p>
-              </>
-            ) : (
-              <>
-                <p data-testid="publication-state" className="mt-2 text-sm font-semibold text-pass">
-                  Published {new Date(detail.meeting.published_at).toLocaleString()}
-                </p>
-                <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
-                  Live on the public site. Withdrawing it removes it from every
-                  public response; the record and its history stay here.
-                </p>
-              </>
-            )}
-
-            <div className="mt-4 max-w-lg">
-              <label htmlFor="publication-reason" className="label-sm">
-                Publication reason
-              </label>
-              <input
-                id="publication-reason"
-                value={publishReason}
-                onChange={(event) => setPublishReason(event.target.value)}
-                className={`${fieldClass} ${focusRing}`}
-              />
-              <p className="mt-1 text-xs text-muted">
-                Required. It is written to the correction log against{" "}
-                <code>published_at</code>.
-              </p>
-            </div>
-
+          {/* Decision 8. Publishing is a decision with a reason attached, not a
+              default that happens because ingestion succeeded. */}
+          <div className={ACTION_ROW}>
             <button
               type="button"
               onClick={() =>
@@ -356,78 +363,216 @@ export function AdminMeetingDetailPage() {
                 )
               }
               disabled={publishing || publishReason.trim() === ""}
-              className={`mt-4 ${buttonClass} ${focusRing}`}
+              className={`${ACTION_PRIMARY} ${FOCUS_RING}`}
             >
               {detail.meeting.published_at === null ? "Publish" : "Unpublish"}
             </button>
-          </PressroomCard>
-
-          {/* Decision 6. */}
-          <PressroomCard className="mt-6">
-            <h2 className="font-display text-xl font-semibold text-ink">Agenda items</h2>
-            <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
-              Confidence is marked field by field. There is no score for an item
-              and none for the meeting, because one mangled title says nothing
-              about the six items either side of it.
-            </p>
-
-            {detail.agenda_items.length === 0 ? (
-              <p className="mt-4 text-sm text-muted">No agenda item was extracted.</p>
+            <a href="#record-a-correction" className={`${ACTION} ${FOCUS_RING} no-underline`}>
+              Edit fields
+            </a>
+            {sourceDocument ? (
+              <a
+                href={sourceDocument.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className={`${ACTION} ${FOCUS_RING} no-underline`}
+              >
+                Open source document
+              </a>
             ) : (
-              <ul className="mt-4 divide-y divide-rule border-y border-rule">
-                {detail.agenda_items.map((item) => {
-                  const marks = Object.entries(item.field_confidence);
-                  return (
-                    <li key={item.id} className="py-4">
-                      <p className="text-sm font-semibold text-ink">
-                        <span className="figure">{item.item_number}</span> · {item.title}
-                      </p>
-                      {item.description && (
-                        <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-soft">
-                          {item.description}
-                        </p>
-                      )}
-                      {marks.length === 0 ? (
-                        <p className="mt-2 text-xs text-muted">
-                          No confidence was recorded for any field of this item.
-                        </p>
-                      ) : (
-                        <ul className="mt-3 flex flex-wrap gap-2">
-                          {marks.map(([fieldName, mark]) => (
-                            <li
-                              key={fieldName}
-                              data-testid={`confidence-${item.id}-${fieldName}`}
-                              data-field={fieldName}
-                              data-level={mark.level}
-                              className="cite max-w-full"
-                              title={`${fieldName}: ${mark.level} — ${mark.reason}`}
-                            >
-                              <span className="font-semibold text-ink">{fieldName}</span>
-                              <span className={LEVEL_CLASS[mark.level]}>{mark.level}</span>
-                              <span className="text-muted">{mark.reason}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+              <span className={`${ACTION} cursor-not-allowed opacity-40`}>No source document</span>
             )}
-          </PressroomCard>
+            <button
+              type="button"
+              onClick={() => void handleReparse()}
+              disabled={reparsing}
+              className={`${ACTION_QUIET} ${FOCUS_RING}`}
+            >
+              {reparsing ? "Re-parsing…" : "Re-parse stored bytes"}
+            </button>
+          </div>
 
-          <PressroomCard className="mt-6">
-            <h2 className="font-display text-xl font-semibold text-ink">Documents and artifacts</h2>
+          <div className="max-w-lg">
+            <label htmlFor="publication-reason" className="label-sm">
+              Publication reason
+            </label>
+            <input
+              id="publication-reason"
+              value={publishReason}
+              onChange={(event) => setPublishReason(event.target.value)}
+              className={`${FIELD} ${FOCUS_RING}`}
+            />
+            <p className="mt-1 text-xs text-muted">
+              Required. It is written to the correction log against <code>published_at</code>.
+            </p>
+          </div>
+
+          <p
+            data-testid="publication-state"
+            className={`text-sm font-semibold ${
+              detail.meeting.published_at === null ? "text-accent" : "text-pass"
+            }`}
+          >
+            {detail.meeting.published_at === null
+              ? "Ingested, not published"
+              : `Published ${new Date(detail.meeting.published_at).toLocaleString()}`}
+          </p>
+          <p className="max-w-prose text-sm leading-relaxed text-ink-soft">
+            {detail.meeting.published_at === null
+              ? "This record exists here and nowhere else. Ingestion produced a candidate; publishing it is a decision, and the reason you give is kept with it."
+              : "Live on the public site. Withdrawing it removes it from every public response; the record and its history stay here."}
+          </p>
+
+          {/* The split. The parsed record on paper, the document it came from
+              on the sunk ground beside it. */}
+          <div className="grid grid-cols-1 border border-rule lg:grid-cols-[1.35fr_1fr]">
+            {/* Decision 6. */}
+            <div className="flex flex-col gap-3 px-4 py-3.5">
+              <span className="label-sm">
+                Agenda items — {detail.agenda_items.length} extracted
+              </span>
+              {detail.agenda_items.length === 0 ? (
+                <p className="text-sm text-muted">No agenda item was extracted.</p>
+              ) : (
+                <ul className="flex flex-col">
+                  {detail.agenda_items.map((item) => {
+                    const marks = Object.entries(item.field_confidence);
+                    const worst: ConfidenceLevel = marks.some(([, mark]) => mark.level === "low")
+                      ? "low"
+                      : marks.some(([, mark]) => mark.level === "medium")
+                        ? "medium"
+                        : "high";
+                    return (
+                      <li
+                        key={item.id}
+                        className="grid grid-cols-[2.5rem_1fr_max-content] items-baseline gap-3 border-b border-rule py-2.5 text-[13px] last:border-b-0"
+                      >
+                        <span className="figure text-[11.5px] text-muted">{item.item_number}.</span>
+                        <span className="min-w-0 leading-snug">
+                          <span className="block text-ink">{item.title}</span>
+                          {item.description && (
+                            <span className="mt-0.5 block text-[11.5px] leading-relaxed text-muted">
+                              {item.description}
+                            </span>
+                          )}
+                          {marks.length === 0 ? (
+                            <span className="mt-1 block text-[11.5px] text-muted">
+                              No confidence was recorded for any field of this item.
+                            </span>
+                          ) : (
+                            <span className="mt-1.5 flex flex-wrap gap-1.5">
+                              {marks.map(([fieldName, mark]) => (
+                                <span
+                                  key={fieldName}
+                                  data-testid={`confidence-${item.id}-${fieldName}`}
+                                  data-field={fieldName}
+                                  data-level={mark.level}
+                                  className="inline-flex max-w-full items-baseline gap-1.5 border border-rule px-1.5 py-0.5 text-[10.5px]"
+                                >
+                                  <b className="font-semibold text-ink">{fieldName}</b>
+                                  <b
+                                    className={`font-bold uppercase tracking-label ${MARK_TEXT[mark.level]}`}
+                                  >
+                                    {LEVEL_MARK[mark.level].label}
+                                  </b>
+                                  <span className="text-muted">{mark.reason}</span>
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </span>
+                        <StatusPill tone={LEVEL_MARK[worst].tone} testId={`item-mark-${item.id}`}>
+                          {LEVEL_MARK[worst].label}
+                        </StatusPill>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="max-w-prose text-[11.5px] leading-relaxed text-muted">
+                Confidence is marked field by field. There is no score for an item
+                and none for the meeting, because one mangled title says nothing
+                about the six items either side of it — the pill at the end of a
+                row is the worst mark on it, not an average of them.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-rule bg-paper-sunk px-4 py-3.5 lg:border-l lg:border-t-0">
+              <span className="label-sm">Source artifact</span>
+              {artifact === null ? (
+                <p className="text-sm text-muted">No artifact bytes are stored for this meeting.</p>
+              ) : (
+                <KeyValues
+                  testId="artifact-facts"
+                  items={[
+                    { key: "File", value: artifact.storage_key },
+                    { key: "Fetched", value: formatStamp(artifact.fetched_at) },
+                    { key: "From", value: artifact.source_url ?? "records request (no URL)" },
+                    {
+                      key: "sha256",
+                      value: `${artifact.sha256.slice(0, 4)}…${artifact.sha256.slice(-4)}`,
+                    },
+                    { key: "Pages", value: "Not recorded" },
+                    { key: "Size", value: `${artifact.byte_size} bytes` },
+                    { key: "Type", value: artifact.content_type ?? "unknown" },
+                  ]}
+                />
+              )}
+
+              {detail.artifacts.length > 1 && (
+                <p className="text-[11px] leading-relaxed text-muted">
+                  {detail.artifacts.length} artifacts back this record. The one above is the
+                  earliest returned.
+                </p>
+              )}
+
+              <span className="label-sm mt-1">Extracted text — as parsed</span>
+              <LogTail testId="extracted-text">{extractedText}</LogTail>
+              <p className="max-w-prose text-[11px] leading-relaxed text-muted">
+                The raw page text is not returned by the API. What is above is the
+                value the parser produced for the item most in need of a look — the
+                thing a correction would replace.
+              </p>
+
+              <p className="max-w-prose text-[11.5px] leading-relaxed text-muted">
+                A manual correction is recorded as an edit with your name, the old
+                value, the new value and a reason. It never overwrites the artifact.
+              </p>
+            </div>
+          </div>
+
+          {/* Decision 8's gate, said plainly. */}
+          {defects.length > 0 ? (
+            <FlagBar label="Publish gate" tone="bad" testId="publish-gate">
+              This meeting has{" "}
+              <b className="font-semibold text-ink">
+                {defects.length} item{defects.length === 1 ? "" : "s"} marked Fix
+              </b>
+              . Publishing is allowed and will be logged as publishing over a known
+              defect — say so in the reason, because the log will show you knew.
+            </FlagBar>
+          ) : (
+            <FlagBar label="Publish gate" tone="ok" testId="publish-gate">
+              No field on this record is marked Fix. Publishing is still a decision
+              with a reason attached; it is just not one made over a known defect.
+            </FlagBar>
+          )}
+
+          <div className="flex flex-col gap-3 border border-rule px-4 py-3.5">
+            <span className="label-sm">Documents</span>
             {detail.documents.length === 0 ? (
-              <p className="mt-2 text-sm text-muted">No document is linked to this meeting.</p>
+              <p className="text-sm text-muted">No document is linked to this meeting.</p>
             ) : (
-              <ul className="mt-3 divide-y divide-rule border-y border-rule">
+              <ul className="divide-y divide-rule border-y border-rule">
                 {detail.documents.map((doc) => (
-                  <li key={doc.id} className="flex flex-wrap items-baseline justify-between gap-3 py-3">
+                  <li
+                    key={doc.id}
+                    className="flex flex-wrap items-baseline justify-between gap-3 py-2.5"
+                  >
                     <span className="text-sm text-ink">{doc.title}</span>
                     <a
                       href={doc.url}
-                      className={`cite ${focusRing}`}
+                      className={`cite ${FOCUS_RING}`}
                       rel="noreferrer noopener"
                       target="_blank"
                     >
@@ -438,33 +583,35 @@ export function AdminMeetingDetailPage() {
               </ul>
             )}
 
-            {detail.artifacts.length === 0 ? (
-              <p className="mt-4 text-sm text-muted">No artifact bytes are stored for this meeting.</p>
-            ) : (
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[32rem] border-collapse text-left">
+            {detail.artifacts.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[30rem] border-collapse text-left text-[13px]">
                   <caption className="sr-only">Stored artifacts backing this meeting</caption>
                   <thead>
-                    <tr className="border-b border-rule">
-                      <th scope="col" className="label-sm py-2 pr-4">SHA-256</th>
-                      <th scope="col" className="label-sm py-2 pr-4">Type</th>
-                      <th scope="col" className="label-sm py-2 pr-4">Bytes</th>
-                      <th scope="col" className="label-sm py-2">Fetched</th>
+                    <tr>
+                      <th scope="col" className="label-sm border-b border-rule py-2 pr-3">
+                        sha256
+                      </th>
+                      <th scope="col" className="label-sm border-b border-rule py-2 pr-3">
+                        Type
+                      </th>
+                      <th scope="col" className="label-sm border-b border-rule py-2 pr-3 text-right">
+                        Bytes
+                      </th>
+                      <th scope="col" className="label-sm border-b border-rule py-2">
+                        Fetched
+                      </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-rule">
-                    {detail.artifacts.map((artifact) => (
-                      <tr key={artifact.id}>
-                        <td className="py-2 pr-4 font-mono text-xs text-ink-soft">
-                          {artifact.sha256.slice(0, 12)}…
+                  <tbody>
+                    {detail.artifacts.map((row) => (
+                      <tr key={row.id} className="border-b border-rule last:border-b-0">
+                        <td className="py-2 pr-3 font-mono text-xs text-ink-soft">
+                          {row.sha256.slice(0, 12)}…
                         </td>
-                        <td className="py-2 pr-4 text-sm text-ink-soft">
-                          {artifact.content_type ?? "unknown"}
-                        </td>
-                        <td className="py-2 pr-4 figure text-sm text-ink">{artifact.byte_size}</td>
-                        <td className="py-2 text-sm text-ink tabular">
-                          {formatStamp(artifact.fetched_at)}
-                        </td>
+                        <td className="py-2 pr-3 text-ink-soft">{row.content_type ?? "unknown"}</td>
+                        <td className="py-2 pr-3 text-right figure text-ink">{row.byte_size}</td>
+                        <td className="py-2 tabular text-ink">{formatStamp(row.fetched_at)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -472,33 +619,27 @@ export function AdminMeetingDetailPage() {
               </div>
             )}
 
-            <p className="mt-5 max-w-prose text-sm leading-relaxed text-ink-soft">
+            <p className="max-w-prose text-sm leading-relaxed text-ink-soft">
               Re-parsing replays these stored bytes.{" "}
               <strong className="font-semibold text-ink">No request is made to the source.</strong>{" "}
-              The artifact itself is never rewritten — a correction changes the
-              parsed record and leaves the evidence alone.
+              The artifact itself is never rewritten — a correction changes the parsed record and
+              leaves the evidence alone.
             </p>
-            <button
-              type="button"
-              onClick={() => void handleReparse()}
-              disabled={reparsing}
-              className={`mt-4 ${buttonClass} ${focusRing}`}
-            >
-              {reparsing ? "Re-parsing…" : "Re-parse stored bytes"}
-            </button>
-          </PressroomCard>
+          </div>
 
           {/* Decision 7. */}
-          <PressroomCard className="mt-6">
-            <h2 className="font-display text-xl font-semibold text-ink">Record a correction</h2>
-            <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
-              A correction appends. The old value, the new one and your reason
-              are kept forever; the stored artifact is not touched, because a
-              transparency project that edits its own evidence has nothing left
-              to stand on.
+          <div
+            id="record-a-correction"
+            className="flex flex-col gap-3 border border-rule px-4 py-3.5"
+          >
+            <span className="label-sm">Record a correction</span>
+            <p className="max-w-prose text-sm leading-relaxed text-ink-soft">
+              A correction appends. The old value, the new one and your reason are kept forever; the
+              stored artifact is not touched, because a transparency project that edits its own
+              evidence has nothing left to stand on.
             </p>
 
-            <form onSubmit={handleCorrection} className="mt-4 max-w-lg space-y-5">
+            <form onSubmit={handleCorrection} className="max-w-lg space-y-4">
               {formError && (
                 <p role="alert" className="border-l-2 border-accent px-4 py-2 text-sm text-ink-soft">
                   {formError}
@@ -516,7 +657,7 @@ export function AdminMeetingDetailPage() {
                     setTargetKey(event.target.value);
                     setField("");
                   }}
-                  className={`${fieldClass} ${focusRing}`}
+                  className={`${FIELD} ${FOCUS_RING}`}
                 >
                   {targets.map((target) => (
                     <option key={target.key} value={target.key}>
@@ -534,7 +675,7 @@ export function AdminMeetingDetailPage() {
                   id="correction-field"
                   value={selectedField}
                   onChange={(event) => setField(event.target.value)}
-                  className={`${fieldClass} ${focusRing}`}
+                  className={`${FIELD} ${FOCUS_RING}`}
                 >
                   {(selectedTarget?.fields ?? []).map((name) => (
                     <option key={name} value={name}>
@@ -552,7 +693,7 @@ export function AdminMeetingDetailPage() {
                   id="correction-value"
                   value={newValue}
                   onChange={(event) => setNewValue(event.target.value)}
-                  className={`${fieldClass} ${focusRing}`}
+                  className={`${FIELD} ${FOCUS_RING}`}
                 />
               </div>
 
@@ -566,37 +707,33 @@ export function AdminMeetingDetailPage() {
                   rows={3}
                   value={correctionReason}
                   onChange={(event) => setCorrectionReason(event.target.value)}
-                  className={`${fieldClass} ${focusRing}`}
+                  className={`${FIELD} ${FOCUS_RING}`}
                 />
                 <p className="mt-1 text-xs text-muted">
-                  Required. A change with no stated reason is indistinguishable
-                  from tampering.
+                  Required. A change with no stated reason is indistinguishable from tampering.
                 </p>
               </div>
 
               <button
                 type="submit"
                 disabled={correcting || correctionReason.trim() === ""}
-                className={`${buttonClass} ${focusRing}`}
+                className={`${ACTION_PRIMARY} ${FOCUS_RING}`}
               >
                 {correcting ? "Recording…" : "Record correction"}
               </button>
             </form>
-          </PressroomCard>
+          </div>
 
-          <PressroomCard className="mt-6">
-            <h2 className="font-display text-xl font-semibold text-ink">Corrections</h2>
+          <div className="flex flex-col gap-3 border border-rule px-4 py-3.5">
+            <span className="label-sm">Corrections</span>
             {corrections.length === 0 ? (
-              <p className="mt-2 text-sm text-muted">Nothing on this record has been corrected.</p>
+              <p className="text-sm text-muted">Nothing on this record has been corrected.</p>
             ) : (
               // Text only. There is no edit control because there is no edit
               // path: the database raises on UPDATE and DELETE of these rows.
-              <ol
-                data-testid="corrections-history"
-                className="mt-4 divide-y divide-rule border-y border-rule"
-              >
+              <ol data-testid="corrections-history" className="divide-y divide-rule border-y border-rule">
                 {corrections.map((correction) => (
-                  <li key={correction.id} className="py-4">
+                  <li key={correction.id} className="py-3">
                     <p className="label-sm">
                       {formatStamp(correction.created_at)} ·{" "}
                       {correction.operator_email ?? "operator removed"}
@@ -614,9 +751,9 @@ export function AdminMeetingDetailPage() {
                 ))}
               </ol>
             )}
-          </PressroomCard>
+          </div>
         </>
       )}
-    </PressroomShell>
+    </>
   );
 }
