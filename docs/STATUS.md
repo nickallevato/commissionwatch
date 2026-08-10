@@ -1,6 +1,10 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after **joining a dispute to the correction it produced** (B3, below —
+> Last updated: 2026-08-10, after **putting the name-match quality in front of the operator who
+> approves it** (below — the public page showed the band and the review console showed nothing,
+> so the person deciding knew less than the person reading) and **remembering an operator's
+> entity-resolution judgement** so the same ambiguous pair is not re-asked every sweep. Before
+> those: **joining a dispute to the correction it produced** (B3, below —
 > `dispute_id` was a column nothing wrote) and giving the **external monitor a trigger that
 > actually fires** (`deploy/monitor-trigger.sh`, below — one operator action remains, and the
 > dead-man's-switch gap is named there rather than left implicit). Before those: the **bulk data
@@ -745,6 +749,89 @@ three months. `OPENFEC_API_KEY` is required; **`DEMO_KEY` is never used**, in co
 
 Counts: backend **959 tests / 241 suites**, frontend **409 / 41**, both green. Backend lint: 2
 warnings, 0 errors — the same two deliberate ones. Frontend lint: 0 problems.
+
+## Match quality reaches the operator, and an entity judgement is remembered
+
+Working from `docs/superpowers/plans/2026-08-10-match-quality-in-review.md`. Migration 070.
+
+**The inversion this fixed.** A `vote_donor_conflict` rests on a fuzzy name match, and that
+uncertainty was modelled properly and stored on the finding — band, score, matched terms,
+unmatched terms, blind terms. The **public** officials page rendered all of it, chip and
+disclosure, with "not a verified identity" inside the chip. `AdminReviewPage.tsx` rendered
+**none** of it. So the reader was told how uncertain a claim was and the operator being asked
+to approve it was not: the person making the decision had less information than the person
+receiving it.
+
+**One component, two surfaces.** `MatchConfidenceChip` moved out of `DonorOverlay.tsx` into
+`components/officials/MatchQuality.tsx`, and both the public page and the console import it.
+Writing a second chip for the console would have fixed the symptom and kept the disease — two
+components rendering the same stored band, free to drift. The band labels, short forms and
+colours live in `matchBands.ts` so `MatchQuality.tsx` exports components and nothing else.
+
+`MatchQualityPanel` is the operator's version and sits **above the buttons, not behind a
+disclosure**. On the public page the terms are a `<details>`, which is right for a reader who
+has already been given the caveat in the sentence they just read. It is wrong on the screen
+where somebody decides whether the claim gets published: the single most useful fact about a
+finding may be that it rests on one common word, and a test asserts the panel contains no
+`<details>`.
+
+**The queue can be worked by quality.** `?band=` filters on the stored band read straight out
+of `metadata` in SQL — not recomputed, because the band on a finding is the band it was
+raised under. `?sort=weakest_first` orders by `array_position` over the band list rather than
+by the string; alphabetically "moderate" < "strong" < "weak", which is close to exactly wrong.
+Findings with no band sort last. The default ordering — overdue first, then oldest — is
+untouched, so nothing low-severity is quietly buried. `band_counts` says what is waiting.
+
+**The weak-match policy is stated.** `MINIMUM_MATCH_BAND` is unchanged at `moderate` and weak
+matches are still **not** raised: a weak match is one common term, across a full donor list
+that is an enormous number of pairs, essentially all coincidences, and raising them would bury
+the findings worth reading. What changed is that the decision is now findable. `MATCH_POLICY`
+carries the minimum band, the labels and the sentence; the API serves it and the console
+renders it **verbatim**, so screen and detector cannot drift.
+`correlateVoteDonorsWithDiagnostics` returns the tally of what was considered and not raised.
+
+**The tally is deliberately not persisted.** A row per considered-and-dropped coincidence is a
+table growing with the product of donors and agenda items that answers no question anyone has.
+The diagnostics exist so the rule is testable and so a future report can be built from a pure
+function.
+
+**An entity-resolution judgement is remembered.** `entity_resolution_decisions` (migration 070)
+records whether an operator judged a donor and an agenda subject to be the same entity. The
+pair is keyed on distinctive terms, not on the finding — a finding id changes every sweep and
+an agenda item id changes every meeting, so keying on either would mean the judgement expired
+exactly when it became useful.
+
+**The donor half goes through `splitTerms`, and that is load-bearing.** Keyed on
+`normalizeName`, "Ridgeline Aggregate LLC" and "RIDGELINE AGGREGATE, L.L.C." were two keys for
+one company filed by two clerks — and "Ridgeline Aggregate LLC" and "Ridgeline Aggregate
+Union" were two keys as well, which would have made a stored judgement depend on what class of
+organisation the donor is, on a path whose governing invariant is that detection applies
+identically to every entity class. Discarding the class word first makes uniform treatment hold
+by construction, as it does in `name-match.ts`. The tests caught this; the first draft had it
+wrong.
+
+**The two answers are not symmetric.** `different_entity` suppresses the pair on later
+sweeps — asking an operator the same question after they answered it is the defect this
+exists to fix. `same_entity` **annotates**: the finding is still raised, still `held`, and
+still needs an explicit approval with its own stated reason. Nothing here publishes anything
+as a side effect, and the console says so on the screen.
+
+**Changing your mind is expected.** The table is current state and updatable; every write —
+first or fifth — appends to `record_corrections`, so the sequence is recoverable from the one
+append-only log rather than from a second one that could disagree with it. `old_value` is
+`null` on a first judgement and the previous answer on a revision, because "was never decided"
+and "was decided the other way" are different facts. The row id is generated before the insert
+so the first log entry for a pair names a target that exists.
+
+**PII.** The table stores the donor's filed name and the matched terms — the disclosure — and
+nothing else about a donor. `finance-pii-guard.test.ts` scans its column names. Its one
+exemption is `entity_resolution_decisions.operator_email`, the audit actor snapshotted as
+everywhere else, and the exemption is a set of full `table.column` strings rather than a
+pattern, so it cannot widen to cover a `donor_email`.
+
+Counts after this change: backend **1141 tests / 273 suites**, frontend **443 / 42**, deploy
+**61 / 0**, all green. Backend lint: 2 warnings, 0 errors — the same two deliberate ones.
+Frontend lint: **0 problems**. Migration 070 verified from an empty database.
 
 ## Open data, the fork path and the meeting calendar have landed
 
