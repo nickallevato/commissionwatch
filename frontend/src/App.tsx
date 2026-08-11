@@ -9,6 +9,7 @@ import { MembersPage } from "./pages/MembersPage";
 import { OfficialPage } from "./pages/OfficialPage";
 import { SearchPage } from "./pages/SearchPage";
 import { VotesPage } from "./pages/VotesPage";
+import { ElectionsPage } from "./pages/ElectionsPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
 import { PublicRecordsPage } from "./pages/PublicRecordsPage";
@@ -61,6 +62,7 @@ export function App() {
           <Route path="officials/:id" element={<OfficialPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="votes" element={<VotesPage />} />
+          <Route path="elections" element={<ElectionsPage />} />
           <Route path="anomalies" element={<AnomaliesPage />} />
           <Route path="methodology" element={<MethodologyPage />} />
           {/* P7. The statutory route the Methodology page promises, as a page.

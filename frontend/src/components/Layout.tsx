@@ -24,6 +24,10 @@ const navItems: NavItem[] = [
   { to: "/meetings", label: "Meetings" },
   { to: "/members", label: "Officials" },
   { to: "/votes", label: "Votes" },
+  // Scaffolded, and the page says so rather than showing placeholder
+  // candidates. It sits in the masthead so the module has a home to build
+  // into; it publishes nothing until it can cite a filing.
+  { to: "/elections", label: "Elections" },
   // P6. Search sits with the record it searches, not in the utility row: the
   // archive is the product, and a reader arriving with a question starts here.
   { to: "/search", label: "Search" },

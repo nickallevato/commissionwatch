@@ -41,6 +41,10 @@ describe("Layout", () => {
       ["Meetings", "/meetings"],
       ["Officials", "/members"],
       ["Votes", "/votes"],
+      // Scaffolded module. In the masthead so it has a home to build into; the
+      // page itself states that it holds no records rather than showing
+      // placeholder candidates.
+      ["Elections", "/elections"],
       // P6: search over the published record.
       ["Search", "/search"],
       // When these bodies sit, and the iCal feeds behind it.
