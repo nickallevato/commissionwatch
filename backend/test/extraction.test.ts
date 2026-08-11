@@ -11,6 +11,7 @@ import {
 import {
   locateQuote,
   namesAnOfficial,
+  subjectPerformedAction,
   verifiedMatter,
   verifyClaims,
   MIN_QUOTE_LENGTH,
@@ -870,15 +871,15 @@ describe("the matter, held to the same standard as the citation", () => {
     // verified vote down with it.
     const result = verifyClaims(DOC, [
       {
-        subject_name: "Deputy Mayor Fischer",
-        action: "voted_yes",
+        subject_name: "Commissioner Bode",
+        action: "seconded",
         matter: "the findings presented in the parking amendment",
         quote: "Deputy Mayor Fischer and seconded by Commissioner Bode. The motion carried 5-0.",
       },
     ]);
     assert.equal(result.verified.length, 1);
     assert.equal(result.verified[0].matter, null);
-    assert.equal(result.verified[0].subject_name, "Deputy Mayor Fischer");
+    assert.equal(result.verified[0].subject_name, "Commissioner Bode");
   });
 });
 
@@ -1009,5 +1010,85 @@ describe("a reply cut off by the token ceiling", () => {
     assert.equal(outcome.failedChunks.length, outcome.chunks);
     assert.match(outcome.failedChunks[0].error, /Truncated reply/);
     assert.notEqual(classifyExtraction(outcome), "succeeded");
+  });
+});
+
+describe("which of two named officials actually did it", () => {
+  /**
+   * The canonical minutes sentence, and the defect it produced in production
+   * on 2026-08-11. Fischer MOVED and Bode SECONDED, but a claim saying Fischer
+   * seconded passed every check then in place: the quotation is verbatim, the
+   * person is real, and the sentence does name Fischer. The stored claims held
+   * the true second and the false one, equally well cited.
+   */
+  const BOTH_NAMED =
+    "Motion to approve Consent Items F.1 through F.22 as presented was made by " +
+    "Deputy Mayor Fischer and seconded by Commissioner Bode.";
+
+  const ROLL_CALL =
+    "The motion carried 5-0. (Deputy Mayor Fischer – Aye; Commissioner Bode – Aye; " +
+    "Commissioner Sweeney – Aye; Commissioner Madgic – Aye; Mayor Morrison – Aye)";
+
+  it("attributes the second to the official beside the word 'seconded'", () => {
+    assert.equal(subjectPerformedAction(BOTH_NAMED, "Commissioner Bode", "seconded"), true);
+    assert.equal(subjectPerformedAction(BOTH_NAMED, "Deputy Mayor Fischer", "seconded"), false);
+  });
+
+  it("attributes the motion to the official beside 'was made by'", () => {
+    assert.equal(subjectPerformedAction(BOTH_NAMED, "Deputy Mayor Fischer", "moved"), true);
+    assert.equal(subjectPerformedAction(BOTH_NAMED, "Commissioner Bode", "moved"), false);
+  });
+
+  it("rejects an action the citation carries no cue for at all", () => {
+    // The second production case: `Fischer [seconded]` cited to a vote line.
+    const voteLine = "Deputy Mayor Fischer – Aye; Commissioner Bode – Aye";
+    assert.equal(subjectPerformedAction(voteLine, "Deputy Mayor Fischer", "seconded"), false);
+  });
+
+  it("still reads every vote out of a roll call", () => {
+    // The rule must not cost us the thing the feature is for. Each name has its
+    // own "Aye" beside it, so all five resolve.
+    for (const who of [
+      "Deputy Mayor Fischer",
+      "Commissioner Bode",
+      "Commissioner Sweeney",
+      "Commissioner Madgic",
+      "Mayor Morrison",
+    ]) {
+      assert.equal(subjectPerformedAction(ROLL_CALL, who, "voted_yes"), true, who);
+    }
+  });
+
+  it("leaves a sentence naming one official alone", () => {
+    // Nothing to confuse, and the subject check already proved they are in it.
+    const single = "Commissioner Bode moved to approve the resolution as presented.";
+    assert.equal(subjectPerformedAction(single, "Commissioner Bode", "moved"), true);
+    assert.equal(subjectPerformedAction(single, "Commissioner Bode", "recused"), true);
+  });
+
+  it("gives 'spoke' to the official the sentence leads with", () => {
+    // Speech has no closed cue list, so the minutes' own convention is used:
+    // "Commissioner Bode asked about X".
+    const twoSpeakers =
+      "Commissioner Sweeney inquired about verification, and Commissioner Bode agreed.";
+    assert.equal(subjectPerformedAction(twoSpeakers, "Commissioner Sweeney", "spoke"), true);
+    assert.equal(subjectPerformedAction(twoSpeakers, "Commissioner Bode", "spoke"), false);
+  });
+
+  it("rejects the false second end to end, and keeps the true one", () => {
+    const doc = `F. Consent Agenda\n${BOTH_NAMED}\n${ROLL_CALL}`;
+    const result = verifyClaims(doc, [
+      { subject_name: "Commissioner Bode", action: "seconded", matter: null, quote: BOTH_NAMED },
+      { subject_name: "Deputy Mayor Fischer", action: "seconded", matter: null, quote: BOTH_NAMED },
+      { subject_name: "Deputy Mayor Fischer", action: "moved", matter: null, quote: BOTH_NAMED },
+    ]);
+
+    assert.equal(result.verified.length, 2);
+    assert.deepEqual(
+      result.verified.map((claim) => `${claim.subject_name}:${claim.action}`).sort(),
+      ["Commissioner Bode:seconded", "Deputy Mayor Fischer:moved"],
+    );
+    assert.equal(result.rejected.length, 1);
+    assert.equal(result.rejected[0].reason, "wrong-role-in-quote");
   });
 });

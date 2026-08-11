@@ -30,6 +30,7 @@ export const REJECTION_REASONS = [
   "asserts-motive",
   "subject-not-in-quote",
   "not-an-official",
+  "wrong-role-in-quote",
 ] as const;
 
 /**
@@ -209,13 +210,168 @@ function asText(value: unknown): string {
  * "Cmr. Smith" and "Smith". A subject whose surname is absent from its own
  * citation is rejected.
  */
-function quoteNamesSubject(quote: string, subject: string): boolean {
+/**
+ * Every official the minutes name inside a passage, with where they appear.
+ *
+ * Offices are the anchor, because that is how minutes print members and it is
+ * the same signal `namesAnOfficial` uses.
+ */
+const OFFICIAL_MENTION = /\b(?:Deputy Mayor|Mayor|Commissioner)\s+([A-Z][\w'’-]+)/g;
+
+export interface OfficialMention {
+  surname: string;
+  index: number;
+  end: number;
+}
+
+export function officialMentions(passage: string): OfficialMention[] {
+  const found: OfficialMention[] = [];
+  for (const match of passage.matchAll(OFFICIAL_MENTION)) {
+    if (match.index === undefined) continue;
+    found.push({
+      surname: match[1].toLowerCase(),
+      index: match.index,
+      end: match.index + match[0].length,
+    });
+  }
+  return found;
+}
+
+/**
+ * A phrase marking an action, and which side of it the actor stands on.
+ *
+ * The side is load-bearing, not decoration. A roll call reads
+ * "Deputy Mayor Fischer – Aye; Commissioner Bode – Aye", where each vote belongs
+ * to the name BEFORE it — and the next commissioner's name begins two
+ * characters after that "Aye" while Fischer's ends three before it. Nearest-by-
+ * distance alone therefore hands Fischer's vote to Bode, and every vote in the
+ * roll call shifts by one person. Minutes are consistent about direction, so
+ * direction is what we use.
+ */
+type CueSide = "before" | "after";
+interface ActionCue {
+  pattern: RegExp;
+  /** Where the actor stands relative to the cue. */
+  side: CueSide;
+}
+
+const ACTION_CUES: Record<ClaimAction, ActionCue[]> = {
+  // "Commissioner Bode moved..." but also "...was made by Deputy Mayor Fischer".
+  moved: [
+    { pattern: /\bmoved\b/gi, side: "before" },
+    { pattern: /\bmade the motion\b/gi, side: "before" },
+    { pattern: /\bwas made by\b/gi, side: "after" },
+    { pattern: /\bmotion by\b/gi, side: "after" },
+  ],
+  seconded: [
+    { pattern: /\bseconded by\b/gi, side: "after" },
+    // "Commissioner Bode seconded the motion." The lookahead keeps this from
+    // also matching "seconded BY Commissioner Bode", where the actor stands on
+    // the other side — without it, the sentence resolves to whoever moved.
+    { pattern: /\bsecond(?:ed|s)?\b(?!\s+by\b)/gi, side: "before" },
+  ],
+  voted_yes: [
+    { pattern: /\b(?:aye|yes|in favou?r)\b/gi, side: "before" },
+    { pattern: /\bvoted (?:yes|aye)\b/gi, side: "before" },
+  ],
+  voted_no: [{ pattern: /\b(?:nay|no|opposed|against)\b/gi, side: "before" }],
+  abstained: [{ pattern: /\babstain(?:ed|s|ing)?\b/gi, side: "before" }],
+  absent: [{ pattern: /\b(?:absent|excused)\b/gi, side: "before" }],
+  recused: [{ pattern: /\brecus(?:ed|es|ing|al)\b/gi, side: "before" }],
+  // Open-ended by nature — there is no closed list of ways minutes report
+  // speech. Handled by the leading-subject rule instead.
+  spoke: [],
+};
+
+/** The official standing on the cue's side of it, nearest to it. */
+function actorFor(mentions: OfficialMention[], cue: number, side: CueSide): OfficialMention | null {
+  const candidates =
+    side === "before"
+      ? mentions.filter((mention) => mention.end <= cue)
+      : mentions.filter((mention) => mention.index >= cue);
+  if (candidates.length === 0) return null;
+
+  return candidates.reduce((best, mention) => {
+    const distance = side === "before" ? cue - mention.end : mention.index - cue;
+    const bestDistance = side === "before" ? cue - best.end : best.index - cue;
+    return distance < bestDistance ? mention : best;
+  });
+}
+
+/**
+ * Did THIS subject perform THIS action, given a sentence naming several people?
+ *
+ * The gap this closes, found in production 2026-08-11. The minutes' canonical
+ * sentence is:
+ *
+ *   "Motion to approve Consent Items F.1 through F.22 as presented was made by
+ *    Deputy Mayor Fischer and seconded by Commissioner Bode."
+ *
+ * Fischer moved and Bode seconded, but a claim saying *Fischer seconded* passed
+ * every check: the quotation is verbatim, the person is real, and the sentence
+ * does name Fischer. `quoteNamesSubject` asks whether the subject appears, and
+ * when two officials appear in two different roles, that question cannot
+ * separate them. The stored claims contained both the true second and the false
+ * one, equally well cited.
+ *
+ * The rule is proximity to the action's own cue: of the officials named, the
+ * one nearest the word marking the action is the one who performed it. So
+ * "seconded" resolves to Bode and the Fischer claim dies. A quote with no cue
+ * for the claimed action fails outright — which also rejects
+ * `Fischer [seconded]` cited to "Deputy Mayor Fischer – Aye", a vote line
+ * carrying no second at all.
+ *
+ * `spoke` has no closed cue list, so it takes the leading-subject rule instead:
+ * minutes report speech as "Commissioner Bode asked about X", subject first.
+ *
+ * A sentence naming only one official is left alone — there is nothing to
+ * confuse, and `quoteNamesSubject` has already established they are in it.
+ */
+export function subjectPerformedAction(
+  quote: string,
+  subject: string,
+  action: ClaimAction,
+): boolean {
+  const surname = subjectSurname(subject);
+  if (surname === null) return false;
+
+  const mentions = officialMentions(quote);
+  const distinct = new Set(mentions.map((m) => m.surname));
+  if (distinct.size <= 1) return true;
+
+  if (action === "spoke") {
+    return mentions.length > 0 && mentions[0].surname === surname;
+  }
+
+  for (const cue of ACTION_CUES[action]) {
+    for (const match of quote.matchAll(cue.pattern)) {
+      if (match.index === undefined) continue;
+      // "before" measures from the END of the cue word, so "Fischer – Aye"
+      // looks left from after "Aye" and finds Fischer, not the next name.
+      const from = cue.side === "before" ? match.index : match.index + match[0].length;
+      const actor = actorFor(mentions, from, cue.side);
+      if (actor !== null && actor.surname === surname) return true;
+    }
+  }
+  // Either no cue for this action anywhere in the citation, or every cue
+  // resolved to somebody else. Both mean the sentence does not say this subject
+  // did this thing, whoever else it names.
+  return false;
+}
+
+/** The surname a subject is matched on, or null if there is nothing usable. */
+function subjectSurname(subject: string): string | null {
   const parts = subject
     .replace(/[.,]/g, " ")
     .split(/\s+/)
     .filter((part) => part.length > 2);
-  if (parts.length === 0) return false;
-  const surname = parts[parts.length - 1].toLowerCase();
+  if (parts.length === 0) return null;
+  return parts[parts.length - 1].toLowerCase();
+}
+
+function quoteNamesSubject(quote: string, subject: string): boolean {
+  const surname = subjectSurname(subject);
+  if (surname === null) return false;
   return quote.toLowerCase().includes(surname);
 }
 
@@ -296,6 +452,17 @@ export function verifyClaims(documentText: string, claims: RawClaim[]): Verifica
       rejected.push({
         reason: "subject-not-in-quote",
         detail: `the citation does not name ${subject}`,
+        raw,
+      });
+      continue;
+    }
+
+    if (!subjectPerformedAction(quote, subject, action as ClaimAction)) {
+      // Names the subject, but another official in the sentence performed this
+      // action. Equally well cited and simply untrue.
+      rejected.push({
+        reason: "wrong-role-in-quote",
+        detail: `the citation names ${subject} but does not attribute '${action}' to them`,
         raw,
       });
       continue;
