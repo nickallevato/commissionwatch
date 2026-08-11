@@ -930,3 +930,84 @@ describe("cleaning up claims a policy change forbade", () => {
     assert.equal((await db("minute_claims").where({ meeting_id: meetingId })).length, 1);
   });
 });
+
+describe("a reply cut off by the token ceiling", () => {
+  /**
+   * Production, 2026-08-11: three of nine chunks were cut mid-string. Each had
+   * already emitted several complete, correct claims, and all of them were
+   * discarded — real recorded votes lost for a reason with nothing to do with
+   * the record.
+   */
+  const TRUNCATED = `[
+  {
+    "subject_name": "Commissioner Sweeney",
+    "action": "moved",
+    "matter": "H.2 Ordinance Provisional Adoption",
+    "quote": "Commissioner Sweeney moved to provisionally adopt the ordinance as presented."
+  },
+  {
+    "subject_name": "Commissioner Bode",
+    "action": "seconded",
+    "matter": "H.2 Ordinance Provisional Adoption",
+    "quote": "The motion was seconded by Commissioner Bode."
+  },
+  {
+    "subject_name": "Deputy Mayor Fischer",
+    "action": "voted_yes",
+    "matter": "H.2 Ordinance Provisional Ad`;
+
+  it("recovers the complete claims that came before the cut", () => {
+    const read = readClaims(TRUNCATED);
+    assert.equal(read.ok, true);
+    assert.equal(read.ok && read.claims.length, 2);
+    assert.equal(read.ok && read.truncated, true);
+  });
+
+  it("does not invent the claim that was interrupted", () => {
+    const read = readClaims(TRUNCATED);
+    assert.ok(read.ok);
+    if (read.ok) {
+      const subjects = read.claims.map((c) => c.subject_name);
+      assert.deepEqual(subjects, ["Commissioner Sweeney", "Commissioner Bode"]);
+      assert.ok(!subjects.includes("Deputy Mayor Fischer"));
+    }
+  });
+
+  it("is not fooled by braces inside a quoted string", () => {
+    const tricky = '[{"subject_name":"Commissioner Bode","action":"moved","quote":"He said {not json} \\" here"}';
+    const read = readClaims(tricky);
+    assert.equal(read.ok, true);
+    assert.equal(read.ok && read.claims.length, 1);
+  });
+
+  it("still fails when the cut came before any complete claim", () => {
+    const read = readClaims('[\n  {\n    "subject_name": "Commissioner Bo');
+    assert.equal(read.ok, false);
+    assert.equal(read.ok === false && /cut off before a single complete claim/.test(read.reason), true);
+  });
+
+  it("marks a whole reply as not truncated", () => {
+    const read = readClaims('[{"subject_name":"Commissioner Bode","action":"moved"}]');
+    assert.equal(read.ok && read.truncated, false);
+  });
+
+  it("reports a truncated chunk so the run cannot read as fully examined", async () => {
+    // The salvage must not launder a partial read into a clean one: the tail of
+    // that chunk genuinely was never seen.
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: TRUNCATED } }] }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    assert.ok(outcome.proposed > 0, "salvaged claims are still proposed");
+    assert.equal(outcome.failedChunks.length, outcome.chunks);
+    assert.match(outcome.failedChunks[0].error, /Truncated reply/);
+    assert.notEqual(classifyExtraction(outcome), "succeeded");
+  });
+});

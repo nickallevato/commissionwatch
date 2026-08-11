@@ -90,11 +90,14 @@ export const DEFAULT_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free";
 /**
  * Reply ceiling.
  *
- * 2048 was too small and failed silently: a model that thinks before answering
- * exhausted it mid-thought, so the reply contained no JSON and the chunk read
- * as empty. 3000 is what the measurements above were taken at.
+ * Raised twice, both times on evidence. 2048 failed silently: a model that
+ * thinks before answering exhausted it mid-thought, so the reply contained no
+ * JSON and the chunk read as empty. 3000 then truncated three of nine chunks
+ * mid-string on a dense document — the array opened, emitted several complete
+ * claims, and was cut off. 8000 is sized for the worst chunk observed, and
+ * truncation is now both salvaged and reported rather than silently lost.
  */
-export const DEFAULT_MAX_TOKENS = 3000;
+export const DEFAULT_MAX_TOKENS = 8000;
 
 export interface OpenRouterOptions {
   apiKey?: string;

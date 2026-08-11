@@ -119,8 +119,60 @@ export function chunkText(text: string, size = DEFAULT_CHUNK_SIZE): Chunk[] {
  * between those two and still claim a meeting had no votes.
  */
 export type ReadClaimsResult =
-  | { ok: true; claims: RawClaim[] }
+  | { ok: true; claims: RawClaim[]; truncated: boolean }
   | { ok: false; reason: string; sample: string };
+
+/**
+ * The complete objects at the start of a possibly-truncated JSON array.
+ *
+ * A reply cut off by the token ceiling is not garbage: everything before the
+ * cut is intact, correctly-formed evidence, and discarding it loses real votes
+ * for a reason that has nothing to do with the record. Observed 2026-08-11 —
+ * three of nine chunks were cut mid-string, and each had already emitted
+ * several complete claims.
+ *
+ * Salvaged claims are not trusted any more than whole ones: they still have to
+ * survive `verifyClaims` against the document. The only thing recovered here is
+ * the parsing, never the checking.
+ */
+export function salvageObjects(fragment: string): RawClaim[] {
+  const claims: RawClaim[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < fragment.length; i += 1) {
+    const ch = fragment[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        try {
+          const parsed: unknown = JSON.parse(fragment.slice(start, i + 1));
+          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            claims.push(parsed as RawClaim);
+          }
+        } catch {
+          // One malformed object does not condemn its neighbours.
+        }
+        start = -1;
+      }
+    }
+  }
+  return claims;
+}
 
 /** How much of an unreadable reply to keep for diagnosis. */
 export const REPLY_SAMPLE_LENGTH = 500;
@@ -144,7 +196,7 @@ export function readClaims(reply: string): ReadClaimsResult {
   const sample = reply.trim().slice(0, REPLY_SAMPLE_LENGTH);
   const start = reply.indexOf("[");
   const end = reply.lastIndexOf("]");
-  if (start === -1 || end === -1 || end < start) {
+  if (start === -1) {
     return {
       ok: false,
       reason:
@@ -153,11 +205,28 @@ export function readClaims(reply: string): ReadClaimsResult {
       sample,
     };
   }
+  if (end === -1 || end < start) {
+    // The array opened and never closed: cut off by the token ceiling. What
+    // came before the cut is intact and is recovered.
+    const salvaged = salvageObjects(reply.slice(start));
+    if (salvaged.length === 0) {
+      return {
+        ok: false,
+        reason: "the JSON array was cut off before a single complete claim",
+        sample,
+      };
+    }
+    return { ok: true, claims: salvaged, truncated: true };
+  }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(reply.slice(start, end + 1));
   } catch (error) {
+    // Malformed rather than truncated — but complete objects inside it are
+    // still readable, and the same argument applies.
+    const salvaged = salvageObjects(reply.slice(start));
+    if (salvaged.length > 0) return { ok: true, claims: salvaged, truncated: true };
     return { ok: false, reason: `the JSON array did not parse: ${String(error)}`, sample };
   }
   if (!Array.isArray(parsed)) {
@@ -166,6 +235,7 @@ export function readClaims(reply: string): ReadClaimsResult {
 
   return {
     ok: true,
+    truncated: false,
     claims: parsed.filter(
       (entry): entry is RawClaim =>
         typeof entry === "object" && entry !== null && !Array.isArray(entry),
@@ -213,6 +283,18 @@ export async function extractClaims(
         error: `Unreadable reply from ${reply.servedModel}: ${read.reason}. First ${REPLY_SAMPLE_LENGTH} characters: ${read.sample}`,
       });
       continue;
+    }
+    if (read.truncated) {
+      // Recorded as a failed chunk even though claims were recovered, because
+      // the tail of the chunk was genuinely never read. The run stays `partial`
+      // rather than `succeeded`, which is the honest label: some of this
+      // document was not examined.
+      failedChunks.push({
+        index,
+        error:
+          `Truncated reply from ${reply.servedModel}: recovered ${read.claims.length} complete ` +
+          "claim(s) before the cut, but the rest of this chunk was not read. Raise the token ceiling.",
+      });
     }
     const claims = read.claims;
     proposed += claims.length;
