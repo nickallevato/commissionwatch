@@ -248,12 +248,40 @@ export interface PersistOptions {
  * offset), so a merge here updates the matter and the model that produced it
  * while leaving an operator's review decision alone.
  */
+/**
+ * Collapse claims that share the unique key, keeping the first.
+ *
+ * Required, not defensive. `CHUNK_OVERLAP` exists so a sentence spanning a
+ * chunk boundary is wholly inside one chunk — which guarantees the overlapping
+ * region is read twice, and a claim found in it is proposed twice at the SAME
+ * offset, because verification resolves offsets against the whole document
+ * rather than the chunk. That is two identical keys in one INSERT, and Postgres
+ * refuses it outright: "ON CONFLICT DO UPDATE command cannot affect row a
+ * second time". The unique index in migration 072 dedupes across runs; nothing
+ * dedupes within a single statement except this.
+ *
+ * Observed in production 2026-08-11: the model produced claims correctly and
+ * every one of them was lost at the insert.
+ */
+export function dedupeClaims(claims: AttributedClaim[]): AttributedClaim[] {
+  const seen = new Set<string>();
+  const kept: AttributedClaim[] = [];
+  for (const claim of claims) {
+    // The unique index's key, minus the two columns constant within a call.
+    const key = `${claim.subject_name} ${claim.action} ${claim.quote_offset}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(claim);
+  }
+  return kept;
+}
+
 export async function persistClaims(
   db: Knex,
   outcome: ExtractionOutcome,
   options: PersistOptions,
 ): Promise<number> {
-  const rows = outcome.verified.map((claim) => ({
+  const rows = dedupeClaims(outcome.verified).map((claim) => ({
     meeting_id: options.meetingId,
     artifact_sha256: options.artifactSha256,
     subject_name: claim.subject_name,

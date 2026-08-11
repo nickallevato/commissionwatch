@@ -15,6 +15,7 @@ import {
 } from "../src/services/extraction/verify";
 import {
   chunkText,
+  dedupeClaims,
   extractClaims,
   persistClaims,
   readClaims,
@@ -689,5 +690,85 @@ describe("an extraction that outlives its request", () => {
     ]);
     assert.equal(runs[0].status, "partial");
     assert.equal(runs[0].failed_chunks.length, 1);
+  });
+});
+
+describe("the same claim found twice, because chunks overlap on purpose", () => {
+  const claim = {
+    subject_name: "Deputy Mayor Fischer",
+    action: "moved" as const,
+    matter: "Consent Items F.1 through F.22",
+    quote:
+      "Motion to approve Consent Items F.1 through F.22 as presented was made by Deputy Mayor Fischer",
+    quote_offset: 1234,
+    model: "test/model:free",
+  };
+
+  it("keeps one row per unique key", () => {
+    assert.equal(dedupeClaims([claim, claim, claim]).length, 1);
+  });
+
+  it("keeps claims that differ in ANY part of the key", () => {
+    // Two people can say the same sentence at different offsets, and one person
+    // can move and second different matters. Only an exact key match collapses.
+    const others = [
+      claim,
+      { ...claim, subject_name: "Commissioner Bode" },
+      { ...claim, action: "seconded" as const },
+      { ...claim, quote_offset: 9999 },
+    ];
+    assert.equal(dedupeClaims(others).length, 4);
+  });
+
+  it("stores a claim proposed by two overlapping chunks instead of losing every claim", async () => {
+    // Production, 2026-08-11: the model extracted correctly and the whole
+    // insert failed with "ON CONFLICT DO UPDATE command cannot affect row a
+    // second time", so a run that had genuinely read the minutes stored zero
+    // claims. CHUNK_OVERLAP makes this the normal case, not a rare one.
+    const { commissionId } = await createSource(`${PREFIX}-dupes`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-07-14" });
+
+    const outcome: ExtractionOutcome = {
+      model: "test/model:free",
+      served_models: ["test/model:free"],
+      prompt_version: PROMPT_VERSION,
+      chunks: 2,
+      proposed: 2,
+      result: { verified: [claim, claim], rejected: [] },
+      verified: [claim, claim],
+      failedChunks: [],
+    };
+
+    const stored = await persistClaims(db, outcome, {
+      meetingId,
+      artifactSha256: "a".repeat(64),
+    });
+    assert.equal(stored, 1);
+
+    const rows = await db("minute_claims").where({ meeting_id: meetingId });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, "held");
+  });
+
+  it("still merges rather than duplicates when the extractor is re-run", async () => {
+    const { commissionId } = await createSource(`${PREFIX}-rerun`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-07-15" });
+    const outcome: ExtractionOutcome = {
+      model: "test/model:free",
+      served_models: ["test/model:free"],
+      prompt_version: PROMPT_VERSION,
+      chunks: 1,
+      proposed: 1,
+      result: { verified: [claim], rejected: [] },
+      verified: [claim],
+      failedChunks: [],
+    };
+    const opts = { meetingId, artifactSha256: "b".repeat(64) };
+
+    await persistClaims(db, outcome, opts);
+    await persistClaims(db, outcome, opts);
+
+    const rows = await db("minute_claims").where({ meeting_id: meetingId });
+    assert.equal(rows.length, 1);
   });
 });
