@@ -14,7 +14,7 @@ afterAll(() => server.close());
 
 const OPERATOR = {
   id: "op-1",
-  email: "na@your-orgconsulting.com",
+  email: "operator@commissionwatch.bmux.sh",
   name: "Operator",
   role: "operator",
   last_login_at: null,
@@ -151,7 +151,7 @@ describe("PressroomLayout", () => {
     );
     renderShell();
 
-    expect(await screen.findByText("na@your-orgconsulting.com")).toBeInTheDocument();
+    expect(await screen.findByText("operator@commissionwatch.bmux.sh")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(deleted).toBe(true));

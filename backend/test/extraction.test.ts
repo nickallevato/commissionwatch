@@ -87,6 +87,49 @@ describe("free models only, enforced in code", () => {
     assert.throws(() => new OpenRouterClient({ model: "openai/gpt-4o" }), OpenRouterError);
   });
 
+  it("treats an empty OPENROUTER_MODEL as unset, because Compose sets it empty", async () => {
+    // Not a hypothetical. `- OPENROUTER_MODEL=${OPENROUTER_MODEL:-}` in
+    // deploy/docker-compose.shared.yml puts an EMPTY STRING in the container
+    // whenever the host has no value, and `??` passes an empty string straight
+    // through. The documented default was therefore unreachable on precisely
+    // the deployment it was written for, and the client threw
+    // "Refusing to call ''" instead — a configuration bug wearing the costume
+    // of the safety check.
+    const previous = process.env.OPENROUTER_MODEL;
+    process.env.OPENROUTER_MODEL = "";
+    try {
+      const client = new OpenRouterClient({ apiKey: "k" });
+      assert.equal(client.model, DEFAULT_MODEL);
+    } finally {
+      if (previous === undefined) delete process.env.OPENROUTER_MODEL;
+      else process.env.OPENROUTER_MODEL = previous;
+    }
+  });
+
+  it("still honours an explicitly set OPENROUTER_MODEL, and still checks it is free", () => {
+    const previous = process.env.OPENROUTER_MODEL;
+    process.env.OPENROUTER_MODEL = "  openai/gpt-4o  ";
+    try {
+      // Whitespace trimmed, and then refused on its merits — a padded id must
+      // not slip past the free check by failing to match the suffix.
+      assert.throws(() => new OpenRouterClient({ apiKey: "k" }), /free models only/);
+    } finally {
+      if (previous === undefined) delete process.env.OPENROUTER_MODEL;
+      else process.env.OPENROUTER_MODEL = previous;
+    }
+  });
+
+  it("treats an empty OPENROUTER_API_KEY as unconfigured", () => {
+    const previous = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = "   ";
+    try {
+      assert.equal(new OpenRouterClient().configured, false);
+    } finally {
+      if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = previous;
+    }
+  });
+
   it("says so plainly when no key is configured, rather than pretending", async () => {
     const client = new OpenRouterClient({ apiKey: "", model: DEFAULT_MODEL });
     await assert.rejects(

@@ -19,7 +19,7 @@ A civic accountability site that cannot itself be corrected has no standing to d
 
 Static, in the primary navigation, linked from the footer of every page and from every finding. It states, in plain language and in this order:
 
-1. **Who publishes this.** The accountable individual by name, and Cold Smoke Consulting as the responsible organisation. Not "the team." A named person with an address for service.
+1. **Who publishes this.** The accountable individual by name. Not "the team." A named person with an address for service. (Amended 2026-08-11: the responsible-organisation half was dropped at the operator's request; the named-individual requirement is unchanged and is the half the obligation rests on.)
 2. **Where the data comes from.** Every adapter from W2, with its jurisdiction, its source URL, its fetch cadence, and its current health. The adapter table on this page reads from `ingestion_sources` — it cannot drift from reality, because it is not prose.
 3. **How a document becomes a record.** Fetch → content-hash → store artifact → parse → analyse. The page states the invariant plainly: **every stage after `fetch` reads from a stored artifact, never from the live web**, so what you see was derived from a specific document with a specific SHA-256, which is named on the page.
 4. **How anomaly flags are computed.** All six detectors described in one paragraph each, in terms a reader can check: what the detector looks for, what threshold fires it, what it does *not* mean. A flag is a reason to look, never a conclusion.

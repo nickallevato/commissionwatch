@@ -74,6 +74,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * An environment variable that is present but empty is absent.
+ *
+ * `??` does not cover this, and Docker Compose makes it the *normal* case, not
+ * an edge one: `- OPENROUTER_MODEL=${OPENROUTER_MODEL:-}` sets the variable in
+ * the container to the empty string whenever the host has no value for it. So
+ * `process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL` yielded "" on every
+ * deployment that had not set a model, `assertFreeModel("")` threw, and the
+ * documented default was unreachable in production while passing every test.
+ */
+function envValue(name: string): string | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
 export class OpenRouterClient {
   readonly model: string;
   private readonly apiKey: string;
@@ -84,14 +101,14 @@ export class OpenRouterClient {
   private readonly logger: { info(message: string): void; warn(message: string): void };
 
   constructor(options: OpenRouterOptions = {}) {
-    this.model = options.model ?? process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
+    this.model = options.model ?? envValue("OPENROUTER_MODEL") ?? DEFAULT_MODEL;
     // Before anything else, and in the constructor rather than at call time, so
     // a misconfigured deployment fails when the client is built rather than
     // halfway through a batch.
     assertFreeModel(this.model);
 
-    this.apiKey = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? "";
-    this.baseUrl = options.baseUrl ?? process.env.OPENROUTER_BASE_URL ?? DEFAULT_BASE_URL;
+    this.apiKey = options.apiKey ?? envValue("OPENROUTER_API_KEY") ?? "";
+    this.baseUrl = options.baseUrl ?? envValue("OPENROUTER_BASE_URL") ?? DEFAULT_BASE_URL;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.maxRetries = options.maxRetries ?? 3;
     this.sleep =

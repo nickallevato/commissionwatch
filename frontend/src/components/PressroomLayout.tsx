@@ -244,7 +244,7 @@ export function PressroomLayout() {
           <div className="mt-auto border-t border-rule px-4 pt-3 text-[11px] text-muted">
             <p>Signed in as</p>
             {/* Truncate rather than wrap. The rail is a fixed narrow column and
-                an address like na@your-orgconsulting.com breaks across three
+                an address like operator@commissionwatch.bmux.sh breaks across three
                 lines under `break-all`, shoving the sign-out button around and
                 making the rail's height depend on who is signed in. The full
                 value stays reachable as a tooltip and to assistive tech. */}

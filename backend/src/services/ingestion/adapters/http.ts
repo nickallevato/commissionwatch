@@ -17,7 +17,7 @@
  * spoofed. This project's access argument depends on it being true.
  */
 export const COMMISSIONWATCH_USER_AGENT =
-  'CommissionWatch/0.1 (civic transparency project; +https://commissionwatch.bmux.sh)';
+  'CommissionWatch/0.1 (civic transparency project; +https://commissionwatch.bmux.sh; admin@bmux.sh)';
 
 /** Default gap between two requests when an adapter states none. */
 export const DEFAULT_MIN_DELAY_MS = 2000;

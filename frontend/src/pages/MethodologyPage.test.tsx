@@ -31,14 +31,18 @@ describe("MethodologyPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("names the publisher and an accountable editor", () => {
+  it("names an accountable individual, not an organisation or 'the team'", () => {
+    // The organisation name was removed on request; the named person is the
+    // half that carries the obligation. A site that publishes claims about
+    // named people owes an address for service, and "the team" is not one —
+    // so this assertion is narrowed, never dropped.
     renderWithProviders(<MethodologyPage />);
     const publisher = screen.getByRole("heading", {
       name: "Who publishes this",
     }).parentElement;
     expect(publisher).not.toBeNull();
-    expect(publisher!.textContent).toMatch(/Cold Smoke Consulting/);
     expect(publisher!.textContent).toMatch(/Nick Allevato/);
+    expect(publisher!.textContent).not.toMatch(/Cold Smoke/i);
   });
 
   it("documents all six automated checks", () => {

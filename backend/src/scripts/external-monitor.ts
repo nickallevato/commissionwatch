@@ -45,7 +45,7 @@ export const DEFAULT_BASE_URL = "https://commissionwatch.bmux.sh";
  * report on anyone's record-keeping.
  */
 export const MONITOR_USER_AGENT =
-  "CommissionWatchMonitor/1.0 (+https://commissionwatch.bmux.sh; uptime probe; ops@your-orgconsulting.com)";
+  "CommissionWatchMonitor/1.0 (+https://commissionwatch.bmux.sh; uptime probe; admin@bmux.sh)";
 
 /** Per-request ceiling. Four requests a run, four times an hour. */
 export const REQUEST_TIMEOUT_MS = 10_000;

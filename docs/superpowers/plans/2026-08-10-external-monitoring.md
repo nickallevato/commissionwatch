@@ -94,7 +94,7 @@ its reader to mute it.
 ## Politeness
 
 - User agent `CommissionWatchMonitor/1.0 (+https://commissionwatch.bmux.sh; uptime probe;
-  ops@your-orgconsulting.com)` — honest, names the project, reachable. The same discipline the
+  admin@bmux.sh)` — honest, names the project, reachable. The same discipline the
   scrapers follow, pointed at our own site.
 - 10-second timeout per request via `AbortSignal.timeout`.
 - **One request per check per run**, and at most **one** retry, only on a transport error or a 5xx,

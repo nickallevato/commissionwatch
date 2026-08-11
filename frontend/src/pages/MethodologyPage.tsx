@@ -287,8 +287,8 @@ export function MethodologyPage() {
             <p className="label-sm">One</p>
             <SectionHeading id="publisher">Who publishes this</SectionHeading>
             <Prose>
-              CommissionWatch is published by Cold Smoke Consulting, and edited
-              by Nick Allevato, who is accountable for everything on it. Not
+              CommissionWatch is published and edited by Nick Allevato, who is
+              accountable for everything on it. Not
               &ldquo;the team&rdquo;: a named person, reachable at the address
               below, who answers for a mistake and signs the correction.
             </Prose>
