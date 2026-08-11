@@ -1,7 +1,12 @@
 import type { Knex } from "knex";
 import { extractPdfText, looksLikePdf } from "../ingestion/pdf-text";
 import { OpenRouterClient } from "./openrouter";
-import { extractClaims, persistClaims, type ExtractionOutcome } from "./extractor";
+import {
+  extractClaims,
+  persistClaims,
+  pruneDisallowedClaims,
+  type ExtractionOutcome,
+} from "./extractor";
 import { failRun, finishRun, startRun } from "./runs";
 
 /**
@@ -155,10 +160,14 @@ async function extractOnce(
   }
 
   const outcome = await extractClaims(deps.client, { documentText: text });
-  const stored = await persistClaims(deps.db, outcome, {
-    meetingId,
-    artifactSha256: artifact.sha256,
-  });
+  const persistOptions = { meetingId, artifactSha256: artifact.sha256 };
+  const stored = await persistClaims(deps.db, outcome, persistOptions);
+  // After storing, not before: a run that fails partway should not have
+  // stripped claims it was about to replace.
+  const pruned = await pruneDisallowedClaims(deps.db, persistOptions);
+  if (pruned > 0) {
+    console.log(`Extraction ${meetingId}: removed ${pruned} held claim(s) no longer permitted`);
+  }
 
   return { meeting_id: meetingId, artifact_sha256: artifact.sha256, outcome, stored };
 }

@@ -29,7 +29,61 @@ export const REJECTION_REASONS = [
   "unknown-action",
   "asserts-motive",
   "subject-not-in-quote",
+  "not-an-official",
 ] as const;
+
+/**
+ * Offices whose holders this project records.
+ *
+ * The gate exists because the first real extraction produced a claim about
+ * `Mark Campanelli`, a member of the public who spoke at public comment, with
+ * his neighbourhood quoted alongside his name. Public comment is a public
+ * record, but a watchdog that accumulates a searchable file on private
+ * residents who show up to speak is a different and much worse thing than one
+ * that holds elected officials to account. The minutes make no distinction;
+ * this does.
+ *
+ * Matched on the office as the minutes print it, because there is no roster to
+ * match against. Bozeman's own site answers 403 to everything (Akamai, wall not
+ * bot detection) and Granicus publishes no member list, so the only attestation
+ * of who holds an office is the record itself — which prints "Deputy Mayor
+ * Fischer" and "Commissioner Bode" consistently, and prints members of the
+ * public without any office at all. That difference is the signal.
+ *
+ * Staff — City Manager, City Attorney, Clerk — are deliberately NOT here. They
+ * are public officials and including them would be defensible, but they are not
+ * members of the commission and this list is the narrower claim.
+ */
+export const RECORDED_OFFICES = ["mayor", "deputy mayor", "commissioner"] as const;
+
+/**
+ * Does this subject hold an office the project records?
+ *
+ * Requires the office to lead the name, so "Commissioner Bode" qualifies and
+ * "a resident who used to be a commissioner" does not.
+ */
+export function namesAnOfficial(subject: string): boolean {
+  const lower = subject.trim().toLowerCase();
+  return RECORDED_OFFICES.some(
+    (office) => lower === office || lower.startsWith(`${office} `),
+  );
+}
+
+/**
+ * How far from its citation a matter may be found in the document.
+ *
+ * `matter` was the one field nothing checked, and it was wrong in production on
+ * 2026-08-11: a verified quotation, "Deputy Mayor Fischer – Aye" at offset
+ * 5748, inside the consent-agenda vote — carrying a matter about a parking
+ * amendment recorded five thousand characters later. Right person, right
+ * action, verbatim citation, invented context. That is the same failure shape
+ * as a misattributed quote, and the subject check did not cover it.
+ *
+ * An unlocatable matter drops to null rather than rejecting the claim: losing
+ * the context of a true fact is a small harm, and asserting the wrong context
+ * is a large one.
+ */
+export const MATTER_WINDOW = 2000;
 
 export type RejectionReason = (typeof REJECTION_REASONS)[number];
 
@@ -172,6 +226,27 @@ function quoteNamesSubject(quote: string, subject: string): boolean {
  * of a model's output failed. A model that is wrong nine times in ten is
  * information an operator needs, and silently keeping the tenth would hide it.
  */
+/**
+ * The matter, if the document supports it near the citation — otherwise null.
+ *
+ * Held to the same standard as the quote, because it makes the same kind of
+ * assertion: it says what the person's action was *about*. Proximity is part of
+ * the test, not just presence — the wrong matter in production was real text
+ * from the same document, simply describing a different agenda item. Finding it
+ * somewhere in a 22-page record proves nothing about which vote it belongs to.
+ */
+export function verifiedMatter(
+  documentText: string,
+  matter: string,
+  quoteOffset: number,
+): string | null {
+  if (matter === "") return null;
+
+  const at = locateQuote(documentText, matter);
+  if (at === null) return null;
+  return Math.abs(at - quoteOffset) <= MATTER_WINDOW ? matter : null;
+}
+
 export function verifyClaims(documentText: string, claims: RawClaim[]): VerificationResult {
   const verified: VerifiedClaim[] = [];
   const rejected: RejectedClaim[] = [];
@@ -188,6 +263,16 @@ export function verifyClaims(documentText: string, claims: RawClaim[]): Verifica
     }
     if (!(CLAIM_ACTIONS as readonly string[]).includes(action)) {
       rejected.push({ reason: "unknown-action", detail: `action '${action}'`, raw });
+      continue;
+    }
+    if (!namesAnOfficial(subject)) {
+      // Checked before the quotation is even located: a member of the public
+      // is not a cheaper claim to store, it is one this project does not make.
+      rejected.push({
+        reason: "not-an-official",
+        detail: `'${subject}' holds none of: ${RECORDED_OFFICES.join(", ")}`,
+        raw,
+      });
       continue;
     }
     if (normaliseQuery(quote).length < MIN_QUOTE_LENGTH) {
@@ -231,7 +316,7 @@ export function verifyClaims(documentText: string, claims: RawClaim[]): Verifica
     verified.push({
       subject_name: subject,
       action: action as ClaimAction,
-      matter: matter === "" ? null : matter,
+      matter: verifiedMatter(documentText, matter, offset),
       // The document's own text at that offset, not the model's rendering of
       // it. If they differ by whitespace, the record is what the record says.
       quote: documentText.slice(offset, offset + normaliseQuery(quote).length),

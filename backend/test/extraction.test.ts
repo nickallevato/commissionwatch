@@ -10,6 +10,8 @@ import {
 } from "../src/services/extraction/openrouter";
 import {
   locateQuote,
+  namesAnOfficial,
+  verifiedMatter,
   verifyClaims,
   MIN_QUOTE_LENGTH,
 } from "../src/services/extraction/verify";
@@ -18,6 +20,7 @@ import {
   dedupeClaims,
   extractClaims,
   persistClaims,
+  pruneDisallowedClaims,
   readClaims,
   PROMPT_VERSION,
   REPLY_SAMPLE_LENGTH,
@@ -770,5 +773,160 @@ describe("the same claim found twice, because chunks overlap on purpose", () => 
 
     const rows = await db("minute_claims").where({ meeting_id: meetingId });
     assert.equal(rows.length, 1);
+  });
+});
+
+describe("who this project records, and who it does not", () => {
+  const MINUTES_WITH_PUBLIC = [
+    "Commissioner Bode moved to approve the resolution as presented.",
+    "The motion was seconded by Deputy Mayor Fischer.",
+    "A member of the public, Mark Campanelli, a Bogart Park resident living in the RA",
+    "district, raised a question about short-term rentals.",
+    "City Attorney Sullivan responded that the approach would be legally questionable.",
+  ].join("\n");
+
+  it("records a commissioner, a deputy mayor and a mayor", () => {
+    for (const subject of ["Commissioner Bode", "Deputy Mayor Fischer", "Mayor Morrison"]) {
+      assert.equal(namesAnOfficial(subject), true, subject);
+    }
+  });
+
+  it("refuses a member of the public who spoke at public comment", () => {
+    // Production, 2026-08-11: the first real extraction produced a claim about
+    // a named resident with his neighbourhood in the quote. Public comment is
+    // public record, but accumulating a searchable file on residents who turn
+    // up to speak is a different and much worse thing than holding elected
+    // officials to account.
+    assert.equal(namesAnOfficial("Mark Campanelli"), false);
+
+    const result = verifyClaims(MINUTES_WITH_PUBLIC, [
+      {
+        subject_name: "Mark Campanelli",
+        action: "spoke",
+        matter: "short-term rentals",
+        quote:
+          "A member of the public, Mark Campanelli, a Bogart Park resident living in the RA",
+      },
+    ]);
+    assert.equal(result.verified.length, 0);
+    assert.equal(result.rejected[0].reason, "not-an-official");
+  });
+
+  it("refuses staff, who are officials but are not members of the commission", () => {
+    assert.equal(namesAnOfficial("City Attorney Sullivan"), false);
+    assert.equal(namesAnOfficial("City Manager Winn"), false);
+  });
+
+  it("refuses a bare surname, since the office is what identifies a member", () => {
+    assert.equal(namesAnOfficial("Fischer"), false);
+    assert.equal(namesAnOfficial("Bode"), false);
+  });
+
+  it("requires the office to LEAD the name", () => {
+    // "a resident who used to be a commissioner" must not qualify.
+    assert.equal(namesAnOfficial("a resident who used to be a commissioner"), false);
+  });
+});
+
+describe("the matter, held to the same standard as the citation", () => {
+  const DOC = [
+    "F. Consent Agenda",
+    "Motion to approve Consent Items F.1 through F.22 as presented was made by",
+    "Deputy Mayor Fischer and seconded by Commissioner Bode. The motion carried 5-0.",
+    "(Deputy Mayor Fischer - Aye; Commissioner Bode - Aye)",
+    "x".repeat(4000),
+    "H.1 Parking amendment project report for Application 26307",
+    "Commissioner Bode moved to adopt the findings presented in the parking amendment",
+    "project report for Application 26307.",
+  ].join("\n");
+
+  it("keeps a matter found beside its citation", () => {
+    const offset = DOC.indexOf("Deputy Mayor Fischer and seconded");
+    assert.equal(
+      verifiedMatter(DOC, "Consent Items F.1 through F.22 as presented", offset),
+      "Consent Items F.1 through F.22 as presented",
+    );
+  });
+
+  it("drops a matter that belongs to a different agenda item", () => {
+    // The exact production defect: a verified quotation, "Deputy Mayor Fischer
+    // - Aye" inside the consent vote, carrying a matter about a parking
+    // amendment four thousand characters away. Right person, right action,
+    // verbatim citation, invented context.
+    const offset = DOC.indexOf("(Deputy Mayor Fischer - Aye");
+    assert.equal(
+      verifiedMatter(DOC, "the findings presented in the parking amendment", offset),
+      null,
+    );
+  });
+
+  it("drops a matter the document does not contain at all", () => {
+    assert.equal(verifiedMatter(DOC, "a bond issue that was never discussed", 0), null);
+  });
+
+  it("drops the matter but KEEPS the claim, because the fact is still true", async () => {
+    // Losing the context of a true fact is a small harm. Asserting the wrong
+    // context is a large one. So an unverifiable matter must not take the
+    // verified vote down with it.
+    const result = verifyClaims(DOC, [
+      {
+        subject_name: "Deputy Mayor Fischer",
+        action: "voted_yes",
+        matter: "the findings presented in the parking amendment",
+        quote: "Deputy Mayor Fischer and seconded by Commissioner Bode. The motion carried 5-0.",
+      },
+    ]);
+    assert.equal(result.verified.length, 1);
+    assert.equal(result.verified[0].matter, null);
+    assert.equal(result.verified[0].subject_name, "Deputy Mayor Fischer");
+  });
+});
+
+describe("cleaning up claims a policy change forbade", () => {
+  it("removes a held claim about a non-official, and keeps the officials", async () => {
+    // The claim about a member of the public was stored before the rule existed.
+    // A merge cannot remove it — it is simply never proposed again — so without
+    // pruning it would outlive the decision to stop recording the public.
+    const { commissionId } = await createSource(`${PREFIX}-prune`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-07-16" });
+    const sha = "c".repeat(64);
+
+    await db("minute_claims").insert([
+      {
+        meeting_id: meetingId, artifact_sha256: sha, subject_name: "Mark Campanelli",
+        action: "spoke", quote: "A member of the public, Mark Campanelli, raised a question.",
+        quote_offset: 10, model: "test/model:free", prompt_version: PROMPT_VERSION, status: "held",
+      },
+      {
+        meeting_id: meetingId, artifact_sha256: sha, subject_name: "Commissioner Bode",
+        action: "moved", quote: "Commissioner Bode moved to approve the resolution as presented.",
+        quote_offset: 200, model: "test/model:free", prompt_version: PROMPT_VERSION, status: "held",
+      },
+    ]);
+
+    const pruned = await pruneDisallowedClaims(db, { meetingId, artifactSha256: sha });
+    assert.equal(pruned, 1);
+
+    const left = await db("minute_claims").where({ meeting_id: meetingId });
+    assert.equal(left.length, 1);
+    assert.equal(left[0].subject_name, "Commissioner Bode");
+  });
+
+  it("never deletes a claim an operator has already ruled on", async () => {
+    // Approved or rejected carries a human decision. Erasing it to tidy up
+    // after a policy change would be destroying the review record itself.
+    const { commissionId } = await createSource(`${PREFIX}-prune-keep`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-07-17" });
+    const sha = "d".repeat(64);
+
+    await db("minute_claims").insert({
+      meeting_id: meetingId, artifact_sha256: sha, subject_name: "Mark Campanelli",
+      action: "spoke", quote: "A member of the public, Mark Campanelli, raised a question.",
+      quote_offset: 10, model: "test/model:free", prompt_version: PROMPT_VERSION,
+      status: "rejected",
+    });
+
+    assert.equal(await pruneDisallowedClaims(db, { meetingId, artifactSha256: sha }), 0);
+    assert.equal((await db("minute_claims").where({ meeting_id: meetingId })).length, 1);
   });
 });

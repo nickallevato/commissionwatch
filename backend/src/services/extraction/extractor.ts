@@ -2,6 +2,7 @@ import type { Knex } from "knex";
 import { OpenRouterClient, OpenRouterError, type CompletionResult } from "./openrouter";
 import {
   CLAIM_ACTIONS,
+  namesAnOfficial,
   verifyClaims,
   type RawClaim,
   type VerificationResult,
@@ -26,16 +27,19 @@ import {
  */
 
 /** Bumped whenever the instructions change, and stored on every row. */
-export const PROMPT_VERSION = "2026-08-11.1";
+export const PROMPT_VERSION = "2026-08-11.2";
 
 export const SYSTEM_PROMPT = `You extract facts from the official minutes of a public meeting.
 
 You return ONLY a JSON array. No prose, no markdown fences, no explanation.
 
 Each element must be an object with these keys:
-  "subject_name": the person named in the minutes, exactly as printed
+  "subject_name": the official named in the minutes, exactly as printed,
+    INCLUDING their office — "Commissioner Bode", "Deputy Mayor Fischer",
+    "Mayor Morrison"
   "action": one of ${CLAIM_ACTIONS.join(", ")}
-  "matter": what the action concerned, as the minutes describe it, or null
+  "matter": what the action concerned, copied VERBATIM from the text near the
+    quote, or null
   "quote": a VERBATIM sentence copied from the minutes that shows this
 
 Rules you must follow:
@@ -43,6 +47,13 @@ Rules you must follow:
   you. Do not paraphrase, tidy, shorten or correct it. A quote that is not
   present in the text will be discarded and the fact will be lost.
 - The quote must itself name the person in "subject_name".
+- ONLY record members of the commission — those the minutes give an office:
+  Mayor, Deputy Mayor, Commissioner. Never a member of the public, a person
+  giving public comment, a staff member, or a consultant. If the minutes do not
+  give the person an office, leave them out entirely.
+- "matter" must also be copied from the text, and from NEAR the quote — the
+  agenda item that quote belongs to. A matter taken from a different item will
+  be discarded.
 - Only record what the minutes state. Never record why someone acted, what they
   wanted, what they believed, or what the effect was. No motive, no
   characterisation, no inference.
@@ -274,6 +285,42 @@ export function dedupeClaims(claims: AttributedClaim[]): AttributedClaim[] {
     kept.push(claim);
   }
   return kept;
+}
+
+/**
+ * Remove held claims this policy no longer allows.
+ *
+ * Re-extracting the same bytes revises claims through `onConflict().merge()`,
+ * but a merge can only touch keys the new run produced again. A claim the rules
+ * now forbid is simply never re-proposed, so without this it survives forever —
+ * which is how the claim about a member of the public would have outlived the
+ * decision to stop recording members of the public.
+ *
+ * **Only `held` rows.** An approved or rejected claim carries an operator's
+ * decision, and deleting that would be erasing a human judgement to tidy up
+ * after a policy change.
+ */
+export async function pruneDisallowedClaims(
+  db: Knex,
+  options: PersistOptions,
+): Promise<number> {
+  const rows: unknown = await db("minute_claims")
+    .where({ meeting_id: options.meetingId, artifact_sha256: options.artifactSha256, status: "held" })
+    .select("id", "subject_name");
+  if (!Array.isArray(rows)) return 0;
+
+  const doomed = rows
+    .filter((row): row is { id: string; subject_name: string } =>
+      typeof row === "object" &&
+      row !== null &&
+      typeof (row as { id?: unknown }).id === "string" &&
+      typeof (row as { subject_name?: unknown }).subject_name === "string")
+    .filter((row) => !namesAnOfficial(row.subject_name))
+    .map((row) => row.id);
+
+  if (doomed.length === 0) return 0;
+  await db("minute_claims").whereIn("id", doomed).del();
+  return doomed.length;
 }
 
 export async function persistClaims(
