@@ -375,6 +375,10 @@ router.post("/meetings/:id/extract", async (req: Request<{ id: string }>, res, n
       meeting_id: result.meeting_id,
       artifact_sha256: result.artifact_sha256,
       model: result.outcome.model,
+      // What actually answered. Differs from `model` behind a router, and an
+      // operator reviewing these claims should see that a single run may have
+      // been written by several different models.
+      served_models: result.outcome.served_models,
       prompt_version: result.outcome.prompt_version,
       proposed: result.outcome.proposed,
       verified: result.outcome.result.verified.length,

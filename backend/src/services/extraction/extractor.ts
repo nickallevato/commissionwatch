@@ -1,6 +1,12 @@
 import type { Knex } from "knex";
-import { OpenRouterClient, OpenRouterError } from "./openrouter";
-import { CLAIM_ACTIONS, verifyClaims, type RawClaim, type VerificationResult } from "./verify";
+import { OpenRouterClient, OpenRouterError, type CompletionResult } from "./openrouter";
+import {
+  CLAIM_ACTIONS,
+  verifyClaims,
+  type RawClaim,
+  type VerificationResult,
+  type VerifiedClaim,
+} from "./verify";
 
 /**
  * Minutes in, checked claims out.
@@ -49,13 +55,21 @@ export interface ExtractionInput {
   chunkSize?: number;
 }
 
+/** A verified claim plus the model that actually produced it. */
+export type AttributedClaim = VerifiedClaim & { model: string };
+
 export interface ExtractionOutcome {
+  /** The model that was REQUESTED. May be a router id, which serves others. */
   model: string;
+  /** Every model that actually answered a chunk. One entry for a pinned model. */
+  served_models: string[];
   prompt_version: string;
   chunks: number;
   /** Claims the model produced, before verification. */
   proposed: number;
   result: VerificationResult;
+  /** The survivors, each carrying its own model. What gets persisted. */
+  verified: AttributedClaim[];
   /** Chunks whose call failed. Reported, never treated as "no claims here". */
   failedChunks: Array<{ index: number; error: string }>;
 }
@@ -118,16 +132,19 @@ export async function extractClaims(
   input: ExtractionInput,
 ): Promise<ExtractionOutcome> {
   const chunks = chunkText(input.documentText, input.chunkSize);
-  const proposed: RawClaim[] = [];
   const failedChunks: Array<{ index: number; error: string }> = [];
+  const verified: AttributedClaim[] = [];
+  const rejected: VerificationResult["rejected"] = [];
+  const servedModels = new Set<string>();
+  let proposed = 0;
 
   for (const [index, chunk] of chunks.entries()) {
+    let reply: CompletionResult;
     try {
-      const reply = await client.complete({
+      reply = await client.complete({
         system: SYSTEM_PROMPT,
         user: `Minutes text:\n\n${chunk.text}`,
       });
-      proposed.push(...readClaims(reply));
     } catch (error) {
       // A rate-limited chunk is not an empty chunk. Recording the difference is
       // what stops a throttled run from reading as "this meeting had no votes".
@@ -135,19 +152,37 @@ export async function extractClaims(
         index,
         error: error instanceof OpenRouterError ? error.message : String(error),
       });
+      continue;
     }
-  }
 
-  // Verified against the WHOLE document, not the chunk it came from: the offset
-  // stored has to be a position in the record itself.
-  const result = verifyClaims(input.documentText, proposed);
+    servedModels.add(reply.servedModel);
+    const claims = readClaims(reply.text);
+    proposed += claims.length;
+
+    // Verified against the WHOLE document, not the chunk it came from: the
+    // offset stored has to be a position in the record itself. Verification is
+    // per chunk only so each surviving claim keeps the id of the model that
+    // actually answered — behind a router that is a different model each call,
+    // and one run-wide label would attribute every claim to an id that wrote
+    // none of them.
+    const outcome = verifyClaims(input.documentText, claims);
+    for (const claim of outcome.verified) {
+      verified.push({ ...claim, model: reply.servedModel });
+    }
+    rejected.push(...outcome.rejected);
+  }
 
   return {
     model: client.model,
+    served_models: [...servedModels].sort(),
     prompt_version: PROMPT_VERSION,
     chunks: chunks.length,
-    proposed: proposed.length,
-    result,
+    proposed,
+    // `AttributedClaim` is a `VerifiedClaim` with one extra field, so it
+    // satisfies the older shape as-is. No copy, and callers that only counted
+    // verified claims keep working unchanged.
+    result: { verified, rejected },
+    verified,
     failedChunks,
   };
 }
@@ -171,7 +206,7 @@ export async function persistClaims(
   outcome: ExtractionOutcome,
   options: PersistOptions,
 ): Promise<number> {
-  const rows = outcome.result.verified.map((claim) => ({
+  const rows = outcome.verified.map((claim) => ({
     meeting_id: options.meetingId,
     artifact_sha256: options.artifactSha256,
     subject_name: claim.subject_name,
@@ -179,7 +214,8 @@ export async function persistClaims(
     matter: claim.matter,
     quote: claim.quote,
     quote_offset: claim.quote_offset,
-    model: outcome.model,
+    // The model that produced THIS claim, not the id the run requested.
+    model: claim.model,
     prompt_version: outcome.prompt_version,
     status: "held",
   }));

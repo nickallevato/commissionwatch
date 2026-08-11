@@ -31,23 +31,49 @@ export class OpenRouterError extends Error {
 export const FREE_SUFFIX = ":free";
 
 /**
+ * Zero-cost ids that do not carry the `:free` suffix.
+ *
+ * Exactly one so far: `openrouter/free` is OpenRouter's free-only router, and
+ * its listing prices both prompt and completion at 0. An allowlist rather than
+ * a looser suffix rule, because "does this id cost money" must stay a decision
+ * someone made deliberately and can read in one place.
+ */
+export const FREE_ALLOWLIST: readonly string[] = ["openrouter/free"];
+
+/**
  * Refuse anything that would cost money.
  *
  * Exported and tested on its own because it is the only thing standing between
- * a typo and a bill.
+ * a typo and a bill. It has already earned its keep: on 2026-08-11 Meta's
+ * llama-3.3-70b stopped being free, OpenRouter answered 404 pointing at the
+ * paid slug, and this refused to follow it.
  */
 export function assertFreeModel(model: string): void {
-  if (!model.endsWith(FREE_SUFFIX)) {
-    throw new OpenRouterError(
-      `Refusing to call '${model}': CommissionWatch extraction runs on free models only, ` +
-        `so a model id must end in '${FREE_SUFFIX}'. This is enforced in code, not configuration.`,
-      null,
-      false,
-    );
-  }
+  if (model.endsWith(FREE_SUFFIX) || FREE_ALLOWLIST.includes(model)) return;
+  throw new OpenRouterError(
+    `Refusing to call '${model}': CommissionWatch extraction runs on free models only, ` +
+      `so a model id must end in '${FREE_SUFFIX}' or be one of: ${FREE_ALLOWLIST.join(", ")}. ` +
+      "This is enforced in code, not configuration.",
+    null,
+    false,
+  );
 }
 
-export const DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
+/**
+ * The default extraction model.
+ *
+ * Pinned to a specific model rather than to `openrouter/free`, on evidence
+ * gathered 2026-08-11: the router served four different models across four
+ * calls on the same input, one of them a content-safety classifier that
+ * returned nothing usable, and another that missed a claim its siblings caught.
+ * Inconsistent coverage across a document is worse for this project than an
+ * outage, because it is invisible. This model returned all five claims with all
+ * five citations verbatim.
+ *
+ * When it too stops being free — and it will — the failure is loud: every chunk
+ * fails, `stored` is 0, and nothing is silently asserted about the meeting.
+ */
+export const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
 
 export interface OpenRouterOptions {
   apiKey?: string;
@@ -66,6 +92,15 @@ export interface CompletionRequest {
   user: string;
   /** Ceiling on the reply. Free models are small; a runaway reply is a hang. */
   maxTokens?: number;
+}
+
+export interface CompletionResult {
+  text: string;
+  /**
+   * The model that actually answered, as OpenRouter reported it. Equals the
+   * requested id for a pinned model; differs per call behind a router.
+   */
+  servedModel: string;
 }
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
@@ -124,13 +159,21 @@ export class OpenRouterClient {
   }
 
   /**
-   * One completion. Returns the assistant's text.
+   * One completion. Returns the assistant's text AND the model that produced it.
+   *
+   * `servedModel` is not the same as `this.model` and that is the point.
+   * `openrouter/free` is a router: it picks a different free model per call, and
+   * on 2026-08-11 four consecutive calls were served by four different models,
+   * one of which was a content-safety classifier that could not do the task.
+   * Recording only what we *asked* for would put "openrouter/free" on every row
+   * while several different models actually wrote them, and `minute_claims.model`
+   * exists precisely so a model that turns out to be bad can be found again.
    *
    * Retries 429 and 5xx with a widening delay. A free model under load answers
    * 429 routinely, and treating that as a failure would make the extractor look
    * broken when it is only queued.
    */
-  async complete(request: CompletionRequest): Promise<string> {
+  async complete(request: CompletionRequest): Promise<CompletionResult> {
     if (!this.configured) {
       throw new OpenRouterError(
         "OPENROUTER_API_KEY is not set, so no extraction was attempted.",
@@ -208,7 +251,7 @@ export class OpenRouterClient {
       if (text === null) {
         throw new OpenRouterError("OpenRouter returned no message content", response.status, false);
       }
-      return text;
+      return { text, servedModel: readServedModel(payload) ?? this.model };
     }
   }
 
@@ -216,6 +259,21 @@ export class OpenRouterClient {
     // 2s, 4s, 8s. Free-tier limits are per-minute, so short waits are pointless.
     return Math.min(2000 * 2 ** (attempt - 1), 30_000);
   }
+}
+
+/**
+ * The model OpenRouter says served this response, or null.
+ *
+ * Null is not an error — it means the endpoint did not say, and the caller
+ * falls back to the model it requested. Inventing a value here would be worse
+ * than admitting the request's own id is the best record we have.
+ */
+export function readServedModel(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  const model = payload.model;
+  if (typeof model !== "string") return null;
+  const trimmed = model.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 /** The assistant text, or null if the payload is not the shape we expect. */

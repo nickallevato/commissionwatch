@@ -158,8 +158,41 @@ describe("the rate limit a free tier will actually produce", () => {
     });
 
     const reply = await client.complete({ system: "s", user: "u" });
-    assert.equal(reply, "[]");
+    assert.equal(reply.text, "[]");
     assert.equal(calls, 3);
+    // The payload named no model, so the requested id is the honest record.
+    assert.equal(reply.servedModel, DEFAULT_MODEL);
+  });
+
+  it("records the model that actually answered, not the one requested", async () => {
+    // A router serves a different model per call. `minute_claims.model` exists
+    // so a model that turns out to be bad can be found again, and it can only
+    // do that if it names the model that wrote the row.
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: "openrouter/free",
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            model: "cohere/north-mini-code:free",
+            choices: [{ message: { content: "[]" } }],
+          }),
+          { status: 200 },
+        )) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const reply = await client.complete({ system: "s", user: "u" });
+    assert.equal(reply.servedModel, "cohere/north-mini-code:free");
+    assert.equal(client.model, "openrouter/free");
+  });
+
+  it("accepts the zero-priced router even though it has no ':free' suffix", () => {
+    // `openrouter/free` prices prompt and completion at 0 but does not carry
+    // the suffix. An explicit allowlist, so "is this free" stays one readable
+    // decision rather than a looser rule that would also admit paid ids.
+    assert.doesNotThrow(() => assertFreeModel("openrouter/free"));
+    assert.throws(() => assertFreeModel("openrouter/auto"), /free models only/);
   });
 
   it("gives up loudly rather than returning an empty answer", async () => {
