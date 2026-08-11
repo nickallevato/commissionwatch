@@ -229,8 +229,20 @@ export function classifyRun(
    * A sweep that threw for any *other* reason is still `failed`.
    */
   outstanding = 0,
+  /**
+   * Jobs this sweep completed, whichever run enqueued them.
+   *
+   * Counted separately from `counts` because the two answer different
+   * questions. `counts` is "what happened to this run's jobs" and is written by
+   * handlers keyed on the job's own `run_id`; this is "what this sweep did with
+   * its fifteen minutes". They diverge whenever a sweep drains an older run's
+   * backlog, which — with a global claim ordered by age — is the normal case
+   * while a large archive fills in.
+   */
+  processed = 0,
 ): RunStatus {
-  const work = SUCCESS_KEYS.reduce((total, key) => total + (counts[key] ?? 0), 0);
+  const work =
+    SUCCESS_KEYS.reduce((total, key) => total + (counts[key] ?? 0), 0) + processed;
   const errors = FAILURE_KEYS.reduce((total, key) => total + (counts[key] ?? 0), 0);
   if (threw) return "failed";
   if (outstanding > 0) {
@@ -250,8 +262,16 @@ export function classifyRun(
  * parsing English.
  */
 export class SweepDeadlineReached extends Error {
-  constructor(readonly outstanding: number, timeoutMs: number) {
-    super(`sweep reached its ${timeoutMs}ms deadline with ${outstanding} job(s) still queued`);
+  constructor(
+    readonly outstanding: number,
+    timeoutMs: number,
+    /** Jobs this sweep completed before the clock ran out, from any run. */
+    readonly processed = 0,
+  ) {
+    super(
+      `sweep reached its ${timeoutMs}ms deadline with ${outstanding} job(s) still queued ` +
+        `after completing ${processed}`,
+    );
     this.name = "SweepDeadlineReached";
   }
 }
@@ -480,16 +500,18 @@ export class SourceScheduler {
 
     let threw: string | null = null;
     let outstanding = 0;
+    let processed = 0;
     try {
       const since = new Date(this.now().getTime() - this.lookbackDays * 24 * 60 * 60 * 1000);
       await this.options.queue.enqueue("discover", { since: since.toISOString() }, runId);
-      await this.drain(runId);
+      processed = await this.drain(runId);
     } catch (error) {
       if (error instanceof SweepDeadlineReached) {
         // Not an error. The sweep did as much as its clock allowed, and the
         // rest stays queued for the next drain. Recorded, never as `error`:
         // the sources screen reads that column to decide a source is failing.
         outstanding = error.outstanding;
+        processed = error.processed;
         this.logger.info(
           `SourceScheduler: sweep ${runId} of ${sourceId} reached its deadline with ` +
             `${outstanding} job(s) queued; they carry over to the next drain`,
@@ -502,8 +524,12 @@ export class SourceScheduler {
 
     const counts = await this.readCounts(runId);
     if (outstanding > 0) counts.outstanding = outstanding;
+    // Always recorded, including zero: "this sweep completed no jobs" is a fact
+    // worth being able to read, and its absence would be indistinguishable from
+    // an older run written before this column meant anything.
+    counts.processed = processed;
     const jobErrors = await this.readJobErrors(runId);
-    const status = classifyRun(counts, threw !== null, outstanding);
+    const status = classifyRun(counts, threw !== null, outstanding, processed);
     const errorText = [threw, ...jobErrors].filter((value): value is string => value !== null && value !== "");
 
     await this.db("ingestion_runs")
@@ -536,19 +562,40 @@ export class SourceScheduler {
   }
 
   /** Turns the worker until this run has no claimable work left, or time runs out. */
-  private async drain(runId: string): Promise<void> {
+  /**
+   * Turns the worker until this run has no claimable work left, or time runs
+   * out. Returns how many jobs this sweep actually completed.
+   *
+   * That return value matters more than it looks. `ingestion_runs.counts` is
+   * written by the handlers against **the run that enqueued the job**, while
+   * `CLAIM_SQL` carries no `run_id` filter and takes the oldest pending work
+   * anywhere. Those two facts are individually right and together produce a
+   * trap: a sweep that spends its whole life draining an *earlier* run's
+   * backlog credits every count to that earlier run and finishes with its own
+   * `counts` empty.
+   *
+   * Bozeman's second sweep did exactly that on 2026-08-11 — it processed 250
+   * queued jobs, took the site from 179 records to 358, and recorded
+   * `records: 0` against itself, which then classified as `failed` because no
+   * work appeared to have been done. The global claim is correct and is what
+   * makes a backlog finish across runs; what was missing was the sweep
+   * counting its own labour.
+   */
+  private async drain(runId: string): Promise<number> {
     const deadline = Date.now() + this.sweepTimeoutMs;
+    let processed = 0;
     for (;;) {
       const outstanding = await this.countOutstanding(runId);
-      if (outstanding === 0) return;
+      if (outstanding === 0) return processed;
       if (Date.now() > deadline) {
-        throw new SweepDeadlineReached(outstanding, this.sweepTimeoutMs);
+        throw new SweepDeadlineReached(outstanding, this.sweepTimeoutMs, processed);
       }
       const tick = await this.options.worker.runOnce();
+      processed += tick.completed;
       if (tick.claimed === 0) {
         // Everything left is waiting on a retry backoff. Nothing more this
         // sweep can usefully do; the jobs stay queued for the next one.
-        return;
+        return processed;
       }
     }
   }

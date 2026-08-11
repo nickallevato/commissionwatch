@@ -49,11 +49,37 @@ describe("a sweep that runs out of clock is not a sweep that failed", () => {
   });
 
   it("carries the outstanding count on the error, not just in a log line", () => {
-    const error = new SweepDeadlineReached(250, 900_000);
+    const error = new SweepDeadlineReached(250, 900_000, 89);
     assert.equal(error.outstanding, 250);
+    assert.equal(error.processed, 89);
     assert.match(error.message, /250 job\(s\) still queued/);
     // A distinct type, so `runSweep` never has to match on English.
     assert.ok(error instanceof SweepDeadlineReached);
+  });
+});
+
+describe("a sweep that drains an older run's backlog gets credit for it", () => {
+  /**
+   * The trap this closes, seen live on 2026-08-11.
+   *
+   * `counts` is written by handlers against the run that *enqueued* a job, and
+   * `CLAIM_SQL` takes the oldest pending work anywhere with no `run_id` filter.
+   * Both are right. Together they mean a sweep that spends its whole life
+   * finishing an earlier run's backlog ends with its own `counts` empty — and
+   * Bozeman's second sweep did precisely that: 250 jobs processed, the site
+   * taken from 179 records to 358, and `records: 0` recorded against itself.
+   */
+  it("is partial, not failed, when its own counts are empty but it did the work", () => {
+    assert.equal(classifyRun({}, false, 89, 250), "partial");
+  });
+
+  it("is still failed when it genuinely completed nothing", () => {
+    assert.equal(classifyRun({}, false, 89, 0), "failed");
+  });
+
+  it("counts processed work even with no jobs outstanding", () => {
+    // A sweep that cleared an older backlog entirely and enqueued nothing new.
+    assert.equal(classifyRun({}, false, 0, 12), "succeeded");
   });
 });
 

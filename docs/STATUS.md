@@ -1,6 +1,9 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-10, after **building the two console levers that stood between a healthy
+> Last updated: 2026-08-11, after **the first live Bozeman sweep and the four defects it exposed**
+> (below — a sweep that worked perfectly was recorded `failed`, nothing drained the queue between
+> sweeps, "Sweep now" reported a gateway timeout as a sweep failure, and "0 agenda items" meant two
+> opposite things). Before that: **building the two console levers that stood between a healthy
 > deployment and a live one** (below — production had every source registered and no way to enable
 > one, because the only code that flipped the flag lives in a script the production image does not
 > ship). Before that: **putting the name-match quality in front of the operator who
@@ -1247,6 +1250,89 @@ applied locally.
 the honest first target: its `robots.txt` is permissive, where Bozeman fetches under the vendor
 exception at the published 10-second crawl-delay and is correspondingly slow.
 
+## The first live sweep, and what it taught us
+
+**2026-08-10, 21:49 UTC. `bozeman-granicus` swept for real, against the live host.** It fetched 89
+documents at 10.1 seconds each — exactly the crawl-delay disclosed on the Methodology page — hit
+the 15-minute sweep deadline with 339 jobs queued, and was recorded **`failed`**.
+
+Nothing had gone wrong. Bozeman's Granicus page yields **339 meetings** across 2013–2026; at a
+polite rate that is ~57 minutes of fetching against a 15-minute box. **That source cannot finish in
+one run, however healthy everything is.** Four defects fell out of the discovery.
+
+**1 · A deadline is not a failure.** `drain()` threw a plain `Error`, so `classifyRun` returned
+`failed` — on `/admin/sources` that is indistinguishable from a scraper that is dead, which is the
+one confusion that screen exists to prevent. `SweepDeadlineReached` is now its own type, a run that
+reaches its clock with progress and no errors classifies **`partial`**, and the outstanding count
+is written into `counts` rather than left in an error string. A run that achieved nothing at all is
+still `failed`.
+
+**2 · Nothing drained the queue between sweeps.** `IngestionWorker` has carried a poll loop since
+it was written and **nothing ever called it** — `index.ts` referenced `worker.stop()` on shutdown
+and `worker.start()` nowhere. The only thing that ever turned the queue was `SourceScheduler.drain()`,
+inside a sweep, until the sweep deadline. Two consequences, both seen live:
+
+- **Re-parse did nothing observable.** It enqueues `parse` jobs and answers 202; with no worker
+  running they sat `pending`. The button reported success and produced silence.
+- **A timed-out sweep left its remainder frozen** — including 89 `parse` jobs over bytes already on
+  disk, which need no network at all.
+
+A standing worker now starts at boot claiming **`parse` and `analyze` only** (`STATIONARY_STAGES`).
+That restriction is load-bearing: those two stages receive a content address and no URL, and a
+context with no fetcher, so the loop **cannot** dereference anything. A standing worker that claimed
+`fetch` would walk straight around the boot-safety rule that makes `SourceScheduler.start()` refuse
+to sweep on start. Fetching stays sweep-driven, which is to say operator-driven.
+
+**Proof it works:** the deploy carrying this fix brought Bozeman from **90 to 179 records within
+seconds of the container starting** — exactly +89, the frozen parse jobs — then went idle, because
+everything remaining was `fetch`.
+
+**3 · "Sweep now" reported a failure for a sweep that was working.** The route awaited the entire
+sweep; its own comment claimed *"the sweep has run by the time this returns"*, true for a small
+source and impossible for a large one. `frontend/nginx.conf` sets no timeouts on `location /api/`,
+so it inherits nginx's default **60-second `proxy_read_timeout`**. The operator got a gateway
+timeout whose HTML body carried no `error` field, and the console said *"bozeman-granicus could not
+be swept"* about a sweep that ran on for another fifteen minutes. It now returns a genuine 202 as
+soon as the sweep is launched; the truth about how it went lives on the run row, where it belongs.
+
+**4 · "0 agenda items" meant two opposite things.** A live meeting rendered *"Nothing was extracted
+from this document"* about a document the parser had **never opened** — the sweep died with
+`parse done 0` and every parse job queued. That is an absence dressed as a finding. `no_document`,
+`not_run`, `running`, `done` and `failed` are now distinct states with distinct sentences, because
+"parsed and genuinely empty" may be worth publishing with a note and "not parsed yet" is not a
+record anyone should be deciding about.
+
+### The sweep monitor
+
+`/admin/runs/:id` polls every 5 seconds while a run is running and shows done-of-total, the queued
+count, a progress bar, the **observed** per-job rate and an ETA. Observed, not configured: a
+configured "10s per document" would keep asserting itself while a source throttled us to thirty,
+growing more confident as it grew more wrong. Polling stops at a terminal status.
+
+### 5 · A sweep that drains an older run's backlog now gets credit for it
+
+Found by watching the **second** Bozeman sweep, 2026-08-11. It processed 250 queued jobs, took the
+site from 179 records to 358 — and recorded `records: 0` against itself, then classified `failed`.
+
+`ingestion_runs.counts` is written by handlers against the run that **enqueued** a job. `CLAIM_SQL`
+carries no `run_id` filter and takes the oldest pending work **anywhere**. Both are correct, and the
+global claim is exactly what lets a backlog finish across runs — but together they mean a sweep
+that spends its life finishing an earlier run's queue ends with empty counts, and the new
+`work === 0 → failed` branch then called it a failure for the second time in a day.
+
+`drain()` now returns the number of jobs the sweep itself completed, `SweepDeadlineReached` carries
+it, and it is recorded as `counts.processed` and weighed by `classifyRun`. The two numbers answer
+different questions and are kept apart: `counts` is *what happened to this run's jobs*,
+`processed` is *what this sweep did with its fifteen minutes*.
+
+### What this means operationally
+
+A large archive backfills **across several sweeps, by design**. `CLAIM_SQL` carries no `run_id`
+filter and orders by `next_attempt_at`, so each sweep works the oldest outstanding jobs first and
+nothing is lost when the clock runs out. Bozeman needs roughly four sweeps for its first full pass.
+Records already ingested persist regardless — `runSweep` writes through `this.db`, not the
+transaction, precisely so a sweep that dies leaves what it already landed.
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
@@ -1258,7 +1344,7 @@ exception at the published 10-second crawl-delay and is correspondingly slow.
 | Footprint | ~144 MB actual against 1408 MB of declared limits |
 | Deploy dir | `/home/ec2-user/commissionwatch` on the host |
 | Access | Gated at the Caddy layer to `184.166.213.70`. Everyone else gets 403 |
-| Data | Live host not yet swept. Locally, the first real sweep landed 7 meetings, 40 agenda items, 11 artifacts (2026-08-09) |
+| Data | **The live host has swept.** `bozeman-granicus` was enabled by the operator on 2026-08-10 and has run twice; 339 meetings discovered, backfilling across sweeps (see above). Nothing is published yet — publication is a separate decision, made at `/admin/sources/:id/meetings` |
 
 ### Ingestion runs — the first public records have been fetched
 
