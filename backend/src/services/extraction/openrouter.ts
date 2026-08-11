@@ -62,18 +62,39 @@ export function assertFreeModel(model: string): void {
 /**
  * The default extraction model.
  *
- * Pinned to a specific model rather than to `openrouter/free`, on evidence
- * gathered 2026-08-11: the router served four different models across four
- * calls on the same input, one of them a content-safety classifier that
- * returned nothing usable, and another that missed a claim its siblings caught.
- * Inconsistent coverage across a document is worse for this project than an
- * outage, because it is invisible. This model returned all five claims with all
- * five citations verbatim.
+ * **Must not be a reasoning model.** That is the whole selection criterion and
+ * it was learned the expensive way: `nemotron-3-super-120b` spent its entire
+ * budget thinking aloud and never emitted JSON at all — 27,000 characters of
+ * deliberation at 6,000 tokens, 209 seconds per chunk, zero claims on nine
+ * chunks of a set of minutes that plainly records a 5-0 vote by name.
  *
- * When it too stops being free — and it will — the failure is loud: every chunk
- * fails, `stored` is 0, and nothing is silently asserted about the meeting.
+ * Measured on that same real chunk, 2026-08-11, with reasoning disabled:
+ *
+ *   nvidia/nemotron-3-nano-30b-a3b:free   36.5s   25 claims   valid JSON
+ *   cohere/north-mini-code:free           43.6s   17 claims   valid JSON
+ *   poolside/laguna-s-2.1:free            71.7s   31 claims   valid JSON
+ *   inclusionai/ling-3.0-tiny:free         7.8s    0 claims   prose, no JSON
+ *   nvidia/nemotron-3-super-120b:free    209.5s    0 claims   prose, no JSON
+ *
+ * Pinned rather than routed via `openrouter/free`: that router served four
+ * different models across four identical calls, one a content-safety classifier
+ * that could not do the task. Inconsistent coverage across a document is worse
+ * here than an outage, because it leaves no trace.
+ *
+ * When this one stops being free — and it will, llama-3.3 did it mid-project —
+ * the failure is loud: every chunk fails, `stored` is 0, and the run is recorded
+ * `failed` rather than reported as a meeting where nothing happened.
  */
-export const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
+export const DEFAULT_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free";
+
+/**
+ * Reply ceiling.
+ *
+ * 2048 was too small and failed silently: a model that thinks before answering
+ * exhausted it mid-thought, so the reply contained no JSON and the chunk read
+ * as empty. 3000 is what the measurements above were taken at.
+ */
+export const DEFAULT_MAX_TOKENS = 3000;
 
 export interface OpenRouterOptions {
   apiKey?: string;
@@ -90,7 +111,7 @@ export interface OpenRouterOptions {
 export interface CompletionRequest {
   system: string;
   user: string;
-  /** Ceiling on the reply. Free models are small; a runaway reply is a hang. */
+  /** Ceiling on the reply. Defaults to DEFAULT_MAX_TOKENS. */
   maxTokens?: number;
 }
 
@@ -203,7 +224,10 @@ export class OpenRouterClient {
               { role: "system", content: request.system },
               { role: "user", content: request.user },
             ],
-            max_tokens: request.maxTokens ?? 2048,
+            max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+            // Reasoning off. A model that narrates its deliberation spends the
+            // token budget on prose and emits no JSON — measured, not feared.
+            reasoning: { enabled: false },
             // Deterministic as the endpoint allows. This is an extraction task
             // with a right answer, not a writing task.
             temperature: 0,

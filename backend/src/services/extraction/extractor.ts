@@ -28,7 +28,7 @@ import {
 /** Bumped whenever the instructions change, and stored on every row. */
 export const PROMPT_VERSION = "2026-08-11.1";
 
-const SYSTEM_PROMPT = `You extract facts from the official minutes of a public meeting.
+export const SYSTEM_PROMPT = `You extract facts from the official minutes of a public meeting.
 
 You return ONLY a JSON array. No prose, no markdown fences, no explanation.
 
@@ -100,31 +100,66 @@ export function chunkText(text: string, size = DEFAULT_CHUNK_SIZE): Chunk[] {
 }
 
 /**
- * The model's reply as claims, or an empty list.
+ * A reply we could read, or a statement that we could not.
+ *
+ * The distinction is the whole point. Returning `[]` for an unreadable reply
+ * makes "the model found nothing in this chunk" and "we could not understand
+ * what the model said" identical, and this project cannot tell the difference
+ * between those two and still claim a meeting had no votes.
+ */
+export type ReadClaimsResult =
+  | { ok: true; claims: RawClaim[] }
+  | { ok: false; reason: string; sample: string };
+
+/** How much of an unreadable reply to keep for diagnosis. */
+export const REPLY_SAMPLE_LENGTH = 500;
+
+/**
+ * The model's reply as claims.
  *
  * Free models add prose around JSON however firmly they are told not to, so the
- * array is located rather than assumed. Everything that is not a well-formed
- * array of objects yields nothing — a reply we cannot read is not evidence of
- * anything, and guessing at its meaning is exactly the behaviour this whole
- * module exists to prevent.
+ * array is located rather than assumed. But a reply with no array in it is
+ * **not** an empty result — it is a failure, and it is reported as one.
+ *
+ * This was not hypothetical. On 2026-08-11 the configured model was a reasoning
+ * model: it spent its whole token budget thinking aloud, was cut off mid-word
+ * before emitting any JSON, and did that on all nine chunks of a real set of
+ * minutes. The run recorded nine successful chunks, zero proposed claims, and
+ * a status of "succeeded" — a document full of recorded votes reported as a
+ * meeting where nothing happened. Nothing in the pipeline was lying; every
+ * layer just passed an empty list along.
  */
-export function readClaims(reply: string): RawClaim[] {
+export function readClaims(reply: string): ReadClaimsResult {
+  const sample = reply.trim().slice(0, REPLY_SAMPLE_LENGTH);
   const start = reply.indexOf("[");
   const end = reply.lastIndexOf("]");
-  if (start === -1 || end === -1 || end < start) return [];
+  if (start === -1 || end === -1 || end < start) {
+    return {
+      ok: false,
+      reason:
+        "the reply contained no JSON array — the model answered in prose, or was " +
+        "cut off before it emitted one",
+      sample,
+    };
+  }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(reply.slice(start, end + 1));
-  } catch {
-    return [];
+  } catch (error) {
+    return { ok: false, reason: `the JSON array did not parse: ${String(error)}`, sample };
   }
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) {
+    return { ok: false, reason: "the parsed JSON was not an array", sample };
+  }
 
-  return parsed.filter(
-    (entry): entry is RawClaim =>
-      typeof entry === "object" && entry !== null && !Array.isArray(entry),
-  );
+  return {
+    ok: true,
+    claims: parsed.filter(
+      (entry): entry is RawClaim =>
+        typeof entry === "object" && entry !== null && !Array.isArray(entry),
+    ),
+  };
 }
 
 export async function extractClaims(
@@ -156,7 +191,19 @@ export async function extractClaims(
     }
 
     servedModels.add(reply.servedModel);
-    const claims = readClaims(reply.text);
+
+    const read = readClaims(reply.text);
+    if (!read.ok) {
+      // An unreadable reply is a failed chunk, not an empty one. The sample is
+      // kept because "answered in prose" and "was truncated mid-sentence" need
+      // different fixes, and the count alone distinguishes neither.
+      failedChunks.push({
+        index,
+        error: `Unreadable reply from ${reply.servedModel}: ${read.reason}. First ${REPLY_SAMPLE_LENGTH} characters: ${read.sample}`,
+      });
+      continue;
+    }
+    const claims = read.claims;
     proposed += claims.length;
 
     // Verified against the WHOLE document, not the chunk it came from: the

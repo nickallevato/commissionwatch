@@ -19,6 +19,7 @@ import {
   persistClaims,
   readClaims,
   PROMPT_VERSION,
+  REPLY_SAMPLE_LENGTH,
   type ExtractionOutcome,
 } from "../src/services/extraction/extractor";
 import {
@@ -359,16 +360,70 @@ describe("what a bad model produces, and what survives it", () => {
 
 describe("reading a free model's reply", () => {
   it("finds the array inside the prose they add anyway", () => {
-    const claims = readClaims(
+    const read = readClaims(
       'Sure! Here are the facts I found:\n```json\n[{"subject_name":"A","action":"moved"}]\n```\nHope that helps!',
     );
-    assert.equal(claims.length, 1);
+    assert.equal(read.ok, true);
+    assert.equal(read.ok && read.claims.length, 1);
   });
 
-  it("yields nothing from an unreadable reply rather than guessing", () => {
-    assert.deepEqual(readClaims("I could not find any votes in this document."), []);
-    assert.deepEqual(readClaims("[{broken json"), []);
-    assert.deepEqual(readClaims('{"subject_name":"A"}'), []);
+  it("reports an empty array as an empty ANSWER, not as a failure", () => {
+    // The model read the chunk and found nothing. That is a real result and
+    // must stay distinct from the reply we could not read at all.
+    const read = readClaims("[]");
+    assert.equal(read.ok, true);
+    assert.deepEqual(read.ok && read.claims, []);
+  });
+
+  it("reports an unreadable reply as a FAILURE, never as an empty result", () => {
+    // The defect this replaced, verbatim from production on 2026-08-11: a
+    // reasoning model spent its whole token budget deliberating, was cut off
+    // before emitting JSON, and did it on all nine chunks. Every layer passed
+    // an empty list along and the run was recorded "succeeded" with 0 claims —
+    // a set of minutes recording a 5-0 vote by name, reported as a meeting
+    // where nothing happened.
+    for (const reply of [
+      "I could not find any votes in this document.",
+      "We need to extract facts. Let's scan. Section A: Call to Order. Mayor Morri",
+      "[{broken json",
+      '{"subject_name":"A"}',
+    ]) {
+      const read = readClaims(reply);
+      assert.equal(read.ok, false, `should have failed: ${reply.slice(0, 40)}`);
+      if (!read.ok) {
+        assert.ok(read.reason.length > 0);
+        // The sample is what tells "answered in prose" apart from "truncated".
+        assert.ok(read.sample.length > 0);
+      }
+    }
+  });
+
+  it("keeps a bounded sample of an unreadable reply", () => {
+    const read = readClaims("x".repeat(5000));
+    assert.equal(read.ok, false);
+    assert.equal(read.ok === false && read.sample.length, REPLY_SAMPLE_LENGTH);
+  });
+
+  it("turns an unreadable chunk into a reported failure, not a silent zero", async () => {
+    // The integration half: the extractor must surface it, since readClaims
+    // returning a failure means nothing if the caller drops it.
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: "Let me think about this..." } }] }),
+          { status: 200 },
+        )) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    assert.equal(outcome.proposed, 0);
+    assert.equal(outcome.failedChunks.length, outcome.chunks);
+    assert.match(outcome.failedChunks[0].error, /Unreadable reply/);
+    // And therefore never "succeeded".
+    assert.equal(classifyExtraction(outcome), "failed");
   });
 });
 
