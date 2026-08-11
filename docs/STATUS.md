@@ -1,6 +1,8 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-11, after **the first live Bozeman sweep and the four defects it exposed**
+> Last updated: 2026-08-11, after **minutes extraction landing and reading a real meeting** (below
+> — 44 cited claims from the 2026-07-14 Bozeman minutes, every one held, and seven defects found by
+> running it rather than reading it). Before that: **the first live Bozeman sweep and the four defects it exposed**
 > (below — a sweep that worked perfectly was recorded `failed`, nothing drained the queue between
 > sweeps, "Sweep now" reported a gateway timeout as a sweep failure, and "0 agenda items" meant two
 > opposite things). Before that: **building the two console levers that stood between a healthy
@@ -1333,6 +1335,130 @@ nothing is lost when the clock runs out. Bozeman needs roughly four sweeps for i
 Records already ingested persist regardless — `runSweep` writes through `this.db`, not the
 transaction, precisely so a sweep that dies leaves what it already landed.
 
+## Minutes extraction has landed, and it reads a real meeting
+
+**2026-08-11.** The pipeline that turns a set of minutes into cited claims about what each named
+official did. Run end to end against the 2026-07-14 Bozeman City Commission minutes: 22 pages,
+nine chunks, **44 claims stored**, every one carrying the verbatim sentence it came from and that
+sentence's byte offset into the stored PDF.
+
+Everything it produces is `held`. Every claim names a person, and nothing naming a person
+auto-publishes — that rule predates the feature and is the reason the feature is allowed to exist.
+
+### The design premise
+
+**We do not trust the model — we test it against the bytes.** A claim arrives asserting a named
+official did something, carrying a quotation it says supports that. `verifyClaims` goes and finds
+that quotation in the stored artifact or discards the claim. There is no third outcome and no
+"low confidence" bucket that quietly keeps the row.
+
+This is also what makes a **free** model acceptable. A weaker model fabricates more often; it does
+not fabricate text that then turns out to be present. The failure mode of a cheap model here is a
+lower yield, not a wrong record. On the first real document the wall rejected roughly half of what
+the model proposed.
+
+Seven checks, each with adversarial tests written from the attacker's side:
+
+| Rejection | What it catches |
+|---|---|
+| `quote-not-found` | The quotation is not in the document. The obvious one. |
+| `quote-too-short` | "Yes." appears hundreds of times — locating it proves nothing. A check that passes and means nothing is worse than no check. |
+| `subject-not-in-quote` | A real quotation pinned to someone it never mentions. |
+| `wrong-role-in-quote` | A real quotation naming **two** officials in different roles, attributed to the wrong one. |
+| `not-an-official` | A member of the public who spoke at public comment. |
+| `unknown-action` | An action outside the enum. |
+| `asserts-motive` | Motive language, however well cited — reusing the corrections log's own `motiveTerms`. |
+
+`matter` is held to the same standard as the quote: it must be locatable in the document **and**
+within `MATTER_WINDOW` (2000 chars) of its own citation. An unverifiable matter drops to `null`
+and the claim survives — losing the context of a true fact is a small harm, asserting the wrong
+context is a large one.
+
+### What was built
+
+- **Migration 072 `minute_claims`** — `quote` and `quote_offset` both NOT NULL, so the database
+  refuses a citation nobody located. Addressed by `artifact_sha256`, not a document id: the claim
+  is about a specific set of bytes. `status` defaults `held`.
+- **Migration 073 `extraction_runs`** — every attempt, with its verbatim error, its rejected
+  claims and its failed chunks stored as written rather than summarised to a count.
+- **`services/extraction/{verify,openrouter,extractor,run,runs}.ts`**.
+- **`POST /api/admin/pressroom/meetings/:id/extract`** — 202 immediately, work in the background,
+  409 if one is already running. **`GET .../extract-runs`** reads the outcome.
+- **69 tests** in `backend/test/extraction.test.ts`.
+
+### Model selection — measured, not assumed
+
+`OPENROUTER_API_KEY` lives in SSM Parameter Store `/commissionwatch/env`. Cost to date: **zero**.
+Free-only is enforced in code by `assertFreeModel`, not in configuration, because the failure mode
+of a typo is a bill.
+
+**The first selection criterion is: not a reasoning model.** `nemotron-3-super-120b` spent its
+entire budget thinking aloud and never emitted JSON — 27,000 characters of deliberation at 6,000
+tokens, 209 seconds per chunk, zero claims on nine chunks of minutes that plainly record a 5-0
+vote by name. Measured on one real chunk with reasoning disabled:
+
+```
+nvidia/nemotron-3-nano-30b-a3b:free   36.5s   25 claims   valid JSON   <- pinned
+cohere/north-mini-code:free           43.6s   17 claims   valid JSON
+poolside/laguna-s-2.1:free            71.7s   31 claims   valid JSON
+inclusionai/ling-3.0-tiny:free         7.8s    0 claims   prose, no JSON
+nvidia/nemotron-3-super-120b:free    209.5s    0 claims   prose, no JSON
+```
+
+**`openrouter/free` is allowlisted but deliberately NOT the default.** It is genuinely zero-priced,
+but four identical calls were served by four different models — one a content-safety classifier
+that returned nothing usable, another missing a claim its siblings caught. Inconsistent coverage
+across a document is worse here than an outage, because it leaves no trace. `complete()` records
+the model that *actually* answered, so a router's claims stay traceable to what wrote them.
+
+### Seven defects, all found by running it rather than reading it
+
+Recorded because each is a shape that will recur:
+
+1. **Compose sets an absent variable to the empty string,** and `??` passes that straight through.
+   `OPENROUTER_MODEL` was `""` on every deployment, so the documented default was unreachable in
+   production while passing every test. The free-model guard then fired — a config bug wearing the
+   safety check's costume.
+2. **The pinned model stopped being free** mid-project. `assertFreeModel` refused to follow
+   OpenRouter's 404 pointing at the paid slug, which is the guard working.
+3. **nginx's 60-second `proxy_read_timeout`** turned a synchronous extraction into a bare HTML 504
+   while the work carried on server-side. The same defect as the sweep 504, in a route written
+   *after* fixing that one.
+4. **An unreadable reply was indistinguishable from an empty one.** `readClaims` returned `[]` for
+   prose, so nine successful chunks and zero claims were recorded `succeeded` — a document full of
+   recorded votes reported as a meeting where nothing happened. Nothing lied; every layer passed an
+   empty list along.
+5. **`CHUNK_OVERLAP` guaranteed duplicate keys in one INSERT.** The overlap exists so a sentence
+   spanning a boundary is wholly inside one chunk, so the overlap is read twice, and offsets
+   resolve against the whole document — two identical keys, which Postgres refuses outright
+   (`ON CONFLICT DO UPDATE command cannot affect row a second time`). The overlap that exists to
+   avoid losing evidence was losing all of it.
+6. **Truncated replies were discarded whole.** The token ceiling cut three of nine chunks
+   mid-string, each having already emitted several complete, correct claims. `salvageObjects` now
+   recovers them — and still records the chunk as failed, because the tail genuinely was not read.
+7. **A quotation naming two officials could not say which one acted.** "…was made by Deputy Mayor
+   Fischer and seconded by Commissioner Bode" — a claim saying *Fischer seconded* passed every
+   check. Cues now carry a **direction**, because a roll call reads "Fischer – Aye; Commissioner
+   Bode – Aye" and nearest-by-distance alone shifts every vote by one person.
+
+### What remains
+
+1. **~20% of each document is still unread.** Two of nine chunks fail with
+   `OpenRouter returned no message content` — a different fault from truncation; the content field
+   is absent entirely. The run is labelled `partial`, honestly, but the gap is real.
+2. **No review screen.** Claims are reachable only through the API, so an operator cannot approve
+   one from the console. `minute_claims.status` and the reviewer columns exist and are unused.
+3. **Nothing is published.** Even an approved claim does not reach the public site. That is a
+   separate, deliberate change — not a consequence of this one.
+4. **`member_id` is never populated.** The column and its FK exist; nothing links a claim to a
+   `members` row, or to an existing `votes` row.
+5. **`members` holds placeholder fixtures** — "Avery Sample", "Riley Fixture". No real roster can
+   be sourced: `bozemanmt.gov` answers 403 to everything, Granicus publishes no member list, and
+   the minutes carry no roll call. This is why claims are gated on the **office the minutes print**
+   rather than on a roster.
+6. **One meeting.** Every other ingested meeting needs the same run, and there is no batch route.
+
+
 ## Live state
 
 **https://commissionwatch.bmux.sh returns 200.** Verified from outside the host, with a valid Let's Encrypt certificate.
@@ -1676,10 +1802,48 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    is installed nothing checks the site periodically at all. Exact command in the monitor section
    above. Prefer a machine that is *not* the deploy host, so the clock does not go down with the
    thing it watches.
+0c. **Rotate the superseded OpenRouter key.** Two keys were issued on 2026-08-11; the first was
+   replaced within minutes but was written to `/commissionwatch/env` first, and Parameter Store
+   retains prior versions. The key in use is the second one. Rotating costs nothing — OpenRouter
+   keys are free to reissue — and the value must never appear in this repository or in an SSM
+   command payload. **Operator action; cannot be delegated.**
+
 1. **Enable Gallatin on the live host and install the backup cron.** The code for both landed
    2026-08-09; neither is switched on in production. `npm run sweep -- --adapter gallatin-civicplus
    --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
    same time, or accept that the backup has not left the instance.
+1b. **Fix the two chunks per document that return no content.** ~20% of every set of minutes is
+   currently never read. `OpenRouter returned no message content` means `readMessageText` found no
+   string in `choices[0].message.content` — a *different* fault from the truncation already fixed,
+   where content is absent entirely rather than cut short. Start by widening the error to report
+   `finish_reason` and whether a `reasoning` field was populated; that diagnostic is what solved
+   the last two extraction mysteries in minutes. Until it is fixed every run is honestly but
+   permanently `partial`.
+1c. **Build the claims review screen.** `minute_claims.status`, `reviewed_by`, `review_reason` and
+   `reviewed_at` all exist and nothing writes them, so an operator cannot approve a claim from the
+   console at all — the only door is `GET/POST /api/admin/pressroom/meetings/:id/…`. The screen
+   needs to show the quotation beside its offset in the artifact, because the whole point is that
+   a reviewer checks the citation rather than the claim. Follow the review queue (B-a) rather than
+   inventing a second approval concept.
+1d. **Populate `member_id`, and link a claim to its `votes` row.** The column and its FK to
+   `members` exist and are never written. Blocked in practice by the roster problem below: matching
+   "Deputy Mayor Fischer" to a member row needs member rows worth matching.
+1e. **Get a real roster into `members`.** It currently holds seed fixtures — "Avery Sample",
+   "Jordan Placeholder", "Riley Fixture", "Casey Example" — and those have reached a page before.
+   No roster could be sourced on 2026-08-11: `bozemanmt.gov` is a blanket Akamai 403, Granicus
+   publishes no member list, and the minutes carry no roll call, printing only surnames with
+   offices. **Probe for a source before designing** — the office-gating in `verify.ts` was written
+   precisely so extraction did not have to wait for this, and it should not be quietly replaced by
+   a roster match until a sourced roster exists.
+1f. **Extract the rest of the meetings.** One meeting has been done. There is no batch route and
+   deliberately so — each run costs minutes of wall-clock against a rate-limited free model, and
+   `isExtracting` guards only per-meeting concurrency. A batch runner should be a queue stage, not
+   a loop in a route.
+1g. **Decide what a published claim looks like.** Nothing reaches the public site even once
+   approved, and that is a separate deliberate change — the same shape as the dormant alert
+   delivery. A claim naming an official is the highest-stakes thing this project would publish, so
+   the publication path deserves its own design pass rather than an `if (approved)` in a template.
+
 2. **Prove CI deploy end to end.** Run `deploy-aws` and watch it succeed, so the manual deployment is no longer the only path that has ever worked.
 3. **Move both body lists into `ingestion_sources.config`.** A city standing up a committee should
    not need a deploy. **The five skipped Bozeman meetings are no longer the reason to do it** —
