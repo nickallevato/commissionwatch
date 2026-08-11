@@ -19,7 +19,16 @@ import {
   persistClaims,
   readClaims,
   PROMPT_VERSION,
+  type ExtractionOutcome,
 } from "../src/services/extraction/extractor";
+import {
+  classifyExtraction,
+  failRun,
+  finishRun,
+  isExtracting,
+  listRuns,
+  startRun,
+} from "../src/services/extraction/runs";
 import { cleanupByPrefix, createMeeting, createSource } from "./helpers/pressroom";
 
 /**
@@ -518,5 +527,112 @@ describe("a whole extraction, end to end", () => {
         }),
       /minute_claims_quote_check/,
     );
+  });
+});
+
+describe("an extraction that outlives its request", () => {
+  /**
+   * The 504 that produced this suite: nine chunks against a free model take
+   * minutes, nginx's proxy_read_timeout is 60 seconds, and the synchronous
+   * route returned a bare HTML 504 while the work carried on server-side. From
+   * the console that was indistinguishable from a meeting with no votes.
+   */
+  const outcome = (over: Partial<ExtractionOutcome> = {}): ExtractionOutcome => ({
+    model: "test/model:free",
+    served_models: ["test/model:free"],
+    prompt_version: PROMPT_VERSION,
+    chunks: 4,
+    proposed: 0,
+    result: { verified: [], rejected: [] },
+    verified: [],
+    failedChunks: [],
+    ...over,
+  });
+
+  it("calls a run with no failed chunks succeeded", () => {
+    assert.equal(classifyExtraction(outcome()), "succeeded");
+  });
+
+  it("calls a run partial when SOME chunks failed, even though claims were stored", () => {
+    // Never "succeeded". Part of the document was never read, and a reviewer
+    // looking at the claims list cannot see that from the claims alone.
+    const partial = outcome({ failedChunks: [{ index: 2, error: "429" }] });
+    assert.equal(classifyExtraction(partial), "partial");
+  });
+
+  it("calls a run failed when EVERY chunk failed", () => {
+    // What happened live on 2026-08-11 when the model stopped being free.
+    // There is no evidence the document was read at all, so this is not a
+    // partial success with zero claims.
+    const dead = outcome({
+      chunks: 3,
+      failedChunks: [
+        { index: 0, error: "404 unavailable for free" },
+        { index: 1, error: "404 unavailable for free" },
+        { index: 2, error: "404 unavailable for free" },
+      ],
+    });
+    assert.equal(classifyExtraction(dead), "failed");
+  });
+
+  it("records a run, its verbatim error, and reports it as in flight while running", async () => {
+    const { commissionId } = await createSource(`${PREFIX}-runs`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-06-05" });
+
+    const runId = await startRun(db, meetingId);
+    assert.equal(await isExtracting(db, meetingId), true);
+
+    await failRun(db, runId, new OpenRouterError("OpenRouter returned 404: no longer free", 404, false));
+
+    assert.equal(await isExtracting(db, meetingId), false);
+    const runs = await listRuns(db, meetingId);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].status, "failed");
+    // Verbatim. A summarised error is an error nobody can act on.
+    assert.match(runs[0].error ?? "", /no longer free/);
+    assert.notEqual(runs[0].finished_at, null);
+  });
+
+  it("refuses at the database to leave a finished run without a finish time", async () => {
+    const { commissionId } = await createSource(`${PREFIX}-finish`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-06-06" });
+
+    // Without this constraint a crashed process leaves rows that read as
+    // healthy in-progress work forever, and `isExtracting` would then refuse
+    // every future extraction of that meeting with a 409.
+    await assert.rejects(
+      () =>
+        db("extraction_runs").insert({
+          meeting_id: meetingId,
+          status: "succeeded",
+          finished_at: null,
+        }),
+      /extraction_runs_finished_check/,
+    );
+  });
+
+  it("stores the served models, so a router's claims stay traceable", async () => {
+    const { commissionId } = await createSource(`${PREFIX}-served`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-06-07" });
+
+    const runId = await startRun(db, meetingId);
+    await finishRun(db, runId, {
+      artifactSha256: "a".repeat(64),
+      outcome: outcome({
+        model: "openrouter/free",
+        served_models: ["cohere/north-mini-code:free", "poolside/laguna-xs-2.1:free"],
+        failedChunks: [{ index: 1, error: "429" }],
+      }),
+      stored: 0,
+    });
+
+    const runs = await listRuns(db, meetingId);
+    assert.equal(runs[0].model, "openrouter/free");
+    assert.deepEqual(runs[0].served_models, [
+      "cohere/north-mini-code:free",
+      "poolside/laguna-xs-2.1:free",
+    ]);
+    assert.equal(runs[0].status, "partial");
+    assert.equal(runs[0].failed_chunks.length, 1);
   });
 });

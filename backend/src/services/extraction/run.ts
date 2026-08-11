@@ -2,6 +2,7 @@ import type { Knex } from "knex";
 import { extractPdfText, looksLikePdf } from "../ingestion/pdf-text";
 import { OpenRouterClient } from "./openrouter";
 import { extractClaims, persistClaims, type ExtractionOutcome } from "./extractor";
+import { failRun, finishRun, startRun } from "./runs";
 
 /**
  * Extract one meeting's minutes, end to end.
@@ -71,6 +72,8 @@ export interface RunExtractionDeps {
 }
 
 export interface RunExtractionResult {
+  /** The `extraction_runs` row this attempt wrote. */
+  run_id: string;
   meeting_id: string;
   artifact_sha256: string;
   outcome: ExtractionOutcome;
@@ -90,6 +93,27 @@ export async function runExtraction(
   deps: RunExtractionDeps,
   meetingId: string,
 ): Promise<RunExtractionResult> {
+  const runId = await startRun(deps.db, meetingId);
+  try {
+    const result = await extractOnce(deps, meetingId);
+    await finishRun(deps.db, runId, {
+      artifactSha256: result.artifact_sha256,
+      outcome: result.outcome,
+      stored: result.stored,
+    });
+    return { ...result, run_id: runId };
+  } catch (error) {
+    // Recorded before rethrowing. The caller may be a background task with
+    // nobody listening — that is exactly the case this row exists for.
+    await failRun(deps.db, runId, error);
+    throw error;
+  }
+}
+
+async function extractOnce(
+  deps: RunExtractionDeps,
+  meetingId: string,
+): Promise<Omit<RunExtractionResult, "run_id">> {
   if (!deps.client.configured) {
     throw new ExtractionUnavailable(
       "OPENROUTER_API_KEY is not set on this deployment, so nothing was extracted.",

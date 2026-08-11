@@ -18,6 +18,7 @@ import {
 import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services/pressroom/runs";
 import { OpenRouterClient } from "../../services/extraction/openrouter";
 import { ExtractionUnavailable, runExtraction } from "../../services/extraction/run";
+import { isExtracting, listRuns } from "../../services/extraction/runs";
 import { downloadDocument } from "../../services/storage";
 import { listSources, setSourceEnabled } from "../../services/pressroom/sources";
 
@@ -368,39 +369,60 @@ router.post("/meetings/:id/extract", async (req: Request<{ id: string }>, res, n
     const { id } = req.params;
     if (!UUID_RE.test(id)) return badId(res, "meeting");
 
+    if (await isExtracting(db, id)) {
+      res.status(409).json({
+        error: "An extraction of this meeting is already running",
+        statusCode: 409,
+      });
+      return;
+    }
+
     const client = new OpenRouterClient();
-    const result = await runExtraction({ db, read: downloadDocument, client }, id);
+
+    // Started, not awaited. Nine chunks against a free model take minutes, and
+    // nginx's 60-second proxy_read_timeout turned the synchronous version into
+    // a 504 with no JSON body — indistinguishable, from the console, from a
+    // meeting that produced nothing. The work now outlives the request and
+    // reports itself through `extraction_runs`.
+    void runExtraction({ db, read: downloadDocument, client }, id).catch((error: unknown) => {
+      // Already recorded on the run row by runExtraction; logged so a crash
+      // loop is visible in container logs too.
+      console.error(`Extraction of meeting ${id} failed`, error);
+    });
 
     res.status(202).json({
-      meeting_id: result.meeting_id,
-      artifact_sha256: result.artifact_sha256,
-      model: result.outcome.model,
-      // What actually answered. Differs from `model` behind a router, and an
-      // operator reviewing these claims should see that a single run may have
-      // been written by several different models.
-      served_models: result.outcome.served_models,
-      prompt_version: result.outcome.prompt_version,
-      proposed: result.outcome.proposed,
-      verified: result.outcome.result.verified.length,
-      // Grouped and returned, never swallowed. A model whose output is 90%
-      // rejected is a fact about the model, and hiding it would leave an
-      // operator trusting a yield they cannot see the cost of.
-      rejected: result.outcome.result.rejected.map((entry) => ({
-        reason: entry.reason,
-        detail: entry.detail,
-      })),
-      failed_chunks: result.outcome.failedChunks,
-      stored: result.stored,
-      status: "held",
+      meeting_id: id,
+      status: "running",
       message:
-        "Every extracted claim is held for review. Nothing naming a person is published " +
-        "without an operator approving it.",
+        "Extraction started. It runs in the background and takes a few minutes; " +
+        "poll GET /meetings/:id/extract-runs for the outcome. Every claim it produces " +
+        "is held for review — nothing naming a person is published without an operator.",
     });
   } catch (err) {
     if (err instanceof ExtractionUnavailable) {
       res.status(err.statusCode).json({ error: err.message, statusCode: err.statusCode });
       return;
     }
+    next(err);
+  }
+});
+
+/**
+ * This meeting's extraction attempts, newest first.
+ *
+ * The counterpart to the 202 above: since the work outlives the request, this
+ * is where its outcome is read. It reports `rejected` and `failed_chunks` in
+ * full rather than as counts, because "the model invented quotations",
+ * "the model misattributed real ones" and "the model was throttled" are three
+ * different problems that all render as a small number of stored claims.
+ */
+router.get("/meetings/:id/extract-runs", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) return badId(res, "meeting");
+    const data = await listRuns(db, id);
+    res.json({ data, total: data.length });
+  } catch (err) {
     next(err);
   }
 });
