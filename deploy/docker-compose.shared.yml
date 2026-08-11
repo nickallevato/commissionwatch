@@ -96,6 +96,17 @@ services:
       # /admin/login renders but nobody can ever sign in — the console is
       # deployed and unenterable. seedFirstOperator is a no-op once the table
       # is non-empty, so leaving them set is safe; blank is also safe.
+      # Minutes extraction. Absent, the extract route answers 503 and says so —
+      # which is the correct default, since this is the one feature that calls
+      # a third party. Passed through here because a variable the compose file
+      # does not name does not reach the container: OPERATOR_SEED_* was missing
+      # for exactly this reason and shipped a console nobody could enter.
+      #
+      # Free models only, and that is enforced in code — `assertFreeModel`
+      # refuses any id without the `:free` suffix, so a mistyped model here
+      # fails at construction rather than producing a bill.
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-}
       - OPERATOR_SEED_EMAIL=${OPERATOR_SEED_EMAIL:-}
       - OPERATOR_SEED_PASSWORD=${OPERATOR_SEED_PASSWORD:-}
       - OPERATOR_SEED_NAME=${OPERATOR_SEED_NAME:-}

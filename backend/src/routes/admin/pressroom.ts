@@ -16,6 +16,9 @@ import {
   MEETING_PAGE_MAX,
 } from "../../services/pressroom/meetings";
 import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services/pressroom/runs";
+import { OpenRouterClient } from "../../services/extraction/openrouter";
+import { ExtractionUnavailable, runExtraction } from "../../services/extraction/run";
+import { downloadDocument } from "../../services/storage";
 import { listSources, setSourceEnabled } from "../../services/pressroom/sources";
 
 /**
@@ -342,6 +345,90 @@ router.post(
     }
   },
 );
+
+/**
+ * Extract this meeting's minutes into cited claims.
+ *
+ * A route rather than a script, for the reason `services/extraction/run.ts`
+ * spells out: the production image ships no `src/`, so an operator action that
+ * lives in a CLI script does not exist on the deployment.
+ *
+ * Everything it produces is **held**. Every claim names a person, and nothing
+ * naming a person auto-publishes — that rule predates this feature and is the
+ * reason the feature is allowed to exist at all.
+ *
+ * The response reports how much of the model's output was thrown away.
+ * `proposed` against `verified` is the number that matters: it is the
+ * hallucination rate of whichever free model is configured, measured on this
+ * document rather than assumed, and an operator watching it fall is watching
+ * the guard rail work.
+ */
+router.post("/meetings/:id/extract", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) return badId(res, "meeting");
+
+    const client = new OpenRouterClient();
+    const result = await runExtraction({ db, read: downloadDocument, client }, id);
+
+    res.status(202).json({
+      meeting_id: result.meeting_id,
+      artifact_sha256: result.artifact_sha256,
+      model: result.outcome.model,
+      prompt_version: result.outcome.prompt_version,
+      proposed: result.outcome.proposed,
+      verified: result.outcome.result.verified.length,
+      // Grouped and returned, never swallowed. A model whose output is 90%
+      // rejected is a fact about the model, and hiding it would leave an
+      // operator trusting a yield they cannot see the cost of.
+      rejected: result.outcome.result.rejected.map((entry) => ({
+        reason: entry.reason,
+        detail: entry.detail,
+      })),
+      failed_chunks: result.outcome.failedChunks,
+      stored: result.stored,
+      status: "held",
+      message:
+        "Every extracted claim is held for review. Nothing naming a person is published " +
+        "without an operator approving it.",
+    });
+  } catch (err) {
+    if (err instanceof ExtractionUnavailable) {
+      res.status(err.statusCode).json({ error: err.message, statusCode: err.statusCode });
+      return;
+    }
+    next(err);
+  }
+});
+
+/** This meeting's extracted claims, held ones included. */
+router.get("/meetings/:id/claims", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) return badId(res, "meeting");
+
+    const data = await db("minute_claims")
+      .where({ meeting_id: id })
+      .orderBy("quote_offset", "asc")
+      .select(
+        "id",
+        "subject_name",
+        "member_id",
+        "action",
+        "matter",
+        "quote",
+        "quote_offset",
+        "artifact_sha256",
+        "model",
+        "prompt_version",
+        "status",
+        "created_at",
+      );
+    res.json({ data, total: data.length });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.post("/meetings/:id/reparse", async (req, res, next) => {
   try {
