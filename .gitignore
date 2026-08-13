@@ -5,3 +5,28 @@ dist/
 *.log
 .DS_Store
 .superpowers/
+
+# Local editor/agent state. `.claude/skills/` is checked in deliberately — the
+# development process is part of the project — but settings.local.json holds
+# one machine's permission grants and belongs to nobody else.
+.claude/settings.local.json
+
+# Credential shapes, listed by extension rather than by name, because the
+# failure mode is a file nobody thought to add here. `.env.example` is the one
+# exception and is checked in.
+*.pem
+*.key
+*.p12
+*.pfx
+.env.*
+!.env.example
+!**/.env.example
+
+# Real account, instance and registry identifiers for one operator's site. The
+# checked-in `.example` alongside it carries placeholders and the explanation.
+deploy/deployment.env
+
+# Nothing generated belongs in a repository whose point is that its inputs are
+# auditable.
+*.bundle
+coverage/

@@ -3,10 +3,52 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
+import { signInOperator } from "./helpers/pressroom";
 
 const BOZEMAN_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
 const TEST_EMAIL = "test-sub@example.com";
+
+// Every route here except the two token ones is operator-only, so the suite
+// holds one session for all of them.
+let cookie: string;
+
+before(async () => {
+  cookie = await signInOperator("subscriptions-suite@example.invalid", "Subscriptions Suite");
+});
+
+/**
+ * The guard itself, before any behaviour that depends on it.
+ *
+ * `GET /` unauthenticated returned every subscriber's email address, which is
+ * the only reader PII the project stores, and `DELETE /:id` took an id that
+ * `GET /` had just printed. 401, not 404 — see middleware/requireOperator.
+ */
+describe("/api/subscriptions authentication", () => {
+  const anonymous: [string, () => request.Test][] = [
+    ["GET /", () => request(app).get("/api/subscriptions")],
+    ["GET /?email=", () => request(app).get(`/api/subscriptions?email=${TEST_EMAIL}`)],
+    ["POST /", () =>
+      request(app)
+        .post("/api/subscriptions")
+        .send({ email: TEST_EMAIL, jurisdiction_id: BOZEMAN_ID })],
+    ["GET /:id", () => request(app).get(`/api/subscriptions/${NON_EXISTENT_ID}`)],
+    ["PATCH /:id", () =>
+      request(app).patch(`/api/subscriptions/${NON_EXISTENT_ID}`).send({ digest_only: true })],
+    ["DELETE /:id", () => request(app).delete(`/api/subscriptions/${NON_EXISTENT_ID}`)],
+  ];
+
+  for (const [label, send] of anonymous) {
+    it(`${label} is 401 without a session`, async () => {
+      const res = await send().expect(401);
+      assert.equal(
+        JSON.stringify(res.body).includes("@"),
+        false,
+        "the rejection leaked an address",
+      );
+    });
+  }
+});
 
 describe("POST /api/subscriptions", () => {
   after(async () => {
@@ -16,6 +58,7 @@ describe("POST /api/subscriptions", () => {
   it("creates a subscription", async () => {
     const res = await request(app)
       .post("/api/subscriptions")
+      .set("Cookie", cookie)
       .send({ email: TEST_EMAIL, jurisdiction_id: BOZEMAN_ID })
       .expect(201);
 
@@ -23,13 +66,21 @@ describe("POST /api/subscriptions", () => {
     assert.equal(res.body.jurisdiction_id, BOZEMAN_ID);
     assert.equal(res.body.verified, false);
     assert.ok(res.body.id);
-    assert.ok(res.body.verify_token);
-    assert.equal(res.body.verify_token.length, 64);
+
+    // The token proves the subscriber reads the mailbox. Returning it from the
+    // response that mints it means an address can be verified by someone who
+    // does not own it — so it is minted, and withheld.
+    assert.equal(res.body.verify_token, undefined);
+    assert.equal(res.body.unsubscribe_token, undefined);
+
+    const sub = await db("alert_subscriptions").where({ email: TEST_EMAIL }).first();
+    assert.equal(sub.verify_token.length, 64);
   });
 
   it("rejects duplicate subscription with 409", async () => {
     await request(app)
       .post("/api/subscriptions")
+      .set("Cookie", cookie)
       .send({ email: TEST_EMAIL, jurisdiction_id: BOZEMAN_ID })
       .expect(409);
   });
@@ -37,6 +88,7 @@ describe("POST /api/subscriptions", () => {
   it("rejects invalid email", async () => {
     await request(app)
       .post("/api/subscriptions")
+      .set("Cookie", cookie)
       .send({ email: "not-an-email", jurisdiction_id: BOZEMAN_ID })
       .expect(400);
   });
@@ -44,6 +96,7 @@ describe("POST /api/subscriptions", () => {
   it("rejects non-existent jurisdiction", async () => {
     await request(app)
       .post("/api/subscriptions")
+      .set("Cookie", cookie)
       .send({ email: "new@example.com", jurisdiction_id: NON_EXISTENT_ID })
       .expect(400);
   });
@@ -70,7 +123,7 @@ describe("GET /api/subscriptions", () => {
   });
 
   it("lists subscriptions", async () => {
-    const res = await request(app).get("/api/subscriptions").expect(200);
+    const res = await request(app).get("/api/subscriptions").set("Cookie", cookie).expect(200);
     assert.ok(Array.isArray(res.body.data));
     assert.equal(typeof res.body.total, "number");
   });
@@ -78,6 +131,7 @@ describe("GET /api/subscriptions", () => {
   it("filters by email", async () => {
     const res = await request(app)
       .get("/api/subscriptions?email=list-test@example.com")
+      .set("Cookie", cookie)
       .expect(200);
     assert.ok(res.body.data.length >= 1);
     assert.equal(res.body.data[0].email, "list-test@example.com");
@@ -176,6 +230,7 @@ describe("PATCH /api/subscriptions/:id", () => {
   it("updates subscription preferences", async () => {
     const res = await request(app)
       .patch(`/api/subscriptions/${subId}`)
+      .set("Cookie", cookie)
       .send({ email_enabled: false, digest_only: true })
       .expect(200);
 
@@ -186,6 +241,7 @@ describe("PATCH /api/subscriptions/:id", () => {
   it("returns 404 for non-existent subscription", async () => {
     await request(app)
       .patch(`/api/subscriptions/${NON_EXISTENT_ID}`)
+      .set("Cookie", cookie)
       .send({ email_enabled: false })
       .expect(404);
   });
@@ -193,6 +249,7 @@ describe("PATCH /api/subscriptions/:id", () => {
   it("rejects empty update", async () => {
     await request(app)
       .patch(`/api/subscriptions/${subId}`)
+      .set("Cookie", cookie)
       .send({})
       .expect(400);
   });
@@ -202,6 +259,7 @@ describe("DELETE /api/subscriptions/:id", () => {
   it("returns 404 for non-existent subscription", async () => {
     await request(app)
       .delete(`/api/subscriptions/${NON_EXISTENT_ID}`)
+      .set("Cookie", cookie)
       .expect(404);
   });
 });

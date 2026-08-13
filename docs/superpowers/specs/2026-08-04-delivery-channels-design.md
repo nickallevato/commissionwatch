@@ -68,7 +68,7 @@ CI events POST to `/api/internal/events` with a bearer `CI_EVENT_TOKEN`, so they
 
 **If that request fails or times out (3s), the CI script posts directly to `DISCORD_WEBHOOK_URL` instead.** This matters: a deploy that broke the backend is exactly when the backend cannot be trusted to tell you the deploy broke. The fallback message is marked as having bypassed routing, so it is obvious why it looks different.
 
-This mirrors the existing `scripts/ci-notify-tracker.sh` pattern, which already files CI failures into Tracker. Tracker notification stays — Discord is added alongside, not substituted.
+This mirrored an internal issue-tracker notification script that filed CI failures automatically. That script was removed when the repository was opened — it named a private service and nothing in `.gitea/workflows/` had called it for some time. Discord is now the only CI failure channel.
 
 ## Discord specifics
 

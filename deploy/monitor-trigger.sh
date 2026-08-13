@@ -92,6 +92,21 @@ case "${1:-}" in
   *)            echo "monitor-trigger: unknown argument '$1'" >&2; exit 1 ;;
 esac
 
+# Fills in KEY=VALUE lines from a file, but only for names the environment has
+# not already set. `set -a; . file` would be shorter and is wrong: it OVERWRITES
+# what the caller exported, so a one-off `GITEA_REPO=… ./monitor-trigger.sh`
+# would silently address the operator's own repository instead. The stub-driven
+# test suite is what caught that, by setting exactly those variables.
+load_deployment_env() {
+  local file="$1" key value
+  [ -f "$file" ] || return 0
+  while IFS='=' read -r key value; do
+    case "$key" in ''|'#'*) continue ;; esac
+    key="${key%"${key##*[![:space:]]}"}"
+    [ -n "${!key:-}" ] || export "$key=$value"
+  done < "$file"
+}
+
 GITEA_ENV_FILE="${GITEA_ENV_FILE:-$HOME/.config/commissionwatch/gitea.env}"
 
 # The env file is a convenience for the operator's own machine, not a
@@ -103,6 +118,13 @@ if [ -z "${GITEA_TOKEN:-}" ] && [ -r "$GITEA_ENV_FILE" ]; then
   . "$GITEA_ENV_FILE"
   set +a
 fi
+
+# Site-specific values come from `deploy/deployment.env`, which is gitignored;
+# copy `deployment.env.example` and fill it in. An explicit environment variable
+# still wins. The defaults below are placeholders and resolve to nothing — this
+# repository is public and names no real host.
+DEPLOYMENT_ENV_FILE="${DEPLOYMENT_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deployment.env}"
+load_deployment_env "$DEPLOYMENT_ENV_FILE"
 
 GITEA_URL="${GITEA_URL:-https://gitea.example.invalid}"
 GITEA_REPO="${GITEA_REPO:-your-org/commissionwatch}"

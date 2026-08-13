@@ -1,7 +1,22 @@
 import { Router, Request } from "express";
 import db from "../config/database";
+import { requireOperator } from "../middleware/requireOperator";
 
 const router = Router();
+
+/**
+ * Operator-only, all of it.
+ *
+ * Every route here joins `alert_subscriptions` and selects the subscriber's
+ * email, and none of them is scoped by a token the caller had to be sent.
+ * Unauthenticated, `GET /api/notifications` with no filter at all was a
+ * paginated dump of the subscriber list — the one piece of reader PII the
+ * project holds — and `PATCH /read-all` let anyone mark another reader's mail
+ * read. The self-serve surface is `/api/alerts`, which is scoped by the
+ * management token from the subscriber's own email; this router is the legacy
+ * one and its only remaining caller is the operator.
+ */
+router.use(requireOperator);
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

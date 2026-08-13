@@ -9,7 +9,7 @@ const member: Member = {
   jurisdiction_id: "j1",
   name: "Sarah Chen",
   title: "Chair",
-  email: "schen@denver.gov",
+  email: "schen@example.invalid",
   term_start: "2023-01-15",
   term_end: "2027-01-15",
   created_at: "2024-01-01T00:00:00Z",
@@ -67,8 +67,8 @@ describe("MemberCard", () => {
 
   it("renders the email as a citation chip", () => {
     render(<MemberCard member={member} />);
-    const link = screen.getByRole("link", { name: "schen@denver.gov" });
-    expect(link).toHaveAttribute("href", "mailto:schen@denver.gov");
+    const link = screen.getByRole("link", { name: "schen@example.invalid" });
+    expect(link).toHaveAttribute("href", "mailto:schen@example.invalid");
   });
 
   it("summarises the voting record in the vote_value vocabulary", () => {

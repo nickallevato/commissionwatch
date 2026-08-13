@@ -196,9 +196,10 @@ jobs:
           bash ./deploy/test-monitor-trigger.sh 2>&1 | tee -a /tmp/ci-output.txt
 
   # ── Build and push images to ECR ────────────────────────────────────
-  # The ai2-daedalus runner and its SSH-tunnelled localhost:5000 registry are
-  # both gone. Images now go to ECR in account 123456789012, which the shared
-  # platform host can pull via its bmux-platform-host-ecr-pull instance role.
+  # The old self-hosted runner and its SSH-tunnelled localhost:5000 registry are
+  # both gone. Images now go to ECR in the account named by the AWS_ACCOUNT_ID
+  # repository variable, which the shared platform host pulls from with its
+  # instance role.
   #
   # CRITICAL: --platform linux/arm64. The platform host is a t4g.medium, which
   # is Graviton. An amd64 image builds perfectly in CI and then dies on the host
@@ -209,8 +210,14 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: dh1
     env:
-      AWS_REGION: us-west-2
-      ECR_REGISTRY: 123456789012.dkr.ecr.us-west-2.amazonaws.com
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      # Account, instance and namespace are Gitea repository VARIABLES, not
+      # secrets and not literals. They are identifiers rather than credentials,
+      # but this repository is public and an account number beside an instance
+      # id is a free inventory. Unset, they render as "" and the first aws call
+      # fails naming the empty value — see the guard in "Log in to ECR".
+      ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+      ECR_NAMESPACE: ${{ vars.ECR_NAMESPACE }}
       # AWS CLI v2 pages output through less(1). On a runner TERM is
       # undriveable, so every aws call stalls on "Press RETURN" rather than
       # failing — the step looks merely slow until something times out.
@@ -226,6 +233,22 @@ jobs:
         run: |
           set -o pipefail
           {
+            # An unset Gitea variable renders as "", never as an error, so
+            # ECR_REGISTRY silently becomes ".dkr.ecr..amazonaws.com" and the
+            # failure arrives several steps later as an unresolvable host. Name
+            # the missing variable here instead — this is the first step that
+            # would notice, and a fork will hit it on its very first push.
+            missing=""
+            [ -n "${AWS_REGION:-}" ]    || missing="$missing AWS_REGION"
+            [ -n "${ECR_NAMESPACE:-}" ] || missing="$missing ECR_NAMESPACE"
+            case "$ECR_REGISTRY" in
+              .dkr.ecr*|*ecr..amazonaws*) missing="$missing AWS_ACCOUNT_ID" ;;
+            esac
+            if [ -n "$missing" ]; then
+              echo "Unset Gitea repository variable(s):$missing" >&2
+              echo "Set them under Settings → Actions → Variables. See deploy/deployment.env.example." >&2
+              exit 1
+            fi
             if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
               echo "AWS_ACCESS_KEY_ID not set; cannot push to ECR." >&2
               exit 1
@@ -236,7 +259,7 @@ jobs:
 
       # The `your-org/` prefix is REQUIRED and is not cosmetic. The CI user's
       # inline policy grants push only on
-      #   arn:aws:ecr:us-west-2:123456789012:repository/your-org/commissionwatch-*
+      #   arn:aws:ecr:<region>:<account>:repository/<namespace>/commissionwatch-*
       # so an unprefixed path is denied no matter what else is correct.
       #
       # Repositories are provisioned out of band on purpose: a build pipeline
@@ -281,8 +304,8 @@ jobs:
             docker buildx build --platform linux/arm64 --push \
               --build-arg "BUILD_SHA=$BUILD_SHA" \
               --build-arg "BUILD_TIME=$BUILD_TIME" \
-              -t "$ECR_REGISTRY/your-org/commissionwatch-backend:${{ github.sha }}" \
-              -t "$ECR_REGISTRY/your-org/commissionwatch-backend:latest" \
+              -t "$ECR_REGISTRY/$ECR_NAMESPACE/commissionwatch-backend:${{ github.sha }}" \
+              -t "$ECR_REGISTRY/$ECR_NAMESPACE/commissionwatch-backend:latest" \
               ./backend
           } 2>&1 | tee -a /tmp/ci-output.txt
 
@@ -294,8 +317,8 @@ jobs:
             docker buildx build --platform linux/arm64 --push \
               --build-arg "BUILD_SHA=$BUILD_SHA" \
               --build-arg "BUILD_TIME=$BUILD_TIME" \
-              -t "$ECR_REGISTRY/your-org/commissionwatch-frontend:${{ github.sha }}" \
-              -t "$ECR_REGISTRY/your-org/commissionwatch-frontend:latest" \
+              -t "$ECR_REGISTRY/$ECR_NAMESPACE/commissionwatch-frontend:${{ github.sha }}" \
+              -t "$ECR_REGISTRY/$ECR_NAMESPACE/commissionwatch-frontend:latest" \
               ./frontend
           } 2>&1 | tee -a /tmp/ci-output.txt
 
@@ -324,9 +347,10 @@ jobs:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.SHARED_STACK_LIVE == 'true'
     runs-on: dh1
     env:
-      AWS_REGION: us-west-2
-      INSTANCE_ID: i-0123456789abcdef0
-      ECR_REGISTRY: 123456789012.dkr.ecr.us-west-2.amazonaws.com
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      INSTANCE_ID: ${{ vars.INSTANCE_ID }}
+      ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+      ECR_NAMESPACE: ${{ vars.ECR_NAMESPACE }}
       # See build-and-push: without this every aws call hangs on less(1).
       AWS_PAGER: ""
     steps:
@@ -380,8 +404,8 @@ jobs:
 
             # Pinned to this commit, so a deploy is reproducible and a rollback
             # is the same script with an older tag.
-            export IMAGE_BACKEND="$ECR_REGISTRY/your-org/commissionwatch-backend:${{ github.sha }}"
-            export IMAGE_FRONTEND="$ECR_REGISTRY/your-org/commissionwatch-frontend:${{ github.sha }}"
+            export IMAGE_BACKEND="$ECR_REGISTRY/$ECR_NAMESPACE/commissionwatch-backend:${{ github.sha }}"
+            export IMAGE_FRONTEND="$ECR_REGISTRY/$ECR_NAMESPACE/commissionwatch-frontend:${{ github.sha }}"
 
             # Makes the deploy assert that both containers actually came up
             # serving THIS commit, rather than only that they came up.

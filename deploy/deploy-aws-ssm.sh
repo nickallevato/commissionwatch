@@ -65,13 +65,42 @@ fi
 # Must be set on BOTH ends: here, and in the script the host runs.
 export AWS_PAGER=""
 
+# ── Where the real values live ──────────────────────────────────────────────
+# This repository is public and names no real account, instance or registry.
+# The four site-specific values below come from `deploy/deployment.env`, which
+# is gitignored; copy `deployment.env.example` and fill it in. CI supplies the
+# same values as Gitea repository variables instead, and an explicit environment
+# variable beats both — hence the `:-` chain, in that order.
+#
+# The defaults are AWS's own documentation placeholders. They are not a fallback
+# that will "probably work": a deploy against them fails at the first API call
+# with a clear error, which is the intended behaviour for an unconfigured fork.
+#
+# Fills in only names the environment has not already set. `set -a; . file`
+# would be shorter and is wrong: it OVERWRITES what the caller exported, so a
+# one-off `INSTANCE_ID=… ./deploy-aws-ssm.sh` would deploy to the operator's
+# usual host instead of the one named on the command line.
+load_deployment_env() {
+  local file="$1" key value
+  [ -f "$file" ] || return 0
+  while IFS='=' read -r key value; do
+    case "$key" in ''|'#'*) continue ;; esac
+    key="${key%"${key##*[![:space:]]}"}"
+    [ -n "${!key:-}" ] || export "$key=$value"
+  done < "$file"
+}
+
+DEPLOYMENT_ENV_FILE="${DEPLOYMENT_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deployment.env}"
+load_deployment_env "$DEPLOYMENT_ENV_FILE"
+
 PRODUCT="${PRODUCT:-commissionwatch}"
 AWS_REGION="${AWS_REGION:-us-west-2}"
 INSTANCE_ID="${INSTANCE_ID:-i-0123456789abcdef0}"
-ECR_REGISTRY="${ECR_REGISTRY:-123456789012.dkr.ecr.us-west-2.amazonaws.com}"
+AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-123456789012}"
+ECR_REGISTRY="${ECR_REGISTRY:-${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com}"
 
-# The `your-org/` prefix is REQUIRED and is not cosmetic: the CI user's inline
-# policy grants push only on repository/your-org/commissionwatch-*, so an
+# The namespace prefix is REQUIRED and is not cosmetic: the CI user's inline
+# policy grants push only on repository/<namespace>/commissionwatch-*, so an
 # unprefixed path is denied no matter what else is correct. ECR reports both a
 # wrong path and a missing repository as 403 on a blob HEAD, never a 404, and
 # never names the repository.

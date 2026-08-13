@@ -1,8 +1,26 @@
 import { Router, Request } from "express";
 import crypto from "node:crypto";
 import db from "../config/database";
+import { requireOperator } from "../middleware/requireOperator";
 
 const router = Router();
+
+/**
+ * The legacy email-only subscription router. `/api/alerts` replaced it and is
+ * the surface a reader uses; this one is retained for the operator.
+ *
+ * Everything that reads or writes a subscriber row now requires an operator
+ * session, because nothing here proves the caller owns the row it names.
+ * Unauthenticated, `GET /` was a paginated dump of every subscriber's email
+ * address, `POST /` returned the `verify_token` in its own response — so a
+ * stranger could subscribe an address and verify it without the owner ever
+ * seeing a message — and `DELETE /:id` took an id that `GET /` had just
+ * handed out.
+ *
+ * The two token routes below stay open. A verification or unsubscribe link is
+ * followed by someone holding a 32-byte secret that only reached them by mail,
+ * and an unsubscribe that demands a login is an unsubscribe that does not work.
+ */
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,7 +51,7 @@ interface SubscriptionsQuery {
   offset?: string;
 }
 
-router.get("/", async (req: Request<unknown, unknown, unknown, SubscriptionsQuery>, res, next) => {
+router.get("/", requireOperator, async (req: Request<unknown, unknown, unknown, SubscriptionsQuery>, res, next) => {
   try {
     const { email, jurisdiction_id, limit: rawLimit, offset: rawOffset } = req.query;
 
@@ -72,7 +90,7 @@ interface CreateSubscriptionBody {
   digest_only?: boolean;
 }
 
-router.post("/", async (req: Request<unknown, unknown, CreateSubscriptionBody>, res, next) => {
+router.post("/", requireOperator, async (req: Request<unknown, unknown, CreateSubscriptionBody>, res, next) => {
   try {
     const { email: rawEmail, jurisdiction_id, email_enabled, digest_only } = req.body;
 
@@ -105,7 +123,10 @@ router.post("/", async (req: Request<unknown, unknown, CreateSubscriptionBody>, 
       })
       .returning(["id", "email", "jurisdiction_id", "email_enabled", "digest_only", "verified", "created_at"]);
 
-    res.status(201).json({ ...subscription, verify_token });
+    // Not `verify_token`. The token's whole job is to prove the person holding
+    // it reads the mailbox, which it cannot do if the response that creates it
+    // also prints it.
+    res.status(201).json(subscription);
   } catch (err) {
     next(err);
   }
@@ -158,7 +179,7 @@ router.get("/unsubscribe/:token", async (req, res, next) => {
   }
 });
 
-router.get("/:id", async (req, res, next) => {
+router.get("/:id", requireOperator, async (req: Request<{ id: string }>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid subscription ID format");
@@ -184,7 +205,7 @@ interface UpdateSubscriptionBody {
   digest_only?: boolean;
 }
 
-router.patch("/:id", async (req: Request<{ id: string }, unknown, UpdateSubscriptionBody>, res, next) => {
+router.patch("/:id", requireOperator, async (req: Request<{ id: string }, unknown, UpdateSubscriptionBody>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid subscription ID format");
@@ -213,7 +234,7 @@ router.patch("/:id", async (req: Request<{ id: string }, unknown, UpdateSubscrip
   }
 });
 
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requireOperator, async (req: Request<{ id: string }>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid subscription ID format");

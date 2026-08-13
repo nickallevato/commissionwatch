@@ -2,7 +2,7 @@
 
 Deploys onto the shared bmux platform host over **SSM Run Command**. Not SSH.
 
-> The previous version of this file described an Ansible playbook in a your-org repo. That is not
+> The previous version of this file described an Ansible playbook in a private infrastructure repo. That is not
 > how this deploys and was never how it deployed. Design reasoning:
 > `docs/superpowers/specs/2026-08-06-ssm-deploy-design.md`.
 
@@ -50,6 +50,42 @@ repository variable `SHARED_STACK_LIVE == 'true'`.
 | | Repo-level Gitea secrets |
 
 ## Setup
+
+### 0. Your own account, instance and registry
+
+This repository is public and names none of them. Every account number, instance id, registry host
+and namespace in the files below is a placeholder, and a deploy against the placeholders fails at
+the first AWS call rather than doing something surprising.
+
+For an operator working locally:
+
+```bash
+cp deploy/deployment.env.example deploy/deployment.env
+$EDITOR deploy/deployment.env
+```
+
+`deployment.env` is gitignored. `deploy-aws-ssm.sh` and `monitor-trigger.sh` read it, filling in
+only variables the environment has not already set — so `INSTANCE_ID=i-… ./deploy/deploy-aws-ssm.sh`
+still deploys where you said, not where the file says.
+
+None of this is secret. They are identifiers, and every action against them still needs an IAM
+principal you control. They are kept out of the repository because an account number beside an
+instance id beside a registry host is a free inventory of your infrastructure. Real secrets live in
+Parameter Store (§4) and never appear in either file.
+
+For CI, the same four values are Gitea **variables** (not secrets), added under
+**Settings → Actions → Variables**:
+
+| Variable | Example | Purpose |
+|---|---|---|
+| `AWS_ACCOUNT_ID` | `123456789012` | Builds `ECR_REGISTRY` |
+| `AWS_REGION` | `us-west-2` | Region for every `aws` call |
+| `ECR_NAMESPACE` | `your-org` | The required repository path prefix (§2) |
+| `INSTANCE_ID` | `i-0123456789abcdef0` | The SSM target |
+
+An unset variable renders as `""`, so `ECR_REGISTRY` would become `.dkr.ecr..amazonaws.com` and the
+failure would arrive several steps later as an unresolvable host. The **Log in to ECR** step
+preflights all four and names the missing one.
 
 ### 1. Gitea secrets — repository level, not organisation
 

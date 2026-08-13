@@ -11,6 +11,16 @@ import type {
 } from "@/types";
 
 /**
+ * The people, jurisdictions and votes in this file are invented. The names are
+ * generic on purpose and every address and link points at `example.invalid`,
+ * a domain the DNS standard reserves so it can never resolve.
+ *
+ * They used to read `schen@denver.gov` and `https://bouldercounty.gov`. On a
+ * project whose entire claim is that what it publishes about an official is
+ * sourced and true, a fabricated commissioner reachable at a real city's real
+ * domain is the one kind of fixture that must not exist — someone reading a
+ * screenshot cannot tell the difference, and neither can a scraper.
+ *
  * Every `id` and foreign key below is a real UUID, because every corresponding
  * column is `uuid` and the API routes reject anything that fails
  * `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i` with 400.
@@ -29,7 +39,7 @@ export const jurisdictions: Jurisdiction[] = [
     name: "Denver",
     state: "CO",
     type: "city",
-    website_url: "https://denver.gov",
+    website_url: "https://example.invalid/denver",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
   },
@@ -38,7 +48,7 @@ export const jurisdictions: Jurisdiction[] = [
     name: "Boulder County",
     state: "CO",
     type: "county",
-    website_url: "https://bouldercounty.gov",
+    website_url: "https://example.invalid/boulder",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
   },
@@ -384,7 +394,7 @@ export const members: Member[] = [
     jurisdiction_id: "10000000-0000-4000-8000-000000000001",
     name: "Sarah Chen",
     title: "Chair",
-    email: "schen@denver.gov",
+    email: "schen@example.invalid",
     term_start: "2023-01-15T00:00:00.000Z",
     term_end: "2027-01-15T00:00:00.000Z",
     created_at: "2024-01-01T00:00:00Z",
@@ -396,7 +406,7 @@ export const members: Member[] = [
     jurisdiction_id: "10000000-0000-4000-8000-000000000001",
     name: "Marcus Thompson",
     title: "Vice Chair",
-    email: "mthompson@denver.gov",
+    email: "mthompson@example.invalid",
     term_start: "2022-06-01T00:00:00.000Z",
     term_end: "2026-06-01T00:00:00.000Z",
     created_at: "2024-01-01T00:00:00Z",
@@ -408,7 +418,7 @@ export const members: Member[] = [
     jurisdiction_id: "10000000-0000-4000-8000-000000000001",
     name: "Lisa Park",
     title: "Commissioner",
-    email: "lpark@denver.gov",
+    email: "lpark@example.invalid",
     term_start: "2024-01-01T00:00:00.000Z",
     term_end: "2028-01-01T00:00:00.000Z",
     created_at: "2024-01-01T00:00:00Z",
@@ -420,7 +430,7 @@ export const members: Member[] = [
     jurisdiction_id: "10000000-0000-4000-8000-000000000002",
     name: "James Rodriguez",
     title: "Commissioner",
-    email: "jrodriguez@bouldercounty.gov",
+    email: "jrodriguez@example.invalid",
     term_start: "2023-03-01T00:00:00.000Z",
     term_end: "2027-03-01T00:00:00.000Z",
     created_at: "2024-01-01T00:00:00Z",
@@ -432,7 +442,7 @@ export const members: Member[] = [
     jurisdiction_id: "10000000-0000-4000-8000-000000000002",
     name: "Emily Watson",
     title: "Commissioner",
-    email: "ewatson@bouldercounty.gov",
+    email: "ewatson@example.invalid",
     term_start: "2022-01-01T00:00:00.000Z",
     term_end: "2026-01-01T00:00:00.000Z",
     created_at: "2024-01-01T00:00:00Z",

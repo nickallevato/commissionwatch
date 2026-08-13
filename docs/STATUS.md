@@ -49,6 +49,18 @@ back-fill of those rows onto `delivery_channels` incapable of double-sending.
 dispatcher and dropping `alert_subscriptions` is a separate change, and the two
 must happen in the same commit.
 
+**The legacy routers over those rows are now operator-only** (2026-08-13). Every
+route on `/api/subscriptions` and `/api/notifications` joins `alert_subscriptions`
+and selects the subscriber's email, and all of them were unauthenticated:
+`GET /api/subscriptions` with no query was a paginated dump of every subscriber's
+address, `POST` returned the `verify_token` it had just minted — so an address
+could be subscribed and verified by someone who does not read it — and `DELETE`
+took an id the list had handed out. The two token-scoped links a subscriber
+follows from their own mail, `/verify/:token` and `/unsubscribe/:token`, stay
+open; an unsubscribe that demands a login is an unsubscribe that does not work.
+Nothing in the frontend called any of the guarded routes. When
+`alert_subscriptions` is dropped, both routers go with it.
+
 Per `CLAUDE.md`, nothing in the delivery layer sends product events yet — including SMS. The
 substrate exists. **The review queue landed 2026-08-10** (B-a, below), so the gate it was waiting
 on is now built; cutting delivery over to published findings is a separate, deliberate change, and

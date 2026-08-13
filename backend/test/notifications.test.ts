@@ -4,6 +4,15 @@ import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
 import { NotificationService } from "../src/services/notification";
+import { signInOperator } from "./helpers/pressroom";
+
+// Every HTTP route in this router joins `alert_subscriptions` and selects the
+// subscriber's email, so all of them are operator-only.
+let cookie: string;
+
+before(async () => {
+  cookie = await signInOperator("notifications-suite@example.invalid", "Notifications Suite");
+});
 
 const BOZEMAN_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 const COMPLETED_MEETING_ID = "f6a7b8c9-d0e1-2345-fabc-456789012345";
@@ -88,9 +97,36 @@ describe("NotificationService.processAnomalyEvent", () => {
   });
 });
 
+/**
+ * The guard, before the behaviour that depends on it.
+ *
+ * `GET /api/notifications` with no filter was an unauthenticated, paginated
+ * dump of which reader was told what — subscriber address included.
+ */
+describe("/api/notifications authentication", () => {
+  const anonymous: [string, () => request.Test][] = [
+    ["GET /", () => request(app).get("/api/notifications")],
+    ["GET /count", () => request(app).get(`/api/notifications/count?email=${TEST_EMAIL}`)],
+    ["PATCH /:id/read", () => request(app).patch(`/api/notifications/${NON_EXISTENT_ID}/read`)],
+    ["PATCH /read-all", () =>
+      request(app).patch("/api/notifications/read-all").send({ email: TEST_EMAIL })],
+  ];
+
+  for (const [label, send] of anonymous) {
+    it(`${label} is 401 without a session`, async () => {
+      const res = await send().expect(401);
+      assert.equal(
+        JSON.stringify(res.body).includes(TEST_EMAIL),
+        false,
+        "the rejection leaked the address it was asked about",
+      );
+    });
+  }
+});
+
 describe("GET /api/notifications", () => {
   it("lists notifications", async () => {
-    const res = await request(app).get("/api/notifications").expect(200);
+    const res = await request(app).get("/api/notifications").set("Cookie", cookie).expect(200);
     assert.ok(Array.isArray(res.body.data));
     assert.equal(typeof res.body.total, "number");
   });
@@ -98,6 +134,7 @@ describe("GET /api/notifications", () => {
   it("filters by email", async () => {
     const res = await request(app)
       .get(`/api/notifications?email=${TEST_EMAIL}`)
+      .set("Cookie", cookie)
       .expect(200);
     assert.ok(Array.isArray(res.body.data));
   });
@@ -105,6 +142,7 @@ describe("GET /api/notifications", () => {
   it("rejects invalid severity", async () => {
     await request(app)
       .get("/api/notifications?severity=extreme")
+      .set("Cookie", cookie)
       .expect(400);
   });
 });
@@ -113,6 +151,7 @@ describe("GET /api/notifications/count", () => {
   it("returns unread count for email", async () => {
     const res = await request(app)
       .get(`/api/notifications/count?email=${TEST_EMAIL}`)
+      .set("Cookie", cookie)
       .expect(200);
     assert.equal(typeof res.body.unread, "number");
   });
@@ -120,6 +159,7 @@ describe("GET /api/notifications/count", () => {
   it("requires email or subscription_id", async () => {
     await request(app)
       .get("/api/notifications/count")
+      .set("Cookie", cookie)
       .expect(400);
   });
 });
@@ -128,6 +168,7 @@ describe("PATCH /api/notifications/:id/read", () => {
   it("returns 404 for non-existent notification", async () => {
     await request(app)
       .patch(`/api/notifications/${NON_EXISTENT_ID}/read`)
+      .set("Cookie", cookie)
       .expect(404);
   });
 });
@@ -136,6 +177,7 @@ describe("PATCH /api/notifications/read-all", () => {
   it("requires email or subscription_id", async () => {
     await request(app)
       .patch("/api/notifications/read-all")
+      .set("Cookie", cookie)
       .send({})
       .expect(400);
   });
@@ -143,6 +185,7 @@ describe("PATCH /api/notifications/read-all", () => {
   it("marks all as read for email", async () => {
     const res = await request(app)
       .patch("/api/notifications/read-all")
+      .set("Cookie", cookie)
       .send({ email: TEST_EMAIL })
       .expect(200);
     assert.equal(typeof res.body.updated, "number");

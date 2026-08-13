@@ -5,10 +5,20 @@ import app from "../src/app";
 import db from "../src/config/database";
 import { NotificationService } from "../src/services/notification";
 import { EmailDeliveryService } from "../src/services/email-delivery";
+import { signInOperator } from "./helpers/pressroom";
 
 const BOZEMAN_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 const COMPLETED_MEETING_ID = "f6a7b8c9-d0e1-2345-fabc-456789012345";
 const FLOW_EMAIL = "alert-flow-test@example.com";
+
+// The legacy `/api/subscriptions` and `/api/notifications` routes are
+// operator-only; the verify and unsubscribe links a subscriber follows are not.
+// The flow below crosses that line twice, which is the shape of the real thing.
+let cookie: string;
+
+before(async () => {
+  cookie = await signInOperator("alert-flow-suite@example.invalid", "Alert Flow Suite");
+});
 
 async function cleanup() {
   await db("notifications").whereIn(
@@ -38,15 +48,19 @@ describe("Full alert flow: subscribe → detect anomaly → notification → ema
   it("step 1: creates and verifies a subscription via API", async () => {
     const createRes = await request(app)
       .post("/api/subscriptions")
+      .set("Cookie", cookie)
       .send({ email: FLOW_EMAIL, jurisdiction_id: BOZEMAN_ID })
       .expect(201);
 
     subscriptionId = createRes.body.id;
-    verifyToken = createRes.body.verify_token;
     assert.ok(subscriptionId);
     assert.equal(createRes.body.verified, false);
+    assert.equal(createRes.body.verify_token, undefined, "the response must not carry the token");
 
+    // Read both tokens the way the subscriber gets them — out of band. The
+    // response that creates the row deliberately withholds them.
     const sub = await db("alert_subscriptions").where({ id: subscriptionId }).first();
+    verifyToken = sub.verify_token;
     unsubscribeToken = sub.unsubscribe_token;
 
     await request(app)
@@ -137,6 +151,7 @@ describe("Full alert flow: subscribe → detect anomaly → notification → ema
 
     const listRes = await request(app)
       .get(`/api/notifications?email=${FLOW_EMAIL}`)
+      .set("Cookie", cookie)
       .expect(200);
 
     assert.ok(listRes.body.data.length >= 1);
@@ -148,6 +163,7 @@ describe("Full alert flow: subscribe → detect anomaly → notification → ema
 
     const countRes = await request(app)
       .get(`/api/notifications/count?email=${FLOW_EMAIL}`)
+      .set("Cookie", cookie)
       .expect(200);
 
     assert.ok(countRes.body.unread >= 1);
@@ -174,14 +190,17 @@ describe("Full alert flow: subscribe → detect anomaly → notification → ema
 
     const beforeCount = await request(app)
       .get(`/api/notifications/count?email=${FLOW_EMAIL}`)
+      .set("Cookie", cookie)
       .expect(200);
 
     await request(app)
       .patch(`/api/notifications/${notif.id}/read`)
+      .set("Cookie", cookie)
       .expect(200);
 
     const afterCount = await request(app)
       .get(`/api/notifications/count?email=${FLOW_EMAIL}`)
+      .set("Cookie", cookie)
       .expect(200);
 
     assert.ok(afterCount.body.unread < beforeCount.body.unread, "Unread count should decrease after marking read");

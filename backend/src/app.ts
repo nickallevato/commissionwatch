@@ -101,10 +101,16 @@ app.use("/api/data", dataRouter);
 // than an appointment at midnight.
 app.use("/api/calendar", calendarRouter);
 app.use("/api/ingestion", ingestionRouter);
+// The legacy email-only subscription and notification routers, now operator-
+// only apart from the two token-scoped links a subscriber follows out of their
+// own mail. Both join `alert_subscriptions` and select the subscriber's email,
+// and unauthenticated they were a paginated dump of the one piece of reader PII
+// this project holds. Readers use /api/alerts below; nothing in the frontend
+// calls either of these.
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/notifications", notificationsRouter);
-// The unified self-serve alerts surface. /api/subscriptions above is the
-// legacy email-only one, retained read-only for one release per B-e.
+// The unified self-serve alerts surface, scoped by the management token from
+// the subscriber's own email.
 app.use("/api/alerts", alertsRouter);
 // Twilio posts form-encoded, not JSON, so this router needs its own parser.
 app.use("/api/sms", express.urlencoded({ extended: false }), smsRouter);
