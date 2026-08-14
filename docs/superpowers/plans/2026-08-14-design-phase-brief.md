@@ -18,6 +18,10 @@
 > | 9 | `specs/2026-08-14-geography-design.md` |
 > | 10 | `specs/2026-08-14-notification-and-dispute-loop-design.md` |
 >
+> **Migration numbers in these specs are provisional and they collide.** They were written in
+> parallel and several claim 075–079. Re-read `backend/migrations/` and renumber at plan time; do
+> not trust a number written in a spec.
+>
 > **Build order**, which is not the numbering: §8 vocabulary first (it renames routes, and every
 > later surface names them again), then §4 corpus throughput (there is nothing to distribute yet),
 > then §1 event spine, then §2/§3 the claim pipeline, then §6 delivery and §7 reach, with §5 and §9
