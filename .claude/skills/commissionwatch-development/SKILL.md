@@ -141,7 +141,7 @@ months — verify against `package.json` before trusting any document.
 - Backend: Express 5 + TypeScript on Node 22, Knex migrations, PostgreSQL 16 + pgvector, MinIO
 - Frontend: React + Vite + Tailwind (**not** Next.js)
 - Queue: Postgres `SKIP LOCKED`. No Redis
-- Domain: `commissionwatch.bmux.sh`. `legacy-platform` is removed from this repo — do not reintroduce it
+- Domain: `commissionwatch.bmux.sh`
 - Design: light editorial — serif headlines, one red accent, tabular numerals, citation chips
 - Ingestion stages after `fetch` read stored artifacts, never the network, so `parse` and `analyze`
   develop at full speed even when a source is blocked

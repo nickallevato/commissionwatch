@@ -69,7 +69,6 @@ Backend tests need PostgreSQL: `docker compose up -d db`.
 - The database schema is the source of truth for types
 - No unsourced claim reaches the public site
 - Nothing naming a person auto-publishes — it goes to the operator review queue
-- Do not reintroduce `legacy-platform` anywhere
 - Probe external data sources before designing against them
 - CI is **Gitea Actions**. Never add `.github/workflows/` — it does not run here, and a
   "fixed" workflow nobody executes is worse than a visibly broken one. Runner labels in use:
