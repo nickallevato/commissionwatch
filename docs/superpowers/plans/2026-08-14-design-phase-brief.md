@@ -1,5 +1,27 @@
 # Design-phase brief — what still needs a spec
 
+> **Status, updated 2026-08-14: the design phase ran and these specs are written.** Each section
+> below now names the spec that answers it. A ninth was added mid-phase at the operator's request:
+> the city development map. This file remains the index and the constraint list; the specs are the
+> design of record.
+>
+> | § | Spec |
+> |---|---|
+> | 1 | `specs/2026-08-14-event-spine-design.md` |
+> | 2 | `specs/2026-08-14-published-claim-design.md` |
+> | 3 | `specs/2026-08-14-llm-governor-design.md` |
+> | 4 | `specs/2026-08-14-extraction-throughput-design.md` |
+> | 5 | `specs/2026-08-14-transcripts-design.md` |
+> | 6 | `specs/2026-08-14-delivery-design.md` |
+> | 7 | `specs/2026-08-14-server-rendering-design.md` |
+> | 8 | `specs/2026-08-14-vocabulary-and-ui-design.md` |
+> | 9 | `specs/2026-08-14-geography-design.md` |
+>
+> **Build order**, which is not the numbering: §8 vocabulary first (it renames routes, and every
+> later surface names them again), then §4 corpus throughput (there is nothing to distribute yet),
+> then §1 event spine, then §2/§3 the claim pipeline, then §6 delivery and §7 reach, with §5 and §9
+> slotting in where their probes come back.
+
 > Written 2026-08-14 as a handoff. The operator asked for **a design phase covering everything not
 > yet built**, after the build work recorded in `docs/STATUS.md` § 2026-08-14.
 >
@@ -123,6 +145,25 @@ says "nothing here is a finding."
 Plus: one provenance component set used by both tiers; the `components/ui/` extraction (the
 operator console is currently better-built than the reader's site); and the `<Absence>` empty-state
 grammar.
+
+## 9. The city development map — `…-geography-design.md`
+
+Added by the operator on 2026-08-14, mid-design-phase: a general-purpose mapping system that lets
+this project's data be associated, tagged and connected to the location of the decisions it records.
+
+Must cover: PostGIS (a production database **image** change, not just a migration), a general
+`places` table with an explicit `precision` column so a geocoded address is never drawn as though it
+were a surveyed parcel, and a polymorphic `place_links` association layer carrying the same citation
+requirement as any other claim.
+
+**The line it must not cross**, and the reason it is stated first rather than last: migration
+`043_drop_campaign_finance_pii.ts` already deleted `entity_address` from this database on privacy
+grounds. This feature maps **decisions, not people**. There is no join path from a person to a
+location, and a test asserts its absence.
+
+The payoff beyond the map itself is the query feed: *"anything within 500 metres of this address"*
+is the most compelling subscription in the roadmap, needs no account, and stores nothing about the
+subscriber.
 
 ---
 
