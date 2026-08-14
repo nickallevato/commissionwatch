@@ -141,6 +141,14 @@ SSM command payload**, which is retained in plaintext for 30 days and lands in C
 
 ## 5. Outbound email — and the four things that must be true first
 
+> **Deferred, 2026-08-14.** Sections 5 and 6 are deferred by
+> `2026-08-14-notification-and-dispute-loop-design.md`, which ships *transactional* mail — the
+> dispute acknowledgement and outcome, and subject notice at publication — without a subscriber
+> list. That removes the argument that email must ship early because disputes need a reply.
+> Nothing below is cancelled; §5a–§5c remain **preconditions for transactional mail too**, and the
+> re-ask stands. §5d, the one-commit cutover, does not apply to transactional mail, because there
+> is no `alert_subscriptions` path to collide with.
+
 **Email must not ship until all four of these are done.** They are not preconditions in the
 soft sense.
 

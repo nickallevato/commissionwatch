@@ -269,12 +269,16 @@ itself. It does not need to be found again; it needs to be there when someone ar
 
 **a. Does the subject get notice before publication, or only a dispute route after?**
 
-Specified above as *after* — the dispute link. But every claim names a living person, the officials
-are a known finite set with public email addresses, and a 48-hour "we are about to publish this,
-here is the quote" notice is both ordinary journalistic practice and a strong defence. It also
-slows the pipeline and hands a subject a window to object to accurate records. This is a
-publishing-ethics and legal-exposure call, which the working agreement puts squarely with the
-operator.
+> **Settled 2026-08-14** by `2026-08-14-notification-and-dispute-loop-design.md` §b: **notice at
+> publication, not before**, carrying the dispute link, sent to the seat's published contact address
+> of record. Pre-publication notice would hand a subject a window to object to an accurate record
+> and turn publication into a negotiation. Notice at publication with a working reply loop gives the
+> subject the thing that matters — prompt, answered contest — without giving anyone a veto.
+
+The original framing, kept because it is the trade-off: every claim names a living person, the
+officials are a known finite set with public email addresses, and a 48-hour "we are about to publish
+this, here is the quote" notice is both ordinary journalistic practice and a strong defence. It also
+slows the pipeline and hands a subject a window to object to accurate records.
 
 **b. Does a claim about a person who is no longer in office publish the same way?**
 

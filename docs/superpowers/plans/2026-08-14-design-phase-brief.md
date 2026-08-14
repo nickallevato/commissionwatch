@@ -16,6 +16,7 @@
 > | 7 | `specs/2026-08-14-server-rendering-design.md` |
 > | 8 | `specs/2026-08-14-vocabulary-and-ui-design.md` |
 > | 9 | `specs/2026-08-14-geography-design.md` |
+> | 10 | `specs/2026-08-14-notification-and-dispute-loop-design.md` |
 >
 > **Build order**, which is not the numbering: §8 vocabulary first (it renames routes, and every
 > later surface names them again), then §4 corpus throughput (there is nothing to distribute yet),
@@ -165,13 +166,37 @@ The payoff beyond the map itself is the query feed: *"anything within 500 metres
 is the most compelling subscription in the roadmap, needs no account, and stores nothing about the
 subscriber.
 
+## 10. Notification and the dispute loop — `…-notification-and-dispute-loop-design.md`
+
+Added by the operator on 2026-08-14: a notification system tied into the dispute system, and — since
+the dispute path's PII handling is already bounded, unpublished and IP-free — a deliberate deferral
+of the subscriber email work in §6.
+
+`services/disputes.ts` currently guarantees a dispute produces "no edit to the record, no public
+statement, **no email to anyone**." So a person who contests a claim about themselves gets silence,
+and the `CW-XXXXXXXX` reference that exists to be quoted in an email has no email to be quoted in.
+
+Transactional mail — one message, to one person, about their own matter — needs no subscriber table
+and no consent regime beyond the act of submitting. It also settles open decision 1's remaining half
+and open decision 2 below.
+
+**The highest-risk defect available in this feature**, named so the plan cannot miss it: a `dispute`
+event routed to a broadcast channel would publish a contest the schema forbids publishing.
+`resolveRoutes` must refuse it, with a wildcard route present in the test fixture.
+
 ---
 
 ## Open decisions the specs must not silently resolve
 
-1. **What a published claim about a named person looks like** — §2 above. Genuinely undecided.
-2. **Whether email happens at all**, given RSS + query-feed + Discord cover delivery with no
-   consent regime and no PII. The operator said yes; worth re-asking once the query feed exists.
+1. ~~**What a published claim about a named person looks like**~~ — **specced in §2.** A claim is
+   addressable but never its own page; the operator approves rendered *bytes* pinned by
+   `render_sha256`; retraction shows the withdrawn text rather than hiding it. Its one remaining
+   sub-question — notice before or after publication — was settled by §10: **at publication, with
+   the dispute link.**
+2. ~~**Whether email happens at all**~~ — **split by §10, and the urgent half is decided.**
+   *Transactional* mail ships (dispute acknowledgement, outcome, subject notice): one message, one
+   person, their own matter, no subscriber list. *Subscription* mail defers, and the re-ask stands
+   for once the query feed exists and there is evidence about what people use.
 3. **`rundown_sheets`** — revive on the claims path, or retire the table. It has no writer since
    the `agents/` deletion.
 4. **Who the product is for.** No one has shown *residents* paying for local meeting alerts; every
