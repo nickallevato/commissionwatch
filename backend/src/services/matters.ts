@@ -273,8 +273,13 @@ export const MAX_LIMIT = 200;
  * aggregate and the timeline are built on top of it, so there is one predicate
  * to get right rather than four — and it is the shared helper, given the
  * qualified column the joined query needs, not a retyped `whereNotNull`.
+ *
+ * Exported for P6's search, which needs the same question — *does this matter
+ * appear on a published meeting?* — as an `EXISTS` rather than as an aggregate.
+ * Search is the one surface a reader can reach without guessing an id, so it is
+ * the last place that should carry a fourth copy of this predicate.
  */
-function publishedAppearances(db: Knex): Knex.QueryBuilder {
+export function publishedAppearances(db: Knex): Knex.QueryBuilder {
   return whereMeetingPublished(
     db("matter_appearances as ma")
       .join("agenda_items as ai", "ai.id", "ma.agenda_item_id")

@@ -33,6 +33,13 @@ import {
  * agenda items and its document text are absent, and the moment the meeting is
  * published all three appear. A test that only proved absence would also pass
  * against a search that returned nothing at all.
+ *
+ * Findings and matters were added later and each has a *different* wall, so
+ * each gets the same treatment twice over. A finding needs an operator's
+ * approval and — only if it has a meeting — a published one. A matter needs one
+ * published appearance. Both directions, for both, including the case a naive
+ * `join meetings` silently deletes: a records-derived finding has no meeting at
+ * all and must still be findable once approved.
  */
 
 const PREFIX = "search-test";
@@ -45,7 +52,13 @@ const PREFIX = "search-test";
  * not a word, and `to_tsvector` stems it to a lexeme nothing else produces.
  */
 const TERM = "quorumcheck";
-const HASHES = [sha256Of(`${PREFIX}-published`), sha256Of(`${PREFIX}-withheld`)];
+const HASHES = [
+  sha256Of(`${PREFIX}-published`),
+  sha256Of(`${PREFIX}-withheld`),
+  // Backs the records-derived finding, which has no meeting and therefore needs
+  // an artifact to satisfy `anomaly_flags_subject_check`.
+  sha256Of(`${PREFIX}-records`),
+];
 
 interface SearchBody {
   data: Array<{
@@ -54,9 +67,12 @@ interface SearchBody {
     title: string;
     snippet: string;
     rank: number;
-    meeting_id?: string;
+    meeting_id?: string | null;
     item_number?: number;
     document_type?: string;
+    flag_type?: string;
+    severity?: string;
+    designator?: string | null;
   }>;
   total: number;
   query: string;
@@ -98,6 +114,72 @@ async function attachDocument(
   return artifactId;
 }
 
+/** One finding. `meetingId` is null for a records-derived flag, which has none. */
+async function createFinding(options: {
+  meetingId: string | null;
+  artifactId?: string;
+  description: string;
+  reviewState: "published" | "held";
+}): Promise<string> {
+  const [row] = await db("anomaly_flags")
+    .insert({
+      meeting_id: options.meetingId,
+      artifact_id: options.artifactId ?? null,
+      flag_type: "quorum_issue",
+      severity: "medium",
+      description: options.description,
+      review_state: options.reviewState,
+    })
+    .returning<Array<{ id: string }>>("id");
+  return row.id;
+}
+
+/**
+ * A matter and its appearances, inserted directly rather than through
+ * `rebuildMatters`.
+ *
+ * The rebuild derives identity from agenda item titles, which would make every
+ * fixture here a statement about the parser as well as about search. What these
+ * tests are about is which meetings the appearances sit on, so that is what the
+ * fixture states.
+ */
+let nextAppearanceItemNumber = 90;
+
+async function createMatter(
+  commissionId: string,
+  options: { designator: string; identityKey: string; title: string; meetingIds: string[] },
+): Promise<string> {
+  const [matter] = await db("matters")
+    .insert({
+      commission_id: commissionId,
+      identity_key: options.identityKey,
+      designator: options.designator,
+      title: options.title,
+    })
+    .returning<Array<{ id: string }>>("id");
+
+  for (const meetingId of options.meetingIds) {
+    // `(meeting_id, item_number)` is unique, and two matters both appearing on
+    // the published meeting collide unless the counter outlives the call.
+    nextAppearanceItemNumber += 1;
+    const [item] = await db("agenda_items")
+      .insert({
+        meeting_id: meetingId,
+        item_number: nextAppearanceItemNumber,
+        title: `${options.designator} as noticed`,
+        description: "Appearance fixture for the matters branch of search.",
+      })
+      .returning<Array<{ id: string }>>("id");
+    await db("matter_appearances").insert({
+      matter_id: matter.id,
+      agenda_item_id: item.id,
+      match_rule: "designator",
+    });
+  }
+
+  return matter.id;
+}
+
 describe("full-text search over the record", () => {
   let publishedMeetingId: string;
   let withheldMeetingId: string;
@@ -107,6 +189,14 @@ describe("full-text search over the record", () => {
   let memberId: string;
   let publishedArtifactId: string;
   let withheldArtifactId: string;
+  let recordsArtifactId: string;
+  let publishedFindingId: string;
+  let heldFindingId: string;
+  let withheldMeetingFindingId: string;
+  let recordsFindingId: string;
+  let publishedMatterId: string;
+  let withheldMatterId: string;
+  let mixedMatterId: string;
 
   before(async () => {
     await cleanupByPrefix(PREFIX);
@@ -185,6 +275,54 @@ describe("full-text search over the record", () => {
       "Withheld agenda packet",
       `The ${TERM} appropriation appears here too, in a record nobody has published.`,
     );
+    recordsArtifactId = await createArtifact(
+      HASHES[2],
+      `https://example.invalid/${HASHES[2]}.pdf`,
+    );
+
+    publishedFindingId = await createFinding({
+      meetingId: publishedMeetingId,
+      description: `The ${TERM} roll call shows four members present for a body of five.`,
+      reviewState: "published",
+    });
+    heldFindingId = await createFinding({
+      meetingId: publishedMeetingId,
+      description: `A ${TERM} narrative waiting on an operator, and naming a person.`,
+      reviewState: "held",
+    });
+    withheldMeetingFindingId = await createFinding({
+      meetingId: withheldMeetingId,
+      description: `The ${TERM} roll call on a meeting nobody has published yet.`,
+      reviewState: "published",
+    });
+    // No meeting: a records-derived flag is about an artifact. Migration 027
+    // made `meeting_id` nullable for exactly this, and it is the row an inner
+    // join to `meetings` would delete without saying so.
+    recordsFindingId = await createFinding({
+      meetingId: null,
+      artifactId: recordsArtifactId,
+      description: `A ${TERM} discrepancy between the released document and the index.`,
+      reviewState: "published",
+    });
+
+    publishedMatterId = await createMatter(fixture.commissionId, {
+      designator: "Ordinance 2145",
+      identityKey: "d:ordinance 2145",
+      title: `Ordinance 2145 — ${TERM} corridor rezone`,
+      meetingIds: [publishedMeetingId],
+    });
+    withheldMatterId = await createMatter(fixture.commissionId, {
+      designator: "Ordinance 3199",
+      identityKey: "d:ordinance 3199",
+      title: `Ordinance 3199 — ${TERM} annexation of the east tract`,
+      meetingIds: [withheldMeetingId],
+    });
+    mixedMatterId = await createMatter(fixture.commissionId, {
+      designator: "Ordinance 4177",
+      identityKey: "d:ordinance 4177",
+      title: `Ordinance 4177 — ${TERM} vacation of an alley`,
+      meetingIds: [publishedMeetingId, withheldMeetingId],
+    });
   });
 
   after(async () => {
@@ -312,7 +450,14 @@ describe("full-text search over the record", () => {
   it("finds a meeting by its venue and discriminates the kinds", async () => {
     const body = await get(TERM, "&limit=100");
     const kinds = new Set(body.data.map((row) => row.kind));
-    assert.deepEqual([...kinds].sort(), ["agenda_item", "document", "meeting", "member"]);
+    assert.deepEqual([...kinds].sort(), [
+      "agenda_item",
+      "document",
+      "finding",
+      "matter",
+      "meeting",
+      "member",
+    ]);
 
     const meeting = body.data.find((row) => row.id === publishedMeetingId);
     assert.ok(meeting);
@@ -325,6 +470,130 @@ describe("full-text search over the record", () => {
     assert.ok(document);
     assert.equal(document.kind, "document");
     assert.equal(document.document_type, "agenda");
+  });
+
+  // -------------------------------------------------------------------------
+  // Findings — a different wall: approval, plus a meeting that may not exist
+  // -------------------------------------------------------------------------
+
+  it("finds a published finding by a word in its description", async () => {
+    const finding = (await get(TERM, "&limit=100")).data.find(
+      (row) => row.id === publishedFindingId,
+    );
+    assert.ok(finding, "an approved finding on a published meeting was not searchable");
+    assert.equal(finding.kind, "finding");
+    assert.equal(finding.flag_type, "quorum_issue");
+    assert.equal(finding.severity, "medium");
+    assert.equal(finding.meeting_id, publishedMeetingId);
+  });
+
+  it("withholds a held finding, and admits it the moment an operator publishes it", async () => {
+    const held = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.equal(
+      held.includes(heldFindingId),
+      false,
+      "a finding awaiting review was searchable — the review queue would be decoration",
+    );
+
+    await db("anomaly_flags").where({ id: heldFindingId }).update({ review_state: "published" });
+    const opened = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.ok(opened.includes(heldFindingId), "approving the finding did not make it findable");
+
+    await db("anomaly_flags").where({ id: heldFindingId }).update({ review_state: "held" });
+    const closed = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.equal(closed.includes(heldFindingId), false);
+  });
+
+  it("withholds an approved finding whose meeting is not published, and admits it when it is", async () => {
+    const hidden = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.equal(
+      hidden.includes(withheldMeetingFindingId),
+      false,
+      "an approved finding leaked the existence of an unpublished meeting",
+    );
+
+    await db("meetings").where({ id: withheldMeetingId }).update({ published_at: new Date() });
+    const opened = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.ok(opened.includes(withheldMeetingFindingId));
+
+    await db("meetings").where({ id: withheldMeetingId }).update({ published_at: null });
+    const closed = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.equal(closed.includes(withheldMeetingFindingId), false);
+  });
+
+  it("finds an approved finding that has no meeting at all", async () => {
+    const finding = (await get(TERM, "&limit=100")).data.find(
+      (row) => row.id === recordsFindingId,
+    );
+    // The case an inner join to `meetings` deletes without saying so.
+    // `anomaly_flags.meeting_id` has been nullable since migration 027, and a
+    // records-derived finding has an artifact instead. It has no meeting to be
+    // published, so requiring one would hide it permanently rather than merely
+    // until review.
+    assert.ok(finding, "a records-derived finding was dropped by the meeting join");
+    assert.equal(finding.meeting_id, null);
+  });
+
+  // -------------------------------------------------------------------------
+  // Matters — a third wall: one published appearance is enough
+  // -------------------------------------------------------------------------
+
+  it("finds a matter by its designator and by a word in its title", async () => {
+    const byDesignator = (await get('"Ordinance 2145"', "&limit=100")).data.find(
+      (row) => row.id === publishedMatterId,
+    );
+    assert.ok(byDesignator, "a matter was not findable by the designator a reader would type");
+    assert.equal(byDesignator.kind, "matter");
+    assert.equal(byDesignator.designator, "Ordinance 2145");
+
+    const byTitle = await get(`${TERM} corridor rezone`, "&limit=100");
+    assert.ok(byTitle.data.some((row) => row.id === publishedMatterId));
+  });
+
+  it("withholds a matter whose every appearance is unpublished, and admits it when one is published", async () => {
+    const hidden = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.equal(
+      hidden.includes(withheldMatterId),
+      false,
+      "a matter reachable only through unpublished meetings was searchable",
+    );
+
+    await db("meetings").where({ id: withheldMeetingId }).update({ published_at: new Date() });
+    const opened = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.ok(opened.includes(withheldMatterId), "publishing its only appearance did not admit it");
+
+    await db("meetings").where({ id: withheldMeetingId }).update({ published_at: null });
+    const closed = (await get(TERM, "&limit=100")).data.map((row) => row.id);
+    assert.equal(closed.includes(withheldMatterId), false);
+  });
+
+  it("returns a matter with published and unpublished appearances once, not once per appearance", async () => {
+    const rows = (await get(TERM, "&limit=100")).data.filter((row) => row.id === mixedMatterId);
+    assert.equal(
+      rows.length,
+      1,
+      "one published appearance is enough, and the EXISTS must not become a join",
+    );
+  });
+
+  it("merges every kind into one ranked page, without a kind crowding out the others", async () => {
+    const body = await get(TERM);
+    assert.ok(body.total <= 20, "the fixture outgrew the default page and this test now lies");
+    assert.equal(body.data.length, body.total);
+
+    const ranks = body.data.map((row) => row.rank);
+    for (let i = 1; i < ranks.length; i += 1) {
+      assert.ok(ranks[i - 1] >= ranks[i], "the merged page is not ordered by rank");
+    }
+
+    assert.deepEqual([...new Set(body.data.map((row) => row.kind))].sort(), [
+      "agenda_item",
+      "document",
+      "finding",
+      "matter",
+      "meeting",
+      "member",
+    ]);
   });
 
   // -------------------------------------------------------------------------

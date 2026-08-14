@@ -1,10 +1,11 @@
 import type { Knex } from "knex";
-import { whereMeetingPublished } from "./publication";
+import { whereFindingPublic, whereMeetingPublished } from "./publication";
+import { publishedAppearances } from "./matters";
 
 /**
  * P6 · Full-text search over the published record.
  *
- * Four kinds of record, searched with PostgreSQL and ranked together. No vendor,
+ * Six kinds of record, searched with PostgreSQL and ranked together. No vendor,
  * no API key, no per-call cost, no dimension decision. The embedding work this
  * replaces was withdrawn (archive-salvage spec § A3) and nothing here reaches
  * for it.
@@ -21,16 +22,27 @@ import { whereMeetingPublished } from "./publication";
  * publishing it makes all three appear. The second half matters: a test that
  * only proves nothing comes back also passes when search is broken.
  *
+ * The wall is not one predicate, and the two kinds added after 035 each need a
+ * different one. A **finding** is public when an operator approved it *and*
+ * either it has no meeting or its meeting is published — `whereFindingPublic`,
+ * borrowed whole from the anomalies router rather than retyped, because the
+ * `orWhereExists` half of it is exactly the clause a naive `join meetings`
+ * gets wrong by silently dropping every records-derived flag. A **matter** is
+ * public when it has at least one appearance on a published meeting —
+ * `publishedAppearances`, the same subquery the matters list and timeline are
+ * built on. Both are asserted here in both directions too.
+ *
  * **The database marks matches; the page renders them.** `ts_headline` is given
  * control characters as delimiters rather than `<b>`. The text being highlighted
  * was scraped out of third-party PDFs and HTML, so returning it as markup for
  * the frontend to inject would be an XSS hole opened for a typographic effect.
  *
- * **Four queries, merged here, rather than one SQL union.** A union would have
- * to align twelve columns by position across four branches and could not use the
- * publication helper at all. Ranking, deduplication and paging are ordinary code
- * instead, testable without a database, and each branch stays a plain indexed
- * lookup.
+ * **Six queries, merged here, rather than one SQL union.** A union would have
+ * to align twelve columns by position across six branches and could not use the
+ * publication helpers at all — which, now that there are three of them saying
+ * three different things, is the whole argument rather than half of it. Ranking,
+ * deduplication and paging are ordinary code instead, testable without a
+ * database, and each branch stays a plain indexed lookup.
  */
 
 /** Delimiters `ts_headline` wraps a match in. Not markup, deliberately. */
@@ -52,7 +64,13 @@ const HEADLINE_OPTIONS = `(
 /** `websearch_to_tsquery`: quoted phrases and -exclusions, no `&` or `|` to learn. */
 const TSQUERY = "websearch_to_tsquery('english', ?)";
 
-export type SearchKind = "agenda_item" | "meeting" | "member" | "document";
+export type SearchKind =
+  | "agenda_item"
+  | "meeting"
+  | "member"
+  | "document"
+  | "finding"
+  | "matter";
 
 /** Fields every kind carries, so a result list renders without narrowing first. */
 interface SearchResultBase {
@@ -101,7 +119,33 @@ export interface DocumentResult extends SearchResultBase {
   sha256: string;
 }
 
-export type SearchResult = AgendaItemResult | MeetingResult | MemberResult | DocumentResult;
+export interface FindingResult extends SearchResultBase {
+  kind: "finding";
+  flag_type: string;
+  severity: string;
+  /**
+   * `null` for a records-derived finding, which is about an artifact and has no
+   * meeting. Not `""` — the column is nullable and the schema is what this type
+   * has to agree with.
+   */
+  meeting_id: string | null;
+}
+
+export interface MatterResult extends SearchResultBase {
+  kind: "matter";
+  /** `null` when the identity came from the title. Display, never the key. */
+  designator: string | null;
+  commission_name: string;
+  jurisdiction_name: string;
+}
+
+export type SearchResult =
+  | AgendaItemResult
+  | MeetingResult
+  | MemberResult
+  | DocumentResult
+  | FindingResult
+  | MatterResult;
 
 export interface SearchResponse {
   data: SearchResult[];
@@ -146,6 +190,11 @@ function num(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** For the columns the schema declares nullable, which `text()` would flatten to `""`. */
+function nullableText(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
 function rowsOf(result: unknown): Array<Record<string, unknown>> {
   return Array.isArray(result) ? (result as Array<Record<string, unknown>>) : [];
 }
@@ -156,7 +205,7 @@ function countOf(row: unknown): number {
 }
 
 // ---------------------------------------------------------------------------
-// The four branches
+// The six branches
 // ---------------------------------------------------------------------------
 
 /**
@@ -224,6 +273,41 @@ function documentsQuery(db: Knex, q: string): Knex.QueryBuilder {
   ).whereRaw(`at.search_vector @@ ${TSQUERY}`, [q]);
 }
 
+/**
+ * Findings — the generated claims an operator has approved.
+ *
+ * The wall here is not `whereMeetingPublished`, and getting that wrong is the
+ * expensive mistake. `whereFindingPublic` adds two conditions: approved, and —
+ * only if the flag has a meeting — a published one. Written as a join to
+ * `meetings` instead it would look right and silently drop every
+ * records-derived flag, because `anomaly_flags.meeting_id` has been nullable
+ * since migration 027 and an inner join deletes nulls. The helper is the
+ * anomalies router's, unchanged, given the alias the joined query uses.
+ */
+function findingsQuery(db: Knex, q: string): Knex.QueryBuilder {
+  return whereFindingPublic(db, db("anomaly_flags as af"), "af").whereRaw(
+    `af.search_vector @@ ${TSQUERY}`,
+    [q],
+  );
+}
+
+/**
+ * Matters — the subject a reader most often arrives already knowing the name of.
+ *
+ * A matter is public when at least one of its appearances is on a published
+ * meeting, which `publishedAppearances` already expresses for the list and the
+ * timeline. Asked as an `EXISTS` rather than joined, because a matter with four
+ * published appearances is still one search result and a join would return it
+ * four times.
+ */
+function mattersQuery(db: Knex, q: string): Knex.QueryBuilder {
+  return db("matters as mt")
+    .join("commissions as c", "c.id", "mt.commission_id")
+    .join("jurisdictions as j", "j.id", "c.jurisdiction_id")
+    .whereRaw(`mt.search_vector @@ ${TSQUERY}`, [q])
+    .whereExists(publishedAppearances(db).select(db.raw("1")).whereRaw("ma.matter_id = mt.id"));
+}
+
 function headline(db: Knex, expression: string, q: string): Knex.Raw {
   return db.raw(`ts_headline('english', ${expression}, ${TSQUERY}, ${HEADLINE_OPTIONS}) as snippet`, [
     q,
@@ -268,72 +352,106 @@ export async function search(db: Knex, options: SearchOptions): Promise<SearchRe
 
   const take = offset + limit;
 
-  const [agendaRows, meetingRows, memberRows, documentRows, counts] = await Promise.all([
-    agendaItemsQuery(db, query)
-      .select(
-        "ai.id as id",
-        "ai.title as title",
-        "ai.item_number as item_number",
-        "m.id as meeting_id",
-        db.raw("m.date::text as meeting_date"),
-        "c.name as commission_name",
-        "j.name as jurisdiction_name",
-        rank(db, "ai.search_vector", query),
-        headline(db, "coalesce(nullif(ai.description, ''), ai.title)", query),
-      )
-      .orderByRaw("rank desc, ai.id asc")
-      .limit(take),
+  const [agendaRows, meetingRows, memberRows, documentRows, findingRows, matterRows, counts] =
+    await Promise.all([
+      agendaItemsQuery(db, query)
+        .select(
+          "ai.id as id",
+          "ai.title as title",
+          "ai.item_number as item_number",
+          "m.id as meeting_id",
+          db.raw("m.date::text as meeting_date"),
+          "c.name as commission_name",
+          "j.name as jurisdiction_name",
+          rank(db, "ai.search_vector", query),
+          headline(db, "coalesce(nullif(ai.description, ''), ai.title)", query),
+        )
+        .orderByRaw("rank desc, ai.id asc")
+        .limit(take),
 
-    meetingsQuery(db, query)
-      .select(
-        "m.id as id",
-        "c.name as title",
-        "m.id as meeting_id",
-        db.raw("m.date::text as meeting_date"),
-        "c.name as commission_name",
-        "j.name as jurisdiction_name",
-        rank(db, "m.search_vector", query),
-        headline(db, "coalesce(m.location, '')", query),
-      )
-      .orderByRaw("rank desc, m.id asc")
-      .limit(take),
+      meetingsQuery(db, query)
+        .select(
+          "m.id as id",
+          "c.name as title",
+          "m.id as meeting_id",
+          db.raw("m.date::text as meeting_date"),
+          "c.name as commission_name",
+          "j.name as jurisdiction_name",
+          rank(db, "m.search_vector", query),
+          headline(db, "coalesce(m.location, '')", query),
+        )
+        .orderByRaw("rank desc, m.id asc")
+        .limit(take),
 
-    membersQuery(db, query)
-      .select(
-        "mem.id as id",
-        "mem.name as title",
-        "j.name as jurisdiction_name",
-        rank(db, "mem.search_vector", query),
-        headline(db, "coalesce(mem.title, '')", query),
-      )
-      .orderByRaw("rank desc, mem.id asc")
-      .limit(take),
+      membersQuery(db, query)
+        .select(
+          "mem.id as id",
+          "mem.name as title",
+          "j.name as jurisdiction_name",
+          rank(db, "mem.search_vector", query),
+          headline(db, "coalesce(mem.title, '')", query),
+        )
+        .orderByRaw("rank desc, mem.id asc")
+        .limit(take),
 
-    documentsQuery(db, query)
-      .select(
-        "at.artifact_id as id",
-        "md.title as title",
-        "md.document_type as document_type",
-        "a.sha256 as sha256",
-        "m.id as meeting_id",
-        db.raw("m.date::text as meeting_date"),
-        "c.name as commission_name",
-        "j.name as jurisdiction_name",
-        rank(db, "at.search_vector", query),
-        headline(db, "at.text", query),
-      )
-      .orderByRaw("rank desc, at.artifact_id asc")
-      .limit(take),
+      documentsQuery(db, query)
+        .select(
+          "at.artifact_id as id",
+          "md.title as title",
+          "md.document_type as document_type",
+          "a.sha256 as sha256",
+          "m.id as meeting_id",
+          db.raw("m.date::text as meeting_date"),
+          "c.name as commission_name",
+          "j.name as jurisdiction_name",
+          rank(db, "at.search_vector", query),
+          headline(db, "at.text", query),
+        )
+        .orderByRaw("rank desc, at.artifact_id asc")
+        .limit(take),
 
-    Promise.all([
-      agendaItemsQuery(db, query).count({ total: "ai.id" }).first(),
-      meetingsQuery(db, query).count({ total: "m.id" }).first(),
-      membersQuery(db, query).count({ total: "mem.id" }).first(),
-      // Distinct, because the list deduplicates an artifact reached through two
-      // documents and a total that counted both would describe a different set.
-      documentsQuery(db, query).countDistinct({ total: "at.artifact_id" }).first(),
-    ]),
-  ]);
+      findingsQuery(db, query)
+        .select(
+          "af.id as id",
+          // The description heads the result and is also what matched. A
+          // finding has no separate title — the sentence is the finding.
+          "af.description as title",
+          "af.flag_type as flag_type",
+          "af.severity as severity",
+          "af.meeting_id as meeting_id",
+          rank(db, "af.search_vector", query),
+          headline(db, "af.description", query),
+        )
+        .orderByRaw("rank desc, af.id asc")
+        .limit(take),
+
+      mattersQuery(db, query)
+        .select(
+          "mt.id as id",
+          "mt.title as title",
+          "mt.designator as designator",
+          "c.name as commission_name",
+          "j.name as jurisdiction_name",
+          rank(db, "mt.search_vector", query),
+          // The title, not the designator: a designator match highlights
+          // nothing a reader has not already typed, and the wording is the part
+          // that tells them which Ordinance 2145 this is.
+          headline(db, "mt.title", query),
+        )
+        .orderByRaw("rank desc, mt.id asc")
+        .limit(take),
+
+      Promise.all([
+        agendaItemsQuery(db, query).count({ total: "ai.id" }).first(),
+        meetingsQuery(db, query).count({ total: "m.id" }).first(),
+        membersQuery(db, query).count({ total: "mem.id" }).first(),
+        // Distinct, because the list deduplicates an artifact reached through two
+        // documents and a total that counted both would describe a different set.
+        documentsQuery(db, query).countDistinct({ total: "at.artifact_id" }).first(),
+        findingsQuery(db, query).count({ total: "af.id" }).first(),
+        mattersQuery(db, query).count({ total: "mt.id" }).first(),
+      ]),
+    ]);
 
   const results: SearchResult[] = [];
   for (const row of rowsOf(agendaRows)) {
@@ -390,6 +508,30 @@ export async function search(db: Knex, options: SearchOptions): Promise<SearchRe
       jurisdiction_name: text(row.jurisdiction_name),
       document_type: text(row.document_type),
       sha256: text(row.sha256),
+    });
+  }
+  for (const row of rowsOf(findingRows)) {
+    results.push({
+      kind: "finding",
+      id: text(row.id),
+      title: text(row.title),
+      snippet: text(row.snippet),
+      rank: num(row.rank),
+      flag_type: text(row.flag_type),
+      severity: text(row.severity),
+      meeting_id: nullableText(row.meeting_id),
+    });
+  }
+  for (const row of rowsOf(matterRows)) {
+    results.push({
+      kind: "matter",
+      id: text(row.id),
+      title: text(row.title),
+      snippet: text(row.snippet),
+      rank: num(row.rank),
+      designator: nullableText(row.designator),
+      commission_name: text(row.commission_name),
+      jurisdiction_name: text(row.jurisdiction_name),
     });
   }
 
