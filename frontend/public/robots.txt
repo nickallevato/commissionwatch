@@ -1,0 +1,45 @@
+# CommissionWatch — https://commissionwatch.bmux.sh
+#
+# This site publishes Montana local-government public records and findings
+# derived from them. Everything under the paths allowed below is public record
+# or our own account of how we handled it. Crawl it.
+#
+# Until 2026-08-14 this file did not exist, and `frontend/nginx.conf`'s SPA
+# fallback answered every request for it with a 200 and the application shell —
+# so a crawler asking for our policy was told, in HTML, that there wasn't one.
+#
+# Contact: see /methodology. If we are crawling you and you would rather we
+# didn't, that page names a human and we stop.
+
+# The retrieval crawlers — these fetch a page because someone asked a question
+# it might answer, and a disallow here removes us from that answer. They are
+# separate user-agents from the training crawlers below, and are the ones that
+# matter for a site whose purpose is answering "what did the commission do".
+User-agent: Googlebot
+User-agent: Bingbot
+User-agent: OAI-SearchBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: PerplexityBot
+User-agent: Amazonbot
+Allow: /
+Disallow: /admin/
+
+# The training crawlers. Also allowed, deliberately: the subject matter is
+# public record that a custodian is obliged to publish, and a transparency
+# project that asks to be excluded from the corpus everyone will read is
+# arguing against its own purpose.
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: CCBot
+User-agent: Google-Extended
+Allow: /
+Disallow: /admin/
+
+User-agent: *
+Allow: /
+Disallow: /admin/
+
+# Generated from the database, and it passes through the same publication wall
+# as every other public surface — an unpublished meeting is absent from it.
+Sitemap: https://commissionwatch.bmux.sh/sitemap.xml
