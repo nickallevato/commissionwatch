@@ -151,7 +151,7 @@ at once.
 1. The `schedule:` declaration stays. It is correct, costs nothing, and starts working the day the
    instance does.
 2. `workflow_dispatch` is the trigger that works today, by one `curl` that answers 204. Anything
-   holding a token can drive it on whatever interval the operator trusts — a Tracker routine is
+   holding a token can drive it on whatever interval the operator trusts — a hosted scheduled agent is
    the established pattern here, and `na/minobi`'s watchdog names it as its own fallback. The exact
    request is in the workflow's header comment.
 3. **`deploy.yml` now runs the identical probe after every deploy.** Not a substitute for a periodic

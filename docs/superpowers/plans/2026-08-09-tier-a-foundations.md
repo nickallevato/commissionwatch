@@ -4,7 +4,7 @@
 
 **Goal:** Land the two small, standalone Tier A items — the `vote_donor_conflict` anomaly flag type, and the OpenFEC campaign-finance client decoupled from the archive's orchestration framework onto a plain Postgres cache.
 
-**Architecture:** Two independent migrations plus one service. The OpenFEC client is a near-verbatim port of `backend/src/services/openfec-client.ts` from `origin/archive/archived-91-commits`, with its three `getMemory`/`setMemory` call sites replaced by a `HttpCache` class backed by a new `http_cache` table. Everything else about the client — pagination types, request spacing, cache-key hashing — is unchanged, because it was already correct.
+**Architecture:** Two independent migrations plus one service. The OpenFEC client is a near-verbatim port of `backend/src/services/openfec-client.ts` from the archived 91-commit branch, with its three `getMemory`/`setMemory` call sites replaced by a `HttpCache` class backed by a new `http_cache` table. Everything else about the client — pagination types, request spacing, cache-key hashing — is unchanged, because it was already correct.
 
 **Tech Stack:** TypeScript, Node 22, Express 5, Knex 3, PostgreSQL 16, `node:test` + `node:assert/strict`, supertest.
 

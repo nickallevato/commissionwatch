@@ -33,7 +33,7 @@
 #
 # What was considered and rejected: turning the instance's cron back on (not
 # ours to make, and out of scope — though it would light up eight workflows at
-# once); a Tracker routine, which is the pattern the workflow header names and
+# once); a hosted scheduled agent, which is the pattern the workflow header names and
 # which would still need this same token and this same request, so the script is
 # that routine's body either way; and hanging the monitor off `push`, which
 # fires here but would mean committing on a timer.

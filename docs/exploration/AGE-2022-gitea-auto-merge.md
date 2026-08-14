@@ -77,7 +77,7 @@ In Gitea admin for the `commissionwatch` repo:
 
 ### Phase 3: Use Auto-Merge
 
-- Developers (or Tracker agents creating PRs) click "Auto-merge" after opening a PR
+- Developers (or agents creating PRs) click "Auto-merge" after opening a PR
 - Or, automate via a one-liner in the PR creation script:
 
 ```bash

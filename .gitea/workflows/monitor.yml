@@ -111,7 +111,7 @@ jobs:
             node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
               backend/src/scripts/external-monitor.ts --run
 
-      # Deliberately no Tracker step, and no POST to /api/internal/events.
+      # Deliberately no issue-tracker step, and no POST to /api/internal/events.
       #
       # The application's own delivery routing is out because a deploy that
       # broke the backend is exactly when the backend cannot be trusted to say
@@ -121,5 +121,5 @@ jobs:
       # script posts straight to DISCORD_WEBHOOK_URL when that secret is
       # configured, and says in the message that it bypassed routing.
       #
-      # Tracker is out for a duller reason: a four-hour outage would file
+      # Ticket filing is out for a duller reason: a four-hour outage would file
       # sixteen identical tickets. The failed run is the durable signal.

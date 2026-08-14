@@ -600,7 +600,7 @@ operator change on the Gitea host — **and it would light up eight workflows at
 **What runs today, given that.** The `schedule:` block stays, because it is correct and starts
 working the day the instance does. `workflow_dispatch` is proven: run 26478 probed production green
 from a `POST …/actions/workflows/monitor.yml/dispatches` that answers 204, and the exact request is
-in the workflow's header comment, so a Tracker routine or anything else holding a token can drive
+in the workflow's header comment, so a hosted scheduled agent or anything else holding a token can drive
 it. And `deploy.yml` now runs the identical probe as its last step — not a substitute for a
 periodic check and not offered as one, but aimed at the failure that actually happened, because the
 existing "Verify the site responds" step proves only that `/api/health` answers 200 while the images
@@ -648,7 +648,7 @@ produced a single run in any of its 82 repositories. The trigger needs no access
 the probe runs on `dh1`, the one runner proven through the Caddy IP gate, so the clock and the
 prober fail independently. And it costs nothing and installs nothing — bash and curl, no account, no
 vendor, no daemon, no new dependency, and **no token in the repository**. Turning the instance's
-cron back on would be better and is not ours to make; a Tracker routine, which the workflow header
+cron back on would be better and is not ours to make; a hosted scheduled agent, which the workflow header
 names as this environment's pattern, would still need this same token and this same request, so the
 script is that routine's body either way; and hanging the monitor off `push` fires here but would
 mean committing on a timer.

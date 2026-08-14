@@ -104,7 +104,7 @@ commissionwatch.bmux.sh {
 - [ ] **Step 2:** Confirm the repo's CI guard passes — it fails the build on any reference to internal hosts:
 
 ```bash
-grep -RniE 'docker-host-01|dh-1\b|ai2|internal-registry|builder\.allevato|gitea\.allevato' caddy/Caddyfile
+grep -RniE 'docker-host-01|dh-1\b|ai2|internal-registry|builder\.internal|gitea\.internal' caddy/Caddyfile
 ```
 
 Expected: no output.

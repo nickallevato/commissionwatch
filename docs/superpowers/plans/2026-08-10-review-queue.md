@@ -2,7 +2,7 @@
 
 > Date: 2026-08-10
 > Spec: `docs/superpowers/specs/2026-08-09-archive-salvage-design.md` §§ B-a, B-b
-> Archive source: `origin/archive/archived-91-commits` — `024_create_approval_workflows.ts`,
+> Archive source: the archived 91-commit branch — `024_create_approval_workflows.ts`,
 > `src/services/approval.ts`, `frontend/src/pages/ApprovalsPage.tsx`
 > Migrations: **038**
 

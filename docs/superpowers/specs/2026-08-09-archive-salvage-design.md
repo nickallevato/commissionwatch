@@ -1,9 +1,9 @@
-# Archive salvage — porting `archive/archived-91-commits` into the deployed lineage
+# Archive salvage — porting the archived 91-commit branch into the deployed lineage
 
 > Date: 2026-08-09
 > Status: approved — Tier A and Tier B resolved 2026-08-09; Tier C specced when scheduled
 > Target branch: `origin/main` (the deployed lineage, sha `30d1b49`)
-> Source branch: `origin/archive/archived-91-commits` (90 commits, never deployed)
+> Source branch: the archived 91-commit branch (90 commits, never deployed)
 
 ## Context
 
@@ -490,6 +490,8 @@ by the operator:
 git reset --hard origin/main && git branch --set-upstream-to=origin/main main
 ```
 
-The 90 archived commits remain on `origin/archive/archived-91-commits` at `16dfac7`.
+The 90 archived commits were removed from the remote when this repository was opened to the
+public, and survive only in the operator's local pre-release bundle. Everything this document
+describes porting has already landed on `main`; the branch was a source, not a dependency.
 The staged workflow edits, both `.dockerignore` files and the loose bundle are backed up
 outside the repository. This blocks implementation, not design.
