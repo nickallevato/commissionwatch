@@ -43,6 +43,7 @@ const STATIC_PATHS = [
   "/public-records",
   "/status",
   "/methodology",
+  "/privacy",
   "/subscribe",
 ] as const;
 

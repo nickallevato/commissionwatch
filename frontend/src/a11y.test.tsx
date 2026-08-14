@@ -68,6 +68,7 @@ const PUBLIC_ROUTES = [
   "/elections",
   "/calendar",
   "/methodology",
+  "/privacy",
   "/public-records",
   "/corrections",
   "/status",

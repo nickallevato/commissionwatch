@@ -12,6 +12,7 @@ import { VotesPage } from "./pages/VotesPage";
 import { ElectionsPage } from "./pages/ElectionsPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
 import { PublicRecordsPage } from "./pages/PublicRecordsPage";
 import { CorrectionsPage } from "./pages/CorrectionsPage";
 import { DisputePage } from "./pages/DisputePage";
@@ -65,6 +66,7 @@ export function App() {
           <Route path="elections" element={<ElectionsPage />} />
           <Route path="anomalies" element={<AnomaliesPage />} />
           <Route path="methodology" element={<MethodologyPage />} />
+          <Route path="privacy" element={<PrivacyPage />} />
           {/* P7. The statutory route the Methodology page promises, as a page.
             Unauthenticated by design: a reader exercising a public right does
             not sign in to this project first. */}

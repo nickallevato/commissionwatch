@@ -197,6 +197,17 @@ export function Layout() {
             >
               Open data
             </Link>
+            {/* The colophon again, and for a reason worth stating: a site that
+              publishes people's names owes a reachable account of what it holds
+              about everyone else. It sits beside the methodology because it is
+              the same kind of document — how this site behaves, not part of the
+              record. */}
+            <Link
+              to="/privacy"
+              className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
+            >
+              Privacy
+            </Link>
           </nav>
         </div>
       </footer>
