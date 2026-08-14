@@ -1,6 +1,11 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-11, after **minutes extraction landing and reading a real meeting** (below
+> Last updated: 2026-08-14, after **closing ten unauthenticated public writes, deleting the dead
+> agent package, opening the crawler door, and landing the regions module** — see
+> § 2026-08-14 immediately below, and the new design of record at
+> `docs/superpowers/specs/2026-08-14-system-roadmap-design.md`. **Production is healthy and serving
+> the fix**; the "PRODUCTION IS DOWN" entry under Known defects is from 2026-08-09 and is stale,
+> annotated there rather than deleted. Before that: **minutes extraction landing and reading a real meeting** (below
 > — 44 cited claims from the 2026-07-14 Bozeman minutes, every one held, and seven defects found by
 > running it rather than reading it). Before that: **the first live Bozeman sweep and the four defects it exposed**
 > (below — a sweep that worked perfectly was recorded `failed`, nothing drained the queue between
@@ -25,6 +30,163 @@
 > Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
 > 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
+
+## 2026-08-14 — the public writes were open, and the site was invisible
+
+Nine commits. The first four are **deployed and verified in production** (sha `9d2825c`); the rest
+are on `main` and ship on the next deploy. `SHARED_STACK_LIVE` is set, so **every push to `main`
+now deploys.**
+
+### ⛔ The defect that mattered — `POST /api/anomalies` was unauthenticated
+
+`backend/src/routes/anomalies.ts` was mounted on the public `/api` surface with **no guard**, and
+passed `alwaysHold: false` unconditionally. `alwaysHold` is what carries *nothing naming a person
+auto-publishes* — the detectors derive it from what they matched. So an anonymous stranger could
+`POST` a `medium`- or `low`-severity finding naming a living official and have it **published under
+this project's byline** at the default `high` threshold, with no operator ever seeing it.
+`DELETE /api/anomalies/:id` was open too, as were both detection routes,
+`/meetings/:id/detect-anomalies`, and all six writes on `members` and `votes` — the two tables
+`/officials/:id` computes its arithmetic from.
+
+Only the Caddy IP allowlist stood in front of it. **This file said "B3 no longer blocks going
+public"; that was written without knowing this.** It is now closed, and verified live:
+`POST /api/anomalies` → 401, `POST /api/members` → 401, `GET /api/anomalies` → 200.
+
+**A hand-entered finding is now held at every severity.** Deriving `alwaysHold` from a roster name
+match was the obvious alternative and is weaker — `members` holds seed fixtures, so matching
+against it is a guard that only looks like one. The honest reason is that a hand-entered finding
+has no detector, no `RULES_VERSION` and no citation behind it, and approval already refuses a
+finding citing no stored artifact.
+
+### `agents/meeting-monitor` is deleted
+
+A second analysis engine writing the same `anomaly_flags` table with none of the discipline: a bare
+insert with no delete-then-insert, so every re-run duplicated every flag, and it never wrote
+`review_state`. Its ~72 tests ran in no CI job. Its untracked `dist/` held three compiled modules
+whose TypeScript source does not exist in this repo, and `npm start` ran them.
+
+A module-by-module salvage check found nothing worth porting. Three latent bugs recorded on the way
+out: `extractors.ts:207`'s `/^\s*[,;:to]+\s*/` is a character class, not the word "to", so "table
+the ordinance" loses its `t`; `extractors.ts:236`'s unanimous-vote `if` has a comment for a body;
+and `generator.ts:76` rendered a **`failed` motion as `deferred`**, publishing a motion the body
+voted down as merely postponed — a "describe the record" violation, and the clearest argument
+against porting any of it.
+
+**One consequence, deliberately left standing:** `rundown_sheets` now has no writer.
+`GET /meetings/:id/rundown` answers 404 with "Rundown not yet generated" and the page degrades
+quietly, so nothing false reaches a reader — but the surface is dormant. Reviving it on the
+reviewed-claims path or retiring the table is an open decision.
+
+### The site was invisible to every crawler, and it was one line
+
+`frontend/nginx.conf`'s `try_files $uri $uri/ /index.html` meant `/robots.txt`, `/sitemap.xml` and
+`/llms.txt` all returned **HTTP 200 with the 525-byte application shell**. Verified against the
+live site before the fix. A crawler asking for our policy was told, in HTML, that there wasn't one.
+
+This matters more than it looks: measured across ~500M fetches, GPTBot fetches JS in 11.5% of
+requests and ClaudeBot in 23.8%, and **neither executes it**. A shell is all they ever see.
+
+- `frontend/public/robots.txt` names the **retrieval** crawlers separately from the training ones —
+  they are different user-agents, and they are the ones that decide whether we appear in an answer.
+  `/admin/` is disallowed for everyone.
+- **`GET /sitemap.xml` goes through the publication wall.** It is the fourth public surface that
+  takes no id, after `/api/anomalies`, `/search` and `/corrections`. Every other public path takes a
+  meeting id, so a reader who cannot guess one cannot reach a withheld record — a document that
+  *lists* URLs hands the ids out. `sitemap.test.ts` asserts it in both directions. An official is
+  listed only with a vote on a published meeting, so the seed fixtures cannot reach it.
+- `lastmod` is the row's `updated_at`, never build time. No `<changefreq>`/`<priority>` — Google
+  ignores both.
+- **The `/api/` nginx location is now `^~`.** nginx tries regex locations *before* plain prefix
+  matches, so the new static-extension rule would otherwise have captured `/api/data/meetings.csv`
+  and 404'd every bulk export off disk. Caught by running the config in a container and curling
+  each path, not by reasoning about matching order.
+
+### The regions module — migration 074
+
+`jurisdiction_access_policy`, one verified dated record per jurisdiction: vendor platform, robots
+posture, crawl delay, concurrency, user agent, ToS notes, `verified_on`/`verified_by`.
+
+**The line it draws: our conduct is ours to state; their statute is theirs and must be read.** So
+this table ships **seeded** and `jurisdiction_records_law` still ships **empty**. The rows here
+record decisions this project made about its own behaviour; a statute is the opposite, and the
+letter generator still refuses rather than inventing a deadline. **Do not blur that line later.**
+
+- **The disclosure is a CHECK, not a habit.** A `vendor_exception` row is illegal unless
+  `disclosure_required` is true. `assessPosture` refuses one a second time in code — the constraint
+  protects the table, the service protects the sweep against a row from a restore or a hand-edited
+  staging database.
+- **No policy means `fetchable: false`.** The absence of a decision must not read as permission to
+  crawl politely; that is how a jurisdiction added by a future migration starts being fetched under
+  a policy no human agreed to.
+- **Staleness never stops a sweep** — it is surfaced for a human. A status set by a clock later
+  reads exactly like a decision somebody made (B-a's expiry reasoning, applied again).
+- **The seed carries the same two rows.** `jurisdiction_access_policy` cascades from
+  `jurisdictions`, which `seeds/001_pilot_data.ts` deletes wholesale — the same collision migration
+  037 hit. Left alone, a seeded dev database refuses to fetch anything, correctly but confusingly.
+
+### The error handler had no tests, and threw on an already-sent response
+
+Zero test references, on the module that decides what an unhandled exception tells a stranger.
+Writing them found two real defects. **It threw inside itself when headers were already sent** — a
+route that had begun writing (a bulk export, the new sitemap) and then threw turned a handled error
+into an unhandled one, and the caller got a truncated body with a 200 on it. It delegates now, as
+Express's own final handler does. And **a `statusCode` outside HTTP's range** raised a RangeError
+that reached the caller as a socket hang-up.
+
+`_next` became `next` and is genuinely used, so **backend lint is 2 warnings → 1** by the parameter
+doing work rather than by the config being weakened. Only `embeddings.ts`'s `_limit` remains.
+
+One harness bug worth recording: a `quiet()` helper chained `.finally()` on supertest's `Test`,
+which is a thenable rather than a real promise and never settles. Every 500 test hung and no other
+did, which pointed at the middleware rather than the helper.
+
+### Accessibility, and the frontend
+
+Six public pages — Members, Meetings, Anomalies, Search, Votes, NotFound — opened with `<h2>` and
+had **no `<h1>` at all**, while four others did it correctly. Fixed, with the level skip below them
+corrected. Focus now moves to the page heading on navigation, chosen over a route announcer because
+an announcer leaves a keyboard user's next Tab back in the nav they just left.
+
+**Automated a11y assertions exist for the first time**, over 15 public routes through the full app.
+`vitest-axe` was tried and dropped — its typings augment a `Vi` namespace Vitest 2 removed, so the
+assertion does not typecheck and the only fixes are a cast or a suppression, both barred. Built on
+`axe-core`'s own typed API instead. It immediately found a genuine violation: `HomePage`'s lead
+column was a `<main>` nested inside `Layout`'s `<main>`. `color-contrast` is the single exclusion,
+with the reason in the code — it needs a canvas jsdom does not have.
+
+`darkMode: "class"` is deleted; nothing ever added the class. Public tables reflow to cards below
+`sm`, carrying explicit ARIA roles because `display: block` strips a table's implicit semantics in
+every browser.
+
+### Counts after 2026-08-14
+
+Backend **1308 tests / 308 suites**, from 1262/299. Frontend **485 / 45**, from 409/41. Both green,
+typecheck clean, backend lint **1 warning / 0 errors**, frontend lint 0 problems.
+
+### Research that did not become code, and should not be re-done
+
+`docs/superpowers/specs/2026-08-14-system-roadmap-design.md` holds the reasoning. Headlines:
+
+- **Firecrawl: skip.** Its differentiator over `fetch`+`cheerio` is the managed anti-bot/proxy
+  layer, which SKILL.md's hard line forbids; it returns markdown derivatives that cannot back a
+  sha256 citation; it fetches as `FirecrawlAgent`, which would make our disclosed robots exception
+  false; and it bills per fetch, discarding the ETag/sha256 dedup this pipeline is built on.
+- **No meeting bot.** `bozeman.granicus.com/videos/{clip_id}/captions.vtt` returns real timestamped
+  WebVTT — 9 of 14 sampled clips, one of them 5,480 lines. The custodian publishes the transcript.
+- **Three adapters cover urban Montana**, not fifty: CivicPlus AgendaCenter, CivicClerk OData
+  (Missoula, open, no auth), Granicus RSS. Two are built. **Neither Bozeman nor Gallatin is a
+  Legistar tenant** (verified 500s; `bozeman.legistar.com` returning 200 is a wildcard trap).
+- **Bozeman's RSS endpoint returns the same discovery data in 79 KB versus the 5.9 MB page we fetch
+  today** — worth shrinking the robots exception to.
+- **MCA 2-6-1006 was rewritten effective 2026-07-01.** The (Temporary) version cited in the P7
+  section below terminated 2026-06-30. Reportedly the replacement leaves local governments with
+  **no numeric deadline at all**, and §2-6-1006(1)(d) means **no right to machine-readable format**.
+  *Reported by research, not verified by a human* — the P7 operator task now also has to confirm
+  which edition it is reading.
+- **Every Bozeman minutes PDF from ~clip 2775 on** opens: *"These meeting minutes were generated
+  with the assistance of artificial intelligence and have not been reviewed, approved, or adopted
+  by the City Commission."* The city ships unreviewed AI summaries as its official record; ours
+  pass a review queue. **Lead with the review gate, never with the AI.**
 
 ## Archive salvage — what has landed
 
@@ -1482,6 +1644,7 @@ Recorded because each is a shape that will recur:
 | Footprint | ~144 MB actual against 1408 MB of declared limits |
 | Deploy dir | `/home/ec2-user/commissionwatch` on the host |
 | Access | Gated at the Caddy layer to `184.166.213.70`. Everyone else gets 403 |
+| Deployed | `9d2825c`, built 2026-08-14T21:36Z. **`SHARED_STACK_LIVE` is set, so every push to `main` deploys.** |
 | Data | **The live host has swept.** `bozeman-granicus` was enabled by the operator on 2026-08-10 and has run twice; 339 meetings discovered, backfilling across sweeps (see above). Nothing is published yet — publication is a separate decision, made at `/admin/sources/:id/meetings` |
 
 ### Ingestion runs — the first public records have been fetched
@@ -1680,7 +1843,12 @@ Ordered by how much each blocks the product being real.
 
 ## Known defects and debt
 
-- **PRODUCTION IS DOWN as of 2026-08-09.** Deployed sha `1fb246f`. The frontend serves; the
+- ~~**PRODUCTION IS DOWN as of 2026-08-09.**~~ **STALE — resolved.** As of 2026-08-14 the
+  site is healthy and serving sha `9d2825c`: `/api/health`, `/api/version` and
+  `/api/meetings` all answer, verified from outside the host. The entry is kept rather than
+  deleted because the cause below — a crash-looping backend deploying as a success — is the
+  defect it taught, and that fix is what makes this line safe to close. Original text
+  follows. Deployed sha `1fb246f`. The frontend serves; the
   backend does not — `/api/health`, `/api/version` and `/api/meetings` all return 502. The host,
   the workflow log and ECR are not reachable from this repo, so the cause is not diagnosed here.
   Everything reproducible locally is green: migrations apply 1→33 on a fresh database, the image
@@ -1804,6 +1972,12 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
 - The database schema is the source of truth for types.
 
 ## Next steps, in order
+
+> **The ordered plan now lives in
+> `docs/superpowers/specs/2026-08-14-system-roadmap-design.md` § 11.** The list below is
+> still accurate about the *operator* tasks (0, 0b, 0c, 1) and about the extraction work
+> (1b–1g); the roadmap supersedes it for everything after that and adds the regions module,
+> the event spine, transcripts, the governor and delivery. Read both.
 
 0. **Populate `jurisdiction_records_law` for Bozeman and Gallatin County.** Twenty minutes of
    reading, and it is the difference between a letter that is right and a letter that is
