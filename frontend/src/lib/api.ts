@@ -30,7 +30,6 @@ export type { PaginatedResponse };
  *   bare object — use `fetchOne`
  *     GET  /health
  *     GET  /meetings/:id             (the row plus `agenda_items`, `documents`)
- *     GET  /meetings/:id/rundown
  *     GET  /members/:id              POST/PUT /members[/:id]
  *     GET  /anomalies/:id            POST /anomalies
  *     POST /anomalies/detect-batch

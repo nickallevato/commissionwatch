@@ -45,7 +45,6 @@ export async function seed(knex: Knex): Promise<void> {
   await knex('votes').del();
   await knex('members').del();
   await knex('anomaly_flags').del();
-  await knex('rundown_sheets').del();
   await knex('meeting_documents').del();
   await knex('agenda_items').del();
   await knex('meetings').del();

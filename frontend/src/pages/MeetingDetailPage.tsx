@@ -5,13 +5,11 @@ import {
   useAgendaItems,
   useMeeting,
   useMeetingDocuments,
-  useRundown,
 } from "@/hooks/useMeetings";
 import { useMeetingVotes } from "@/hooks/useVotes";
 import { useMeetingAnomalies } from "@/hooks/useAnomalies";
 import { useMembers } from "@/hooks/useMembers";
 import { StatusBadge } from "@/components/StatusBadge";
-import { RundownViewer } from "@/components/RundownViewer";
 import { AgendaDiffTimeline } from "@/components/AgendaDiffTimeline";
 import { flagTypeLabels } from "@/components/flag-labels";
 import { SeverityMark } from "@/components/AnomalyBadge";
@@ -174,7 +172,6 @@ export function MeetingDetailPage() {
   const { id = "" } = useParams<{ id: string }>();
   const meetingQuery = useMeeting(id);
   const agendaQuery = useAgendaItems(id);
-  const rundownQuery = useRundown(id);
   const votesQuery = useMeetingVotes(id);
   const anomaliesQuery = useMeetingAnomalies(id);
   const documentsQuery = useMeetingDocuments(id);
@@ -438,12 +435,6 @@ export function MeetingDetailPage() {
         </section>
       )}
 
-      {/* Rundown ------------------------------------------------------- */}
-      {rundownQuery.data && (
-        <div className="mt-10">
-          <RundownViewer rundown={rundownQuery.data} />
-        </div>
-      )}
 
       {/* Agenda -------------------------------------------------------- */}
       <section aria-labelledby="agenda-heading" className="mt-10">

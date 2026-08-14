@@ -7,7 +7,6 @@ import type {
   Jurisdiction,
   Meeting,
   MeetingDocument,
-  RundownSheet,
 } from "@/types";
 
 export interface MeetingsFilter {
@@ -112,14 +111,6 @@ export function useAgendaDiff(meetingId: string) {
       );
       return res.data;
     },
-    enabled: !!meetingId,
-  });
-}
-
-export function useRundown(meetingId: string) {
-  return useQuery({
-    queryKey: ["meetings", meetingId, "rundown"],
-    queryFn: () => fetchOne<RundownSheet>(`/meetings/${meetingId}/rundown`),
     enabled: !!meetingId,
   });
 }

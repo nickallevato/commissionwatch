@@ -143,23 +143,6 @@ export interface DocumentTimeline {
   diffs: AgendaDiffPair[];
 }
 
-export interface RundownSheet {
-  id: string;
-  meeting_id: string;
-  summary: string | null;
-  key_items: RundownKeyItem[] | null;
-  generated_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface RundownKeyItem {
-  title: string;
-  description: string;
-  category?: string;
-  priority?: "high" | "medium" | "low";
-}
-
 /** Postgres `vote_value` enum — see backend/migrations/010_create_votes.ts */
 export type VoteValue = "yes" | "no" | "abstain" | "absent";
 

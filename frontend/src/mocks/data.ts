@@ -4,7 +4,6 @@ import type {
   Meeting,
   AgendaItem,
   MeetingDocument,
-  RundownSheet,
   Member,
   Vote,
   AnomalyFlag,
@@ -27,7 +26,7 @@ import type {
  *
  * They follow a readable convention so cross-references stay auditable:
  *   1xxxxxxx… jurisdictions   6xxxxxxx… anomaly flags
- *   2xxxxxxx… commissions     7xxxxxxx… rundown sheets
+ *   2xxxxxxx… commissions
  *   3xxxxxxx… meetings        8xxxxxxx… members
  *   4xxxxxxx… agenda items    9xxxxxxx… votes
  *   5xxxxxxx… meeting documents
@@ -334,52 +333,6 @@ export const anomalyFlags: AnomalyFlag[] = [
     metadata: { vote_count: 3, dissenting: 0 },
     source: "manual",
     created_at: "2024-12-04T08:00:00Z",
-  },
-];
-
-export const rundownSheets: RundownSheet[] = [
-  {
-    id: "70000000-0000-4000-8000-000000000001",
-    meeting_id: "30000000-0000-4000-8000-000000000001",
-    summary:
-      "Key meeting focused on a significant rezoning request at 1234 Main St that would allow mixed-use development. The site plan for Riverside Commerce Park was also reviewed. Both items drew considerable public interest.",
-    key_items: [
-      {
-        title: "1234 Main St Rezoning",
-        description:
-          "Major rezoning from R-2 to MU-3 for 120-unit mixed-use. Staff recommends approval with conditions. Notable public opposition from adjacent neighborhood.",
-        category: "zoning",
-        priority: "high",
-      },
-      {
-        title: "Riverside Commerce Park",
-        description:
-          "50,000 sqft commercial site plan. Traffic study shows acceptable LOS. Landscaping plan meets code requirements.",
-        category: "development",
-        priority: "medium",
-      },
-    ],
-    generated_at: "2024-12-04T10:00:00Z",
-    created_at: "2024-12-04T10:00:00Z",
-    updated_at: "2024-12-04T10:00:00Z",
-  },
-  {
-    id: "70000000-0000-4000-8000-000000000002",
-    meeting_id: "30000000-0000-4000-8000-000000000003",
-    summary:
-      "Routine meeting with one significant land use change application for the Niwot rural area. The proposal would affect 45 acres of currently agricultural land.",
-    key_items: [
-      {
-        title: "Niwot Rural Area Land Use Change",
-        description:
-          "45-acre agricultural to rural residential conversion. Water rights and access road concerns raised by neighbors.",
-        category: "land-use",
-        priority: "high",
-      },
-    ],
-    generated_at: "2024-12-11T10:00:00Z",
-    created_at: "2024-12-11T10:00:00Z",
-    updated_at: "2024-12-11T10:00:00Z",
   },
 ];
 

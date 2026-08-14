@@ -170,21 +170,41 @@ describe("GET /api/meetings/:id/documents", () => {
   });
 });
 
-describe("GET /api/meetings/:id/rundown", () => {
-  it("returns 404 when no rundown exists", async () => {
-    const res = await request(app)
-      .get(`/api/meetings/${COMPLETED_MEETING_ID}/rundown`)
-      .expect(404);
+/**
+ * The rundown route is gone, and this is the test that says so.
+ *
+ * It used to assert the shape of a 404 body reading "Rundown not yet generated
+ * for this meeting" — an assertion that passed for months while being, in
+ * substance, a lie: `rundown_sheets` lost its only writer when
+ * `agents/meeting-monitor` was deleted, so "not yet" described a thing nothing
+ * in this repository was ever going to produce.
+ *
+ * The premise was invalidated, so the test is rewritten rather than deleted. It
+ * now asserts the route is absent — no handler, so the request falls past the
+ * router to Express's own 404 — and, importantly, that its removal did not take
+ * the sibling routes on the same `:id` with it. A route that vanished by
+ * accident and a route that was retired look identical from one assertion.
+ */
+describe("GET /api/meetings/:id/rundown is retired", () => {
+  it("has no handler for a real meeting", async () => {
+    const res = await request(app).get(`/api/meetings/${COMPLETED_MEETING_ID}/rundown`);
 
-    assert.equal(res.body.error, "Rundown not yet generated for this meeting");
+    assert.equal(res.status, 404);
+    // Express's own not-found, not the router's JSON body: nothing answered.
+    assert.equal(res.body.error, undefined);
   });
 
-  it("returns 404 for non-existent meeting", async () => {
-    const res = await request(app)
-      .get(`/api/meetings/${NON_EXISTENT_ID}/rundown`)
-      .expect(404);
+  it("has no handler for a non-existent meeting either", async () => {
+    const res = await request(app).get(`/api/meetings/${NON_EXISTENT_ID}/rundown`);
 
-    assert.equal(res.body.error, "Meeting not found");
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, undefined);
+  });
+
+  it("left the rest of the meeting routes standing", async () => {
+    await request(app).get(`/api/meetings/${COMPLETED_MEETING_ID}`).expect(200);
+    await request(app).get(`/api/meetings/${COMPLETED_MEETING_ID}/agenda-items`).expect(200);
+    await request(app).get(`/api/meetings/${COMPLETED_MEETING_ID}/documents`).expect(200);
   });
 });
 

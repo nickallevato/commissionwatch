@@ -331,10 +331,17 @@ for svc in $COMPOSE_SERVICES; do
   fi
 done
 
-# The backend probe must hit the backend's own port and path, not the frontend's.
-grep -q 'http://127.0.0.1:3001/api/health' "$HERE/docker-compose.shared.yml" \
-  && ok "backend healthcheck probes its own /api/health on 127.0.0.1" \
-  || bad "backend healthcheck does not probe 127.0.0.1:3001/api/health"
+# The backend probe must hit the backend's own port and path, not the frontend's
+# — and it must hit *liveness*, not readiness.
+#
+# The previous form grepped for `/api/health`, which is a prefix of
+# `/api/health/live` and so kept passing after the endpoint split while no
+# longer asserting anything. The distinction it now enforces is load-bearing:
+# Docker restarts whatever this probe fails, so a readiness probe here turns a
+# database outage into a restart loop on a backend that is working.
+grep -q 'http://127.0.0.1:3001/api/health/live' "$HERE/docker-compose.shared.yml" \
+  && ok "backend healthcheck probes its own /api/health/live on 127.0.0.1" \
+  || bad "backend healthcheck must probe 127.0.0.1:3001/api/health/live, not readiness"
 
 # A healthcheck on the backend achieves nothing if web still waits only for the
 # process. These two changes are a pair and must stay one.

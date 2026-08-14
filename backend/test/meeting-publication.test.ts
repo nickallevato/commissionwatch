@@ -70,7 +70,10 @@ describe("published meetings and the public API", () => {
   it("404s an unpublished meeting on every public route that takes its id", async () => {
     const paths = [
       `/api/meetings/${unpublishedId}`,
-      `/api/meetings/${unpublishedId}/rundown`,
+      // `/rundown` was here until 2026-08-14 and has been removed with the
+      // route. It would still pass — Express's own not-found is also a 404 —
+      // and that is exactly why it had to go: an assertion that cannot fail is
+      // not covering the wall, it is padding the list that describes it.
       `/api/meetings/${unpublishedId}/votes`,
       `/api/meetings/${unpublishedId}/anomalies`,
       `/api/meetings/${unpublishedId}/agenda-items`,

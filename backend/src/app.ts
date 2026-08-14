@@ -21,6 +21,7 @@ import dataRouter from "./routes/data";
 import sitemapRouter from "./routes/sitemap";
 import calendarRouter from "./routes/calendar";
 import adminRouter from "./routes/admin";
+import { publicRateLimit } from "./services/rate-limit";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -71,6 +72,21 @@ const corsDelegate: CorsOptionsDelegate<Request> = (req, callback) => {
 
 app.use(helmet());
 app.use(cors(corsDelegate));
+
+/**
+ * Before the body parsers, after CORS.
+ *
+ * After CORS so a preflight is answered rather than counted — a browser that
+ * cannot read the 429 it got for an OPTIONS request reports a CORS error, which
+ * sends the reader looking in entirely the wrong place. Before `express.json()`
+ * because there is no reason to read and parse a body belonging to a request
+ * that is about to be refused.
+ *
+ * See `services/rate-limit.ts` for the tiers, the numbers, and the note that
+ * this is in-process memory rather than a distributed limit.
+ */
+app.use(publicRateLimit);
+
 app.use(express.json());
 
 app.use("/api/health", healthRouter);

@@ -25,6 +25,8 @@
  * No clock of its own. `now` is passed in, so the tests do not sleep.
  */
 
+import type { NextFunction, Request, RequestHandler, Response } from "express";
+
 export interface RateLimitDecision {
   allowed: boolean;
   /** Whole seconds until the window resets. `0` when allowed. */
@@ -126,3 +128,144 @@ export class FixedWindowLimiter {
     if (oldestKey !== undefined) this.windows.delete(oldestKey);
   }
 }
+
+/* ── The public API's rate limit ─────────────────────────────────────── */
+
+/**
+ * Until 2026-08-14 the only consumer of the class above was the dispute form.
+ * Every read route — the bulk export, full-text search, the whole meeting
+ * archive — was unlimited, and what was actually holding the line was the Caddy
+ * IP allowlist in front of the site. An allowlist is an access control, not a
+ * rate limit, and taking it down is a queued operator task: on the day it comes
+ * off, this file is what is left.
+ *
+ * **This limiter is process memory and nothing else.** It is not shared across
+ * replicas and it is erased by every deploy. That is honest for this deployment
+ * — one backend container, restarted on release — and it is the same trade the
+ * dispute limits already make, but a reader must not mistake it for a
+ * distributed limit. If this product ever runs two backends, this file is a lie
+ * and needs a shared store, not a bigger number.
+ *
+ * Two tiers, because the costs differ by an order of magnitude.
+ */
+
+const WINDOW_MS = 60_000;
+
+/**
+ * `/api/search` runs four full-text queries across a four-table join per
+ * request, and `/api/data/:dataset` streams an entire published dataset. Both
+ * are cheap for the caller and expensive here, which is the exact shape a rate
+ * limit exists for.
+ *
+ * Sixty a minute — one a second sustained — because the legitimate burst on
+ * these routes is real and easy to describe: a researcher pulling the bulk
+ * export takes twelve datasets in two formats, twenty-four requests back to
+ * back, and that person is precisely who the export is for. The limit has to
+ * clear that with room and still refuse a scripted hammering, so it is set a
+ * little over twice the largest honest burst rather than at the smallest number
+ * that would technically work.
+ */
+const EXPENSIVE_LIMIT = 60;
+
+/**
+ * Ten a second for ordinary reads. A meeting page fans out to several endpoints
+ * at once and a reader clicking through the archive will genuinely produce
+ * dozens of requests a minute, so this is set where a human — or a polite
+ * crawler — never reaches it and a loop does immediately.
+ */
+const DEFAULT_LIMIT = 600;
+
+const EXPENSIVE_PREFIXES = ["/api/search", "/api/data"];
+
+/**
+ * Not throttled at all.
+ *
+ * `/api/health` because a limit on a health check means an orchestrator
+ * eventually gets a 429 and reads it as an outage — the probe would have caused
+ * the incident it was watching for.
+ *
+ * `/api/admin` because it is the operator console and every route under it is
+ * already behind `requireOperator`, which is a stronger wall than a counter.
+ * Locking an operator out of their own console during an incident, using a
+ * limit meant for anonymous readers, would be this middleware causing harm in
+ * exactly the situation it is supposed to help. The exemption is by path and
+ * not by session cookie on purpose: a cookie is client-controlled, so trusting
+ * its presence — rather than the guard that validates it — would be a bypass
+ * anyone could type. Operator routes that live outside `/api/admin`
+ * (`/api/ingestion`, the detection triggers on `/api/meetings`) take the
+ * default tier, which no console workflow comes near.
+ */
+const UNLIMITED_PREFIXES = ["/api/health", "/api/admin"];
+
+const expensiveLimiter = new FixedWindowLimiter({
+  limit: EXPENSIVE_LIMIT,
+  windowMs: WINDOW_MS,
+});
+
+const defaultLimiter = new FixedWindowLimiter({
+  limit: DEFAULT_LIMIT,
+  windowMs: WINDOW_MS,
+});
+
+/**
+ * Drops every public window. For tests, and for nothing else — the same seam
+ * `resetDisputeRateLimits` provides, and for the same reason: a limiter that
+ * survives between suites is cross-test state that fails whichever test happens
+ * to run last.
+ */
+export function resetPublicRateLimits(): void {
+  expensiveLimiter.reset();
+  defaultLimiter.reset();
+}
+
+/** Exposed so a test can state the limits it is asserting rather than guess. */
+export const PUBLIC_RATE_LIMITS = {
+  windowMs: WINDOW_MS,
+  expensive: EXPENSIVE_LIMIT,
+  default: DEFAULT_LIMIT,
+} as const;
+
+/** `/api/data` must match `/api/data` and `/api/data/x`, but never `/api/database`. */
+function underPrefix(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+export function limiterFor(path: string): FixedWindowLimiter | null {
+  if (UNLIMITED_PREFIXES.some((prefix) => underPrefix(path, prefix))) return null;
+  if (EXPENSIVE_PREFIXES.some((prefix) => underPrefix(path, prefix))) return expensiveLimiter;
+  return defaultLimiter;
+}
+
+/**
+ * Keyed on `req.ip`, which `app.set("trust proxy", 1)` makes the address Caddy
+ * appended rather than Caddy's own — see the comment in `app.ts`. Without that
+ * setting every reader on the internet would share one bucket and the first
+ * loop of the hour would take the site down for everybody, which is a denial of
+ * service wearing a rate limiter's clothes.
+ */
+export const publicRateLimit: RequestHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => {
+  const limiter = limiterFor(req.path);
+  if (limiter === null) {
+    next();
+    return;
+  }
+
+  const decision = limiter.check(req.ip ?? "unknown");
+  if (decision.allowed) {
+    next();
+    return;
+  }
+
+  // `Retry-After` in seconds, so a client is told when to come back instead of
+  // guessing. A 429 with no such header is an instruction to poll.
+  res.setHeader("Retry-After", String(decision.retryAfterSeconds));
+  res.status(429).json({
+    error: "Too many requests",
+    statusCode: 429,
+    retryAfterSeconds: decision.retryAfterSeconds,
+  });
+};

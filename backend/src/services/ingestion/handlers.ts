@@ -651,17 +651,11 @@ export function createIngestionHandlers(
         // with no meeting is still stored and still citable.
         return { counts: { parse_unattached: 1 } };
       }
-      if (ctx.target.documentType !== undefined && ctx.target.documentType !== "agenda") {
-        // Minutes, packets and attachments are stored and left for the parsers
-        // that understand them. Extracting agenda items from minutes would
-        // manufacture an agenda that was never published.
-        return { counts: { parse_not_agenda: 1 } };
-      }
-
       let text;
       try {
         // PDF or HTML, decided on the bytes: Gallatin's agendas are PDFs and
-        // Bozeman's are HTML, and both are agendas.
+        // Bozeman's are HTML, and both are agendas. Minutes are both too, which
+        // is why this now runs before the document-type check rather than after.
         text = await extractDocumentText(ctx.content, ctx.artifact.contentType);
       } catch (error) {
         if (error instanceof UnsupportedDocumentError) {
@@ -678,6 +672,28 @@ export function createIngestionHandlers(
       // questions and the second one failing must not lose the first. A
       // document whose items cannot be read is still searchable by its text.
       const charsIndexed = await recordArtifactText(db, ctx.artifact.id, text.lines.join("\n"));
+
+      if (ctx.target.documentType !== undefined && ctx.target.documentType !== "agenda") {
+        // Minutes, packets and attachments are left for the parsers that
+        // understand them. Extracting agenda items from minutes would
+        // manufacture an agenda that was never published — that part was always
+        // right, and it is the only thing this branch should ever have decided.
+        //
+        // It used to return *above* `recordArtifactText`, which meant the rule
+        // against inventing agenda items also silently withheld the document's
+        // text from `artifact_texts` — the table `services/search.ts` reads for
+        // document bodies. Every set of minutes, every packet and every
+        // attachment this project has ever fetched was stored, content
+        // addressed, and never indexed. Minutes are the substance of the
+        // record: they are what the extraction pipeline reads to produce claims,
+        // and a reader searching for a phrase said at a meeting got nothing.
+        //
+        // The principle was already stated four lines up and merely applied to
+        // the wrong set of documents. `document_versions` rows are written for
+        // every meeting document at fetch time regardless of type, so the join
+        // to the publication wall was already in place and waiting.
+        return { counts: { parse_not_agenda: 1, artifact_text_chars: charsIndexed } };
+      }
 
       const extraction = extractAgendaItems(text.lines);
       const written = await upsertAgendaItems(db, meetingId, extraction.items);

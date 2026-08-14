@@ -131,7 +131,19 @@ services:
       # before the server listens. Failures inside start_period do not count
       # against `retries`, so a slow migration cannot fail the deploy — but a
       # crash loop still will, which is the entire point of adding this.
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/health"]
+      #
+      # `/api/health/live`, NOT `/api/health`. Liveness answers "is this process
+      # up", readiness answers "can it serve". Docker restarts what this probe
+      # fails, so pointing it at readiness means a database outage restarts a
+      # backend that is working perfectly — repeatedly, for as long as the
+      # outage lasts, which makes the outage longer and destroys the logs that
+      # would explain it. `/api/health` became honest on 2026-08-14 (it used to
+      # answer `status: "ok"` while reporting `database: "disconnected"`), and
+      # that honesty is exactly what would have made this probe dangerous.
+      # The deploy gate in `.gitea/workflows/deploy.yml` still uses
+      # `/api/health`, and should: a deploy that cannot reach its database
+      # must not go green.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/health/live"]
       interval: 15s
       timeout: 5s
       retries: 5

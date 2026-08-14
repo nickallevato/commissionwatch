@@ -5,7 +5,6 @@ import {
   commissions,
   agendaItems,
   meetingDocuments,
-  rundownSheets,
   members,
   votes,
   anomalyFlags,
@@ -133,12 +132,6 @@ export const handlers = [
       .filter((d) => d.meeting_id === params.id)
       .sort(byCreatedAtDesc);
     return list(docs);
-  }),
-
-  http.get("/api/meetings/:id/rundown", ({ params }) => {
-    const rundown = rundownSheets.find((r) => r.meeting_id === params.id);
-    if (!rundown) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json(rundown);
   }),
 
   http.get("/api/meetings/:id/votes", ({ params }) => {

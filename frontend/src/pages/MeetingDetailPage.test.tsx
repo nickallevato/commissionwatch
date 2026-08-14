@@ -277,10 +277,6 @@ function install(scenario: Scenario = {}) {
     http.get("/api/meetings/:id/agenda-items", () => list(agendaItems)),
     http.get("/api/meetings/:id/documents", () => list(documents)),
     http.get("/api/meetings/:id/agenda-diff", () => list([])),
-    http.get(
-      "/api/meetings/:id/rundown",
-      () => new HttpResponse(null, { status: 404, statusText: "Not Found" }),
-    ),
     http.get("/api/votes", () => list(votes)),
     http.get("/api/anomalies", () => list(anomalies)),
     http.get("/api/members", () => list(members)),

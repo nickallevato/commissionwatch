@@ -108,31 +108,12 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-router.get("/:id/rundown", async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
-
-    const meeting = await findPublishedMeeting(db, id);
-    if (!meeting) {
-      res.status(404).json({ error: "Meeting not found", statusCode: 404 });
-      return;
-    }
-
-    const rundown = await db("rundown_sheets").where({ meeting_id: id }).first();
-    if (!rundown) {
-      res.status(404).json({
-        error: "Rundown not yet generated for this meeting",
-        statusCode: 404,
-      });
-      return;
-    }
-
-    res.json(rundown);
-  } catch (err) {
-    next(err);
-  }
-});
+// `GET /:id/rundown` was removed on 2026-08-14. It read `rundown_sheets`, whose
+// only writer left with `agents/meeting-monitor`, so the route could answer
+// nothing but "Rundown not yet generated for this meeting" — a promise about
+// something no code in this repository produces, which is the one kind of claim
+// a transparency project may not make about itself. The claim card is what the
+// table was reaching for; see the published-claim design, §9.
 
 // Operator-only, like every other detection entry point. Detection is a
 // write into `anomaly_flags`.
