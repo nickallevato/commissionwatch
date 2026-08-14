@@ -88,6 +88,13 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
       - MINIO_BUCKET=${MINIO_BUCKET:-meeting-documents}
+      # The origin the sitemap writes into every <loc>. Not a secret, and
+      # deliberately without a fallback in code: a sitemap full of
+      # http://localhost URLs is not a degraded sitemap, it is a wrong one
+      # served with a 200. Unset, /sitemap.xml answers 503 and names this
+      # variable. Compose sets an absent variable to the empty string, so the
+      # default here is the literal origin rather than :- nothing.
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-https://commissionwatch.bmux.sh}
       # Delivery channels (W7). Encrypts webhook URLs at rest.
       - CHANNEL_SECRET_KEY=${CHANNEL_SECRET_KEY}
       - CI_EVENT_TOKEN=${CI_EVENT_TOKEN}
