@@ -57,6 +57,38 @@ export async function seed(knex: Knex): Promise<void> {
     { id: GALLATIN_ID, name: 'Gallatin County', state: 'MT', type: 'county', website_url: 'https://www.gallatinmt.gov' },
   ]);
 
+  // The access policy travels with the jurisdiction, because it is deleted with
+  // it. `jurisdiction_access_policy.jurisdiction_id` cascades from this table,
+  // so the rows migration 074 inserted are gone by the time this seed finishes
+  // — the same collision migration 037 hit and recorded.
+  //
+  // Leaving it at that would be a quiet footgun rather than a missing row: a
+  // region with no policy is deliberately `fetchable: false`, so a developer
+  // who seeds and then sweeps gets nothing, correctly but confusingly. These
+  // are our own stated decisions about our own conduct, not anybody's statute,
+  // so restating them here is recording a decision rather than inventing a
+  // fact. `jurisdiction_records_law` is the opposite and is never seeded.
+  await knex('jurisdiction_access_policy').insert([
+    {
+      jurisdiction_id: BOZEMAN_ID,
+      vendor_platform: 'granicus',
+      robots_posture: 'vendor_exception',
+      disclosure_required: true,
+      crawl_delay_seconds: 10,
+      verified_on: '2026-08-04',
+      notes: 'Operator decision of 2026-08-04, disclosed on the Methodology page.',
+    },
+    {
+      jurisdiction_id: GALLATIN_ID,
+      vendor_platform: 'civicplus',
+      robots_posture: 'respect',
+      disclosure_required: false,
+      crawl_delay_seconds: 2,
+      verified_on: '2026-08-04',
+      notes: 'AgendaCenter is not disallowed, so no exception is needed or claimed.',
+    },
+  ]);
+
   await knex('commissions').insert([
     { id: BOZEMAN_COMMISSION_ID, jurisdiction_id: BOZEMAN_ID, name: 'Bozeman City Commission', description: 'Governing body for the City of Bozeman', meeting_schedule: '1st and 3rd Monday at 6:00 PM' },
     { id: GALLATIN_COMMISSION_ID, jurisdiction_id: GALLATIN_ID, name: 'Gallatin County Commission', description: 'Governing body for Gallatin County', meeting_schedule: 'Every Tuesday at 9:00 AM' },
