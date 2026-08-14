@@ -18,6 +18,7 @@ import searchRouter from "./routes/search";
 import publicRecordsRouter from "./routes/public-records";
 import correctionsRouter from "./routes/corrections";
 import dataRouter from "./routes/data";
+import sitemapRouter from "./routes/sitemap";
 import calendarRouter from "./routes/calendar";
 import adminRouter from "./routes/admin";
 import { errorHandler } from "./middleware/errorHandler";
@@ -96,6 +97,10 @@ app.use("/api/corrections", correctionsRouter);
 // routes through services/publication.ts, and data-export.test.ts walks all ten
 // datasets in both directions.
 app.use("/api/data", dataRouter);
+
+// Site root, not /api — a crawler looks for /sitemap.xml and nowhere else.
+// `frontend/nginx.conf` has an exact-match location proxying it here.
+app.use("/sitemap.xml", sitemapRouter);
 // The public meeting calendar and the per-jurisdiction iCal feeds. Published
 // meetings only; a meeting with no published time is an all-day event rather
 // than an appointment at midnight.
