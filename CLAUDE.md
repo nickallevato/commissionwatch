@@ -32,7 +32,8 @@ the stack for months.
 | Storage | MinIO (S3-compatible) |
 | Frontend | React + Vite + Tailwind (**not** Next.js) |
 | Queue | Postgres `SKIP LOCKED` — no Redis |
-| Agents | `agents/meeting-monitor` — scraper, parser, anomaly detectors, rundown generator |
+| Ingestion | `backend/src/services/ingestion/` — source adapters, queue, worker, scheduler |
+| Detection | `backend/src/services/anomaly-detection.ts` and `agenda-diff.ts` |
 | CI/CD | **Gitea Actions only** — `.gitea/workflows/deploy.yml` |
 | Deploy | Docker Compose behind Caddy, images to ECR, shipped over **SSM Run Command** — never SSH |
 | Domain | `commissionwatch.bmux.sh` |
@@ -40,12 +41,22 @@ the stack for months.
 ## Layout
 
 ```
-backend/    Express API, migrations, seeds
+backend/    Express API, migrations, seeds, ingestion adapters, detectors
 frontend/   React SPA
-agents/     Watchdog agents
 deploy/     Caddy + compose for production
 docs/       specs, plans, roadmap
 ```
+
+There is no `agents/` directory. There was one — `agents/meeting-monitor`, a standalone vitest
+package with its own scraper, parser, detectors and rundown generator — and it was deleted on
+2026-08-14. It had become a second, worse analysis engine writing to the same `anomaly_flags`
+table: a bare insert that duplicated every flag on re-run and never set `review_state`, against a
+backend version that is transactional, resolves review state, and keeps a `detection_runs` ledger.
+Its tests ran in no CI job, its scraper still pointed at the Akamai-blocked `bozeman.net`, and its
+gitignored `dist/` held compiled modules whose source no longer existed. The working code had
+already migrated: adapters to `backend/src/services/ingestion/adapters/` with contract suites in
+`backend/test/adapters/`, detection to `backend/src/services/anomaly-detection.ts` and
+`agenda-diff.ts`. A watchdog agent here is a service in `backend/`, not a separate package.
 
 ## Commands
 
