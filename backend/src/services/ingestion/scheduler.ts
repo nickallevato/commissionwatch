@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Knex } from "knex";
 import type { AdapterRegistry } from "./adapters/registry";
 import { errorMessage, IngestionQueue } from "./queue";
+import { rebuildMatters } from "../matters";
 import type { IngestionWorker } from "./worker";
 
 /**
@@ -522,15 +523,50 @@ export class SourceScheduler {
       }
     }
 
+    let matterError: string | null = null;
     const counts = await this.readCounts(runId);
     if (outstanding > 0) counts.outstanding = outstanding;
     // Always recorded, including zero: "this sweep completed no jobs" is a fact
     // worth being able to read, and its absence would be indistinguishable from
     // an older run written before this column meant anything.
     counts.processed = processed;
+
+    // Matters are a projection of `agenda_items`, and this is where they are
+    // brought up to date.
+    //
+    // **Once per sweep, not once per parse.** `rebuildMatters` scans the whole
+    // of `agenda_items` in date order, deliberately: that ordering is what makes
+    // a matter's title the *earliest* wording rather than whichever document
+    // happened to be parsed first. Calling it per document would cost a full
+    // scan per document — quadratic across a sweep that fetches hundreds — and
+    // scoping it to one meeting to avoid that would give up the determinism the
+    // full scan buys. A sweep is the natural boundary: many documents in, one
+    // projection out.
+    //
+    // Skipped when the sweep wrote no agenda items, which is the common case for
+    // a re-sweep that found nothing changed. An unchanged corpus projects to an
+    // unchanged set of matters, so the scan would be pure cost.
+    if ((counts.agenda_items_written ?? 0) > 0) {
+      try {
+        const rebuilt = await rebuildMatters(this.db);
+        counts.matters = rebuilt.matters;
+        counts.matter_appearances = rebuilt.appearances;
+      } catch (error) {
+        // Recorded, never swallowed — but it does not make the sweep `failed`,
+        // and `threw` is deliberately left alone. The records reached the
+        // database; only the view over them is stale, and telling an operator
+        // their ingestion failed when it succeeded would send them looking in
+        // the wrong place. The next sweep that writes an item rebuilds it.
+        matterError = `matters projection failed — ${errorMessage(error)}`;
+        this.logger.error(`SourceScheduler: sweep ${runId} of ${sourceId} ${matterError}`);
+      }
+    }
+
     const jobErrors = await this.readJobErrors(runId);
     const status = classifyRun(counts, threw !== null, outstanding, processed);
-    const errorText = [threw, ...jobErrors].filter((value): value is string => value !== null && value !== "");
+    const errorText = [threw, ...jobErrors, matterError].filter(
+      (value): value is string => value !== null && value !== "",
+    );
 
     await this.db("ingestion_runs")
       .where({ id: runId })

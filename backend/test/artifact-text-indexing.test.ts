@@ -25,6 +25,7 @@ import { IngestionQueue } from "../src/services/ingestion/queue";
 import { registerSource } from "../src/services/ingestion/registration";
 import { SourceScheduler } from "../src/services/ingestion/scheduler";
 import { IngestionWorker } from "../src/services/ingestion/worker";
+import { rebuildMatters } from "../src/services/matters";
 
 /**
  * Minutes are indexed, and the archive that was fetched before they were can be
@@ -194,6 +195,15 @@ beforeEach(async () => {
     await db("meetings").where({ commission_id: commission.id }).del();
   }
   await db("artifacts").where({ sha256: sha256Hex(DOCUMENT_PDF) }).del();
+  // Deleting the meetings above cascades their agenda items and the appearance
+  // links, but not the `matters` rows themselves — nothing cascades to a
+  // projection, and no rebuild runs between one test and the next to notice.
+  // `rebuildMatters` does prune (see the pruning test below); it simply has not
+  // been asked to yet at this point, so the rows are cleared here rather than
+  // left to make the next test's precondition lie.
+  await db("matters")
+    .whereIn("commission_id", db("commissions").where({ jurisdiction_id: jurisdictionId }).select("id"))
+    .del();
   artifacts = new MemoryArtifacts();
 });
 
@@ -248,6 +258,106 @@ describe("parse indexes document text regardless of document kind", () => {
       0,
       "minutes must never become an agenda that was never published",
     );
+  });
+});
+
+/**
+ * Matters are a projection of `agenda_items`, and a projection nothing calls is
+ * an empty table. `rebuildMatters` shipped exported and wired to nothing; this
+ * asserts the sweep is what calls it, and that the call is real rather than a
+ * function reference nobody reaches.
+ */
+describe("a sweep projects matters from the agenda items it wrote", () => {
+  async function mattersForFixture(): Promise<Array<{ title: string; designator: string | null }>> {
+    const rows = await db("matters as mt")
+      .join("commissions as c", "c.id", "mt.commission_id")
+      .where("c.jurisdiction_id", jurisdictionId)
+      .select<Array<{ title: string; designator: string | null }>>("mt.title", "mt.designator");
+    return rows;
+  }
+
+  it("creates matters for the agenda it just parsed", async () => {
+    assert.equal((await mattersForFixture()).length, 0, "precondition: no matters yet");
+
+    await sweep([
+      meetingRef("06022025-2", "2025-06-02", [
+        documentRef(AGENDA_URL, "agenda", "June 2 Agenda"),
+      ]),
+    ]);
+
+    const matters = await mattersForFixture();
+    assert.ok(
+      matters.length > 0,
+      "the sweep must project matters; rebuildMatters is wired into sweepLocked",
+    );
+
+    // Every matter must be reachable from a real appearance. A matter with no
+    // link is a row nothing explains.
+    const orphans = await db("matters as mt")
+      .join("commissions as c", "c.id", "mt.commission_id")
+      .leftJoin("matter_appearances as ma", "ma.matter_id", "mt.id")
+      .where("c.jurisdiction_id", jurisdictionId)
+      .whereNull("ma.matter_id")
+      .count<{ count: string }[]>();
+    assert.equal(Number(orphans[0].count), 0, "no matter may exist without an appearance");
+  });
+
+  /**
+   * A rebuild that only ever adds is not a rebuild.
+   *
+   * Nothing cascades from `meetings` to `matters` — a matter is a projection,
+   * not a child record — so the only thing that can remove one is the next
+   * rebuild noticing it has no appearances left. That path is easy to lose in a
+   * refactor and impossible to see from the outside, because a stale matter
+   * still renders as an ordinary row with an empty timeline.
+   *
+   * The realistic trigger is not a deleted meeting: `upsertAgendaItems` merges
+   * on `(meeting_id, item_number)`, so a county revising an agenda can retitle
+   * an item, which moves its appearance to a different matter and can leave the
+   * old one with nothing.
+   */
+  it("prunes a matter whose last appearance is gone", async () => {
+    await sweep([
+      meetingRef("06022025-2", "2025-06-02", [
+        documentRef(AGENDA_URL, "agenda", "June 2 Agenda"),
+      ]),
+    ]);
+    assert.ok((await mattersForFixture()).length > 0, "precondition: matters exist");
+
+    // Take the agenda items away and rebuild. Nothing else changes.
+    await db("agenda_items")
+      .whereIn(
+        "meeting_id",
+        db("meetings")
+          .join("commissions as c", "c.id", "meetings.commission_id")
+          .where("c.jurisdiction_id", jurisdictionId)
+          .select("meetings.id"),
+      )
+      .del();
+    await rebuildMatters(db);
+
+    assert.equal(
+      (await mattersForFixture()).length,
+      0,
+      "a matter with no appearances must not survive a rebuild",
+    );
+  });
+
+  it("does not accumulate matters when the same agenda is swept twice", async () => {
+    const meetings = [
+      meetingRef("06022025-2", "2025-06-02", [
+        documentRef(AGENDA_URL, "agenda", "June 2 Agenda"),
+      ]),
+    ];
+    await sweep(meetings);
+    const first = (await mattersForFixture()).length;
+
+    await sweep(meetings);
+    const second = (await mattersForFixture()).length;
+
+    // Identity is the content, so a re-sweep finds the rows that already say
+    // the same thing rather than writing new ones.
+    assert.equal(second, first, "a repeated sweep must project the same matters");
   });
 });
 
