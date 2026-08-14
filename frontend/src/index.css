@@ -119,6 +119,23 @@
     color: var(--cw-muted);
   }
 
+  /*
+   * `inline-block` above is right for a metadata key or a strap item, and
+   * wrong for the thing this class is named after. A <th> defaults to
+   * `display: table-cell`; overriding that pulls the cell out of the table's
+   * column layout, so every header row rendered as a run of wrapping inline
+   * text — "SOURCE STATE / RECORDS COLLECTED / LAST SUCCESS" on three lines —
+   * while <tbody> below it still aligned to real columns. Live on the public
+   * status page and the home page, and on six admin tables.
+   *
+   * Scoped to cells rather than dropped from `.label-sm`, because 245 uses of
+   * this class are not in a table and do want inline-block.
+   */
+  th.label-sm,
+  td.label-sm {
+    display: table-cell;
+  }
+
   /* 1px ink rule. Put it on an <hr> or an empty <div>; it draws on top. */
   .rule-hi {
     border: 0;

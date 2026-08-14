@@ -17,6 +17,13 @@ sold to government.
 
 **Live:** https://commissionwatch.bmux.sh
 
+[![A published meeting record: the 14 July 2026 Bozeman City Commission agenda, with 36 agenda items, the stored agenda and minutes PDFs, and a "Contest this record" link](docs/images/meeting-record.png)](https://commissionwatch.bmux.sh/meetings/f2181cfb-ab44-4436-b707-7448ccbd5966)
+
+<sub>**A published meeting.** The real 14 July 2026 Bozeman agenda, the stored PDFs it was read
+out of, and *Contest this record* on every page. The red line at the top is the site saying what it
+does **not** know — this meeting's jurisdiction was never recorded, and a gap gets labelled rather
+than quietly filled. [See it live →](https://commissionwatch.bmux.sh/meetings/f2181cfb-ab44-4436-b707-7448ccbd5966)</sub>
+
 ### Why it works this way
 
 Anyone can write software that summarises a city council meeting. The hard part is being *believed*
@@ -68,6 +75,14 @@ These are not style preferences. Breaking one is a defect, and each has a test.
 - **Failures are disclosed, not swallowed.** Every failure lands in a database row with its error text, and `/status` reads from those rows. A transparency project that silently stops collecting is worse than one that says so.
 - **Detection logic applies identically to every entity class.** No detector may filter on entity type to select targets.
 - **The database schema is the source of truth for types.**
+
+[![The collection status page: every registered source with its state, records collected, last successful sweep and silence watch — including one marked Failing and two marked Disabled with the reason why](docs/images/collection-status.png)](https://commissionwatch.bmux.sh/status)
+
+<sub>**"Failures are disclosed, not swallowed" is a page, not a promise.** `/status` reads every
+figure from the ingestion tables at load time — nothing on it is maintained by hand. A source that
+is failing says so in red, a source that is switched off says *why* in full, and a source that has
+gone quiet past its own expected interval is marked suspect rather than left looking calm.
+[See it live →](https://commissionwatch.bmux.sh/status)</sub>
 
 ---
 
@@ -188,6 +203,11 @@ wall.
 ---
 
 ## The data
+
+[![The open data page: three layers licensed separately — the compiled dataset under CC BY 4.0, the code under MIT, and the government documents with no licence asserted](docs/images/open-data.png)](https://commissionwatch.bmux.sh/data)
+
+<sub>**"Here is what the record shows" is only a checkable claim if you can get the record.**
+[See it live →](https://commissionwatch.bmux.sh/data)</sub>
 
 `/data` describes the dataset, its schema, its licence, how often it changes, and what is withheld
 and why. The export is public, unauthenticated, and needs no key:
