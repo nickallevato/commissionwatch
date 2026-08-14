@@ -7,6 +7,7 @@ import {
 } from "../services/publication";
 import { loadPolicy, resolveReviewState } from "../services/review/policy";
 import { detectAnomalies, detectAnomaliesBatch } from "../services/anomaly-detection";
+import { requireOperator } from "../middleware/requireOperator";
 
 const router = Router();
 
@@ -85,7 +86,9 @@ interface DetectBatchBody {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-router.post("/detect-batch", async (req: Request<unknown, unknown, DetectBatchBody>, res, next) => {
+// Operator-only: detection is a write. It inserts into `anomaly_flags` and
+// costs an unbounded amount of database work chosen by the caller.
+router.post("/detect-batch", requireOperator, async (req: Request<unknown, unknown, DetectBatchBody>, res, next) => {
   try {
     const { commission_id, date_from, date_to, limit } = req.body;
 
@@ -130,7 +133,7 @@ interface CreateAnomalyBody {
   metadata?: Record<string, unknown> | null;
 }
 
-router.post("/", async (req: Request<unknown, unknown, CreateAnomalyBody>, res, next) => {
+router.post("/", requireOperator, async (req: Request<unknown, unknown, CreateAnomalyBody>, res, next) => {
   try {
     const { meeting_id, flag_type, description, severity, metadata } = req.body;
 
@@ -146,11 +149,18 @@ router.post("/", async (req: Request<unknown, unknown, CreateAnomalyBody>, res, 
     const meeting = await findPublishedMeeting(db, meeting_id);
     if (!meeting) throw badRequest("Meeting not found");
 
-    // The threshold applies here too. This route is public and unauthenticated,
-    // and before B-a a hand-written flag at any severity published the instant
-    // it was posted. A finding entered by hand is still a finding.
+    // A hand-entered finding is always held, at every severity, and the
+    // threshold can only agree with that. Two reasons, and either alone is
+    // enough. `alwaysHold` is what carries "nothing naming a person
+    // auto-publishes" — the detectors derive it from what they matched, and a
+    // route that takes free text from a caller has matched nothing and so
+    // cannot derive it. And a hand-entered finding has no detector, no rule
+    // version and no citation behind it: `approval` refuses a finding that
+    // cites no stored artifact, and that refusal is the whole gate. Passing
+    // `false` here made the route the one path in the product that could put
+    // an unsourced sentence about a named official on the public site.
     const policy = await loadPolicy(db);
-    const review_state = resolveReviewState({ severity, alwaysHold: false }, policy);
+    const review_state = resolveReviewState({ severity, alwaysHold: true }, policy);
 
     const [created] = await db("anomaly_flags")
       .insert({
@@ -170,7 +180,7 @@ router.post("/", async (req: Request<unknown, unknown, CreateAnomalyBody>, res, 
   }
 });
 
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requireOperator, async (req: Request<{ id: string }>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid anomaly flag ID format");
@@ -209,7 +219,7 @@ router.get("/meeting/:id", async (req, res, next) => {
   }
 });
 
-router.post("/meeting/:id/detect", async (req, res, next) => {
+router.post("/meeting/:id/detect", requireOperator, async (req: Request<{ id: string }>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");

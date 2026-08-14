@@ -1,5 +1,6 @@
 import { Router, Request } from "express";
 import db from "../config/database";
+import { requireOperator } from "../middleware/requireOperator";
 import { loadDocumentTimelines } from "../services/agenda-diff";
 import { detectAnomalies } from "../services/anomaly-detection";
 import {
@@ -133,7 +134,9 @@ router.get("/:id/rundown", async (req, res, next) => {
   }
 });
 
-router.post("/:id/detect-anomalies", async (req, res, next) => {
+// Operator-only, like every other detection entry point. Detection is a
+// write into `anomaly_flags`.
+router.post("/:id/detect-anomalies", requireOperator, async (req: Request<{ id: string }>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");

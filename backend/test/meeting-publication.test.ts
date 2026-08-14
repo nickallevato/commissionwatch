@@ -86,16 +86,49 @@ describe("published meetings and the public API", () => {
     }
   });
 
-  it("404s the public write-ish routes for an unpublished meeting too", async () => {
-    await request(app).post(`/api/meetings/${unpublishedId}/detect-anomalies`).expect(404);
-    await request(app).post(`/api/anomalies/meeting/${unpublishedId}/detect`).expect(404);
+  // These three used to be public, and this test used to assert they 404 on an
+  // unpublished meeting. They are operator-only now, so there are two walls to
+  // prove and the old assertion could no longer distinguish them: a 404 from
+  // the publication wall and a 401 from the guard look identical from outside
+  // if you only check that the call failed.
+  //
+  // The guard is asserted first, and deliberately fires *before* the meeting is
+  // resolved. Answering 404 to an unauthenticated caller would make the route
+  // an oracle for which meeting ids exist — the same reasoning that makes an
+  // unpublished meeting 404 rather than 403 on the public reads.
+  it("401s the detection and manual-flag routes for an unauthenticated caller", async () => {
+    await request(app).post(`/api/meetings/${unpublishedId}/detect-anomalies`).expect(401);
+    await request(app).post(`/api/anomalies/meeting/${unpublishedId}/detect`).expect(401);
+    await request(app)
+      .post("/api/anomalies")
+      .send({
+        meeting_id: unpublishedId,
+        flag_type: "missing_minutes",
+        description: "x",
+        severity: "low",
+      })
+      .expect(401);
+  });
+
+  it("404s them for an operator too, because the meeting is unpublished", async () => {
+    await request(app)
+      .post(`/api/meetings/${unpublishedId}/detect-anomalies`)
+      .set("Cookie", cookie)
+      .expect(404);
+    await request(app)
+      .post(`/api/anomalies/meeting/${unpublishedId}/detect`)
+      .set("Cookie", cookie)
+      .expect(404);
     // The manual-flag route validates the meeting the same way, and answers 400.
-    const res = await request(app).post("/api/anomalies").send({
-      meeting_id: unpublishedId,
-      flag_type: "missing_minutes",
-      description: "x",
-      severity: 3,
-    });
+    const res = await request(app)
+      .post("/api/anomalies")
+      .set("Cookie", cookie)
+      .send({
+        meeting_id: unpublishedId,
+        flag_type: "missing_minutes",
+        description: "x",
+        severity: "low",
+      });
     assert.equal(res.status, 400);
   });
 

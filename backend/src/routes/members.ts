@@ -1,5 +1,6 @@
 import { Router, Request } from "express";
 import db from "../config/database";
+import { requireOperator } from "../middleware/requireOperator";
 
 const router = Router();
 
@@ -64,7 +65,9 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-router.post("/", async (req, res, next) => {
+// The roster is the record `/officials/:id` computes its arithmetic from, and
+// a member row is a named living person. Writing one is an operator act.
+router.post("/", requireOperator, async (req, res, next) => {
   try {
     const { jurisdiction_id, name, title, term_start, term_end, email, party } = req.body;
 
@@ -85,7 +88,7 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-router.put("/:id", async (req, res, next) => {
+router.put("/:id", requireOperator, async (req: Request<{ id: string }>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid member ID format");
@@ -120,7 +123,7 @@ router.put("/:id", async (req, res, next) => {
   }
 });
 
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requireOperator, async (req: Request<{ id: string }>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) throw badRequest("Invalid member ID format");

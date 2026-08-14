@@ -1,8 +1,9 @@
-import { describe, it, after } from "node:test";
+import { describe, it, after, before } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
+import { signInOperator } from "./helpers/pressroom";
 
 const COMPLETED_MEETING_ID = "f6a7b8c9-d0e1-2345-fabc-456789012345";
 const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
@@ -21,6 +22,17 @@ const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
  */
 after(async () => {
   await db("anomaly_flags").where({ meeting_id: COMPLETED_MEETING_ID }).del();
+});
+
+/**
+ * Every write on these routers is operator-only. They were unauthenticated
+ * until the guard landed, which is why these fixtures used to build
+ * themselves with a bare POST.
+ */
+let operatorCookie: string;
+
+before(async () => {
+  operatorCookie = await signInOperator("anomalies@test.invalid", "Anomalies Suite");
 });
 
 describe("GET /api/anomalies", () => {
@@ -62,6 +74,7 @@ describe("POST /api/anomalies", () => {
   it("creates an anomaly flag", async () => {
     const res = await request(app)
       .post("/api/anomalies")
+      .set("Cookie", operatorCookie)
       .send({
         meeting_id: COMPLETED_MEETING_ID,
         flag_type: "emergency_session",
@@ -78,6 +91,7 @@ describe("POST /api/anomalies", () => {
   it("rejects invalid flag_type", async () => {
     await request(app)
       .post("/api/anomalies")
+      .set("Cookie", operatorCookie)
       .send({
         meeting_id: COMPLETED_MEETING_ID,
         flag_type: "not_real",
@@ -89,6 +103,7 @@ describe("POST /api/anomalies", () => {
   it("rejects missing meeting_id", async () => {
     await request(app)
       .post("/api/anomalies")
+      .set("Cookie", operatorCookie)
       .send({
         flag_type: "emergency_session",
         severity: "high",
@@ -101,6 +116,7 @@ describe("POST /api/meetings/:id/detect-anomalies", () => {
   it("runs anomaly detection on a meeting", async () => {
     const res = await request(app)
       .post(`/api/meetings/${COMPLETED_MEETING_ID}/detect-anomalies`)
+      .set("Cookie", operatorCookie)
       .expect(200);
 
     assert.ok(Array.isArray(res.body.data));
@@ -110,6 +126,7 @@ describe("POST /api/meetings/:id/detect-anomalies", () => {
   it("returns 404 for non-existent meeting", async () => {
     await request(app)
       .post(`/api/meetings/${NON_EXISTENT_ID}/detect-anomalies`)
+      .set("Cookie", operatorCookie)
       .expect(404);
   });
 });
@@ -133,6 +150,7 @@ describe("DELETE /api/anomalies/:id", () => {
   it("returns 404 for non-existent anomaly", async () => {
     await request(app)
       .delete(`/api/anomalies/${NON_EXISTENT_ID}`)
+      .set("Cookie", operatorCookie)
       .expect(404);
   });
 });
@@ -141,6 +159,7 @@ describe("POST /api/anomalies/detect-batch", () => {
   it("runs batch detection and returns summary", async () => {
     const res = await request(app)
       .post("/api/anomalies/detect-batch")
+      .set("Cookie", operatorCookie)
       .send({})
       .expect(200);
 
@@ -152,6 +171,7 @@ describe("POST /api/anomalies/detect-batch", () => {
   it("accepts date filters", async () => {
     const res = await request(app)
       .post("/api/anomalies/detect-batch")
+      .set("Cookie", operatorCookie)
       .send({ date_from: "2020-01-01", date_to: "2030-12-31" })
       .expect(200);
 
@@ -161,6 +181,7 @@ describe("POST /api/anomalies/detect-batch", () => {
   it("rejects invalid commission_id", async () => {
     await request(app)
       .post("/api/anomalies/detect-batch")
+      .set("Cookie", operatorCookie)
       .send({ commission_id: "not-a-uuid" })
       .expect(400);
   });
@@ -168,6 +189,7 @@ describe("POST /api/anomalies/detect-batch", () => {
   it("rejects invalid date format", async () => {
     await request(app)
       .post("/api/anomalies/detect-batch")
+      .set("Cookie", operatorCookie)
       .send({ date_from: "Jan 1 2025" })
       .expect(400);
   });
@@ -177,6 +199,7 @@ describe("Idempotency", () => {
   it("does not duplicate flags when detection runs twice", async () => {
     await request(app)
       .post(`/api/meetings/${COMPLETED_MEETING_ID}/detect-anomalies`)
+      .set("Cookie", operatorCookie)
       .expect(200);
 
     const after1 = await request(app)
@@ -186,6 +209,7 @@ describe("Idempotency", () => {
 
     await request(app)
       .post(`/api/meetings/${COMPLETED_MEETING_ID}/detect-anomalies`)
+      .set("Cookie", operatorCookie)
       .expect(200);
 
     const after2 = await request(app)
@@ -198,6 +222,7 @@ describe("Idempotency", () => {
   it("preserves manually created flags when detection re-runs", async () => {
     const createRes = await request(app)
       .post("/api/anomalies")
+      .set("Cookie", operatorCookie)
       .send({
         meeting_id: COMPLETED_MEETING_ID,
         flag_type: "emergency_session",
@@ -210,14 +235,121 @@ describe("Idempotency", () => {
 
     await request(app)
       .post(`/api/meetings/${COMPLETED_MEETING_ID}/detect-anomalies`)
+      .set("Cookie", operatorCookie)
       .expect(200);
 
-    const flagRes = await request(app)
-      .get(`/api/anomalies/${manualId}`)
-      .expect(200);
-
-    assert.equal(flagRes.body.id, manualId, "Manual flag should survive re-detection");
+    // Read the row, not the public route. A hand-entered finding is `held`, so
+    // `GET /api/anomalies/:id` answers 404 for it — correctly, and that is
+    // asserted on its own above. This test's subject is whether re-detection
+    // destroys a manual flag, which is a question about the table.
+    const survivor = await db("anomaly_flags").where({ id: manualId }).first();
+    assert.ok(survivor, "Manual flag should survive re-detection");
+    assert.equal(survivor.description, "Manually created test flag");
   });
+});
+
+/**
+ * The guard, asserted from the attacker's side.
+ *
+ * Every route below was unauthenticated and mounted on the public `/api`
+ * surface. `POST /` was the sharp one: it applied the severity threshold but
+ * passed `alwaysHold: false` unconditionally, so a stranger could post a
+ * `medium`- or `low`-severity finding naming a living official and have it
+ * published under this project's byline without any operator seeing it. The
+ * Caddy IP allowlist was the only thing standing in front of it.
+ *
+ * Absence of a 401 is not enough to prove a guard — a route that 500s before
+ * reaching its handler also fails to publish. So each case asserts the status
+ * *and*, for the write, that the record is unchanged either side of the call.
+ */
+describe("the mutating routes refuse an unauthenticated caller", () => {
+  it("refuses POST /api/anomalies, and writes nothing", async () => {
+    const before = Number(
+      (await db("anomaly_flags").count("* as n").first())?.n ?? 0,
+    );
+
+    await request(app)
+      .post("/api/anomalies")
+      .send({
+        meeting_id: COMPLETED_MEETING_ID,
+        flag_type: "emergency_session",
+        description: "Posted by nobody",
+        severity: "low",
+      })
+      .expect(401);
+
+    const after_ = Number(
+      (await db("anomaly_flags").count("* as n").first())?.n ?? 0,
+    );
+    assert.equal(after_, before, "an unauthenticated POST inserted a row");
+  });
+
+  it("refuses DELETE /api/anomalies/:id, and deletes nothing", async () => {
+    const [flag] = await db("anomaly_flags")
+      .insert({
+        meeting_id: COMPLETED_MEETING_ID,
+        flag_type: "emergency_session",
+        description: "Guard fixture",
+        severity: "low",
+        source: "manual",
+        review_state: "held",
+      })
+      .returning("*");
+
+    await request(app).delete(`/api/anomalies/${flag.id}`).expect(401);
+
+    const survivor = await db("anomaly_flags").where({ id: flag.id }).first();
+    assert.ok(survivor, "an unauthenticated DELETE removed a finding");
+  });
+
+  it("refuses both detection routes", async () => {
+    await request(app).post("/api/anomalies/detect-batch").send({}).expect(401);
+    await request(app)
+      .post(`/api/anomalies/meeting/${COMPLETED_MEETING_ID}/detect`)
+      .expect(401);
+  });
+
+  it("leaves the public reads open", async () => {
+    await request(app).get("/api/anomalies").expect(200);
+    await request(app).get(`/api/anomalies/${NON_EXISTENT_ID}`).expect(404);
+  });
+});
+
+/**
+ * The invariant the route exists to serve. A hand-entered finding has no
+ * detector, no rule version and no citation behind it, so it is held at every
+ * severity — including the ones the default threshold would otherwise let
+ * through. This asserts the *lowest* severity, because that is the one a
+ * threshold set to `high` publishes.
+ */
+describe("a hand-entered finding is held at every severity", () => {
+  for (const severity of ["low", "medium", "high", "critical"]) {
+    it(`holds a ${severity} finding`, async () => {
+      const res = await request(app)
+        .post("/api/anomalies")
+        .set("Cookie", operatorCookie)
+        .send({
+          meeting_id: COMPLETED_MEETING_ID,
+          flag_type: "emergency_session",
+          description: `Hand-entered ${severity} finding`,
+          severity,
+        })
+        .expect(201);
+
+      assert.equal(
+        res.body.review_state,
+        "held",
+        `a ${severity} manual finding did not go to the review queue`,
+      );
+    });
+  }
+});
+
+// The suite's own operator goes with it. `seedFirstOperator` only acts while
+// `operators` is empty, so a row left behind here makes
+// `operator-auth.test.ts` assert against a table this suite filled.
+after(async () => {
+  await db("operators").where({ email: "anomalies@test.invalid" }).del();
 });
 
 // Closes the knex pool so the run can end on its own.

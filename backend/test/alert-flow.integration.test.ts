@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
+import { signInOperator } from "./helpers/pressroom";
 import { NotificationService } from "../src/services/notification";
 import { EmailDeliveryService } from "../src/services/email-delivery";
-import { signInOperator } from "./helpers/pressroom";
 
 const BOZEMAN_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 const COMPLETED_MEETING_ID = "f6a7b8c9-d0e1-2345-fabc-456789012345";
@@ -243,6 +243,22 @@ describe("Full alert flow: subscribe → detect anomaly → notification → ema
   });
 });
 
+// Detection is a write and is operator-only. This suite drives it over HTTP
+// rather than calling the service, which is the point of it.
+let operatorCookie: string;
+
+before(async () => {
+  operatorCookie = await signInOperator("alert-flow@test.invalid", "Alert Flow Suite");
+});
+
+// Not in `cleanup()` — that runs in a `before` hook too, and deleting the
+// operator there revokes the session this suite just signed in with.
+// `seedFirstOperator` only acts while `operators` is empty, so the row must
+// still go, or `operator-auth.test.ts` asserts against a table this suite filled.
+after(async () => {
+  await db("operators").where({ email: "alert-flow@test.invalid" }).del();
+});
+
 describe("Full flow via HTTP: detect-anomalies endpoint triggers notifications", () => {
   let subscriptionId: string;
 
@@ -268,6 +284,7 @@ describe("Full flow via HTTP: detect-anomalies endpoint triggers notifications",
   it("POST /api/meetings/:id/detect-anomalies creates anomalies and triggers notification pipeline", async () => {
     const res = await request(app)
       .post(`/api/meetings/${COMPLETED_MEETING_ID}/detect-anomalies`)
+      .set("Cookie", operatorCookie)
       .expect(200);
 
     assert.ok(Array.isArray(res.body.data));
