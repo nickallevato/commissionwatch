@@ -8,7 +8,7 @@ export function NotFoundPage() {
   return (
     <div className="mx-auto max-w-xl py-16 text-center sm:py-24">
       <p className="kicker">Error 404</p>
-      <h2 className="headline mt-2">Page Not Found</h2>
+      <h1 className="headline mt-2">Page Not Found</h1>
 
       <div className="rule-hi mx-auto mt-6 w-16" />
 

@@ -16,7 +16,11 @@ const accent = "#B03A2E";
 
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  darkMode: "class",
+  // No `darkMode` key. This carried `darkMode: "class"` while nothing in the
+  // app ever added that class, so every `dark:` variant it enabled was dead
+  // config advertising a theme that did not exist. A committed light identity
+  // is more credible than a half-built one; if a dark theme is ever wanted,
+  // the `--cw-*` custom properties in index.css make it a token swap.
   theme: {
     extend: {
       colors: {

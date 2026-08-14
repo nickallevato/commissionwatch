@@ -28,7 +28,7 @@ describe("MembersPage", () => {
   it("renders the officials headline and kicker", () => {
     renderWithProviders(<MembersPage />);
     expect(
-      screen.getByRole("heading", { name: "Officials" }),
+      screen.getByRole("heading", { level: 1, name: "Officials" }),
     ).toBeInTheDocument();
     expect(screen.getByText("The roster")).toBeInTheDocument();
   });

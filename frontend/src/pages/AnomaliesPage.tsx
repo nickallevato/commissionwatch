@@ -47,9 +47,9 @@ export function AnomaliesPage() {
     <div className="mx-auto max-w-3xl">
       <header>
         <p className="kicker">The ledger</p>
-        <h2 className="headline mt-1.5 text-3xl sm:text-4xl">
+        <h1 className="headline mt-1.5 text-3xl sm:text-4xl">
           Flagged for review
-        </h2>
+        </h1>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-soft">
           Entries in the public record that our checks singled out for a person
           to read. A flag is a prompt to open the source document and judge for

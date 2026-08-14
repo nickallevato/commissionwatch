@@ -232,7 +232,15 @@ export function HomePage() {
     <div className="mx-auto max-w-6xl">
       <div className="lg:grid lg:grid-cols-3 lg:gap-0">
         {/* ---------------- Main column ---------------- */}
-        <main className="lg:col-span-2 lg:pr-10">
+        {/* A <div>, not a <main>. "Main column" here is the newspaper sense —
+          the wide column beside the rail — but the element it was written as
+          is a landmark, and `Layout` already renders the document's <main>
+          around this page. Two main landmarks is a violation
+          (`landmark-main-is-top-level`), and the practical cost is that a
+          screen-reader user jumping by landmark lands in an ambiguous place on
+          the one page most readers see first. The column is layout; the rail
+          beside it is an <aside> because that one really is complementary. */}
+        <div className="lg:col-span-2 lg:pr-10">
           <p className="kicker">{NO_FINDING_YET.kicker}</p>
           <h1 className="headline mt-2">{NO_FINDING_YET.headline}</h1>
           <p className="mt-4 max-w-prose text-base text-ink-soft">
@@ -260,7 +268,7 @@ export function HomePage() {
             isLoading={meetingsLoading}
             isError={meetingsError}
           />
-        </main>
+        </div>
 
         {/* ---------------- Rail ---------------- */}
         <aside className="mt-12 border-t border-rule pt-8 lg:mt-0 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">

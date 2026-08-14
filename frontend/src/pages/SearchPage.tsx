@@ -111,9 +111,12 @@ function ResultRow({ result }: { result: SearchResult }) {
   const body = (
     <>
       <p className="kicker text-muted">{KIND_LABEL[result.kind]}</p>
-      <h3 className="font-display text-lg font-semibold leading-snug tracking-headline text-ink underline-offset-4 group-hover:underline">
+      {/* h2, not h3: the page heading is now the h1, and a result sits
+          directly under it with no section heading in between, so h3 would
+          skip a level. Visual size is set by the classes, not by the tag. */}
+      <h2 className="font-display text-lg font-semibold leading-snug tracking-headline text-ink underline-offset-4 group-hover:underline">
         {result.title}
-      </h3>
+      </h2>
       <p className="tabular mt-1 text-[0.8125rem] leading-normal text-muted">
         {datelineOf(result)}
       </p>
@@ -153,7 +156,7 @@ export function SearchPage() {
     <div>
       <header>
         <p className="kicker">The archive</p>
-        <h2 className="headline mt-1">Search</h2>
+        <h1 className="headline mt-1">Search</h1>
         <p className="mt-3 max-w-xl text-sm text-muted">
           Every published agenda item, meeting, official and extracted document
           text we hold. Quote a phrase to match it exactly, and prefix a word

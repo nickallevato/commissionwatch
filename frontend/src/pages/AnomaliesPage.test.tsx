@@ -27,7 +27,7 @@ describe("AnomaliesPage", () => {
   it("leads with the review framing, not an accusation", () => {
     renderWithProviders(<AnomaliesPage />);
     expect(
-      screen.getByRole("heading", { name: "Flagged for review" }),
+      screen.getByRole("heading", { level: 1, name: "Flagged for review" }),
     ).toBeInTheDocument();
   });
 

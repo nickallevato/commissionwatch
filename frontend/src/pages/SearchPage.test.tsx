@@ -35,7 +35,7 @@ function renderAt(path: string) {
 describe("SearchPage", () => {
   it("renders the search headline and kicker", () => {
     renderAt("/search");
-    expect(screen.getByRole("heading", { name: "Search" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Search" })).toBeInTheDocument();
     expect(screen.getByText("The archive")).toBeInTheDocument();
   });
 

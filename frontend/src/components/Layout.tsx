@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Outlet, NavLink, Link } from "react-router-dom";
 import {
   formatSweepAge,
   useIngestionStatus,
 } from "@/hooks/useIngestionStatus";
+import { useRouteFocus } from "@/hooks/useRouteFocus";
 
 /**
  * The app shell: a newspaper masthead, a strap line, the copy well, a colophon.
@@ -50,6 +51,8 @@ const focusRing =
 
 export function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+  useRouteFocus(mainRef);
   // The masthead used to assert "Last sweep 12 min ago" from a constant. Real
   // records now exist, so a made-up age is a false statement on a transparency
   // site rather than a placeholder. `data` is undefined while the request is in
@@ -129,7 +132,17 @@ export function Layout() {
         </div>
       </header>
 
-      <main id="main" className={`${shell} flex-1 py-10 sm:py-14`}>
+      {/* tabIndex -1 serves both jobs: it is the fallback target for
+        `useRouteFocus`, and it is what makes the "Skip to content" link above
+        actually move focus rather than only scroll — a bare `href="#main"`
+        pointing at a non-focusable element leaves the tab order in the
+        masthead in every browser that follows the spec here. */}
+      <main
+        id="main"
+        ref={mainRef}
+        tabIndex={-1}
+        className={`${shell} flex-1 py-10 sm:py-14 focus:outline-none`}
+      >
         <Outlet />
       </main>
 

@@ -21,7 +21,7 @@ async function findRecordRow(title: string): Promise<HTMLElement> {
 describe("VotesPage", () => {
   it("renders the votes headline and kicker", () => {
     renderWithProviders(<VotesPage />);
-    expect(screen.getByRole("heading", { name: "Votes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Votes" })).toBeInTheDocument();
     expect(screen.getByText("The record")).toBeInTheDocument();
   });
 
@@ -62,14 +62,19 @@ describe("VotesPage", () => {
       const cells = within(row)
         .getAllByRole("cell")
         .map((c) => c.textContent);
+      // The tally cells each carry their own column name now. Below `sm` the
+      // table reflows to a card stack where the `<thead>` is hidden, so the
+      // label has to travel with the figure or "2 1 0 0" means nothing on a
+      // phone. The label is `sm:hidden`, but jsdom applies no Tailwind
+      // stylesheet, so it is present in `textContent` here either way.
       expect(cells).toEqual([
         "Dec 3, 2024",
         "Planning & Zoning CommissionDenver, CO",
         REZONING,
-        "2",
-        "1",
-        "0",
-        "0",
+        "Yes2",
+        "No1",
+        "Abstain0",
+        "Absent0",
         "Passed",
       ]);
     });

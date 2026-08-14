@@ -5,7 +5,9 @@ import { NotFoundPage } from "./NotFoundPage";
 describe("NotFoundPage", () => {
   it("renders 404 message", () => {
     renderWithProviders(<NotFoundPage />);
-    expect(screen.getByText("Page Not Found")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Page Not Found" }),
+    ).toBeInTheDocument();
   });
 
   it("has a link back to home", () => {

@@ -37,7 +37,7 @@ export function MembersPage() {
     <div>
       <header>
         <p className="kicker">The roster</p>
-        <h2 className="headline mt-1">Officials</h2>
+        <h1 className="headline mt-1">Officials</h1>
         <p className="mt-3 max-w-xl text-sm text-muted">
           Every seated official on the commissions we follow, the term they
           hold, and how each of them has voted on the record.

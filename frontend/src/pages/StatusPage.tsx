@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { CellLabel } from "@/components/ui/CellLabel";
 import type { PublicStatus, PublicStatusSource } from "@/types";
 
 /**
@@ -163,16 +164,36 @@ export function StatusPage() {
               the ones that are switched off and the ones that have never run.
             </p>
 
-            {/* Wide table, narrow phone. The scroll belongs to the table's own
-                container so the page body never scrolls sideways. */}
-            <div className="mt-4 overflow-x-auto border border-rule bg-paper">
-              <table className="w-full min-w-[52rem] border-collapse text-left">
+            {/* Six columns do not fit a phone, and horizontal scroll is the
+                worst possible answer here: this is the page a reader opens to
+                check whether a source has gone quiet, often while a meeting is
+                happening, and a sideways-scrolling table hides the "Silence
+                watch" column exactly when it matters. Below `sm` the table
+                reflows to a stack of cards — each row a card, each cell
+                labelled in place — and the scroll container only engages from
+                `sm` up, where the grid is genuinely wider than the viewport.
+
+                The explicit `role`s are not redundancy. Setting a table
+                element to `display: block` strips its implicit table
+                semantics in every browser, so the roles are what keep the
+                stacked layout a table to a screen reader instead of a run of
+                anonymous divs. At `sm` and up they restate what the tags
+                already mean, which costs nothing. */}
+            <div className="mt-4 border border-rule bg-paper sm:overflow-x-auto">
+              <table
+                role="table"
+                className="block w-full border-collapse text-left sm:table sm:min-w-[52rem]"
+              >
                 <caption className="sr-only">
                   Every registered ingestion source, its verdict, the records it has ever produced,
                   its last successful sweep and its silence watch
                 </caption>
-                <thead>
-                  <tr className="border-b border-rule">
+                {/* Hidden, not `sr-only`, below `sm`: each cell carries its own
+                    visible label there, and a screen reader reading both the
+                    column header and the in-cell label would say everything
+                    twice. */}
+                <thead role="rowgroup" className="hidden sm:table-header-group">
+                  <tr role="row" className="border-b border-rule">
                     <th scope="col" className="label-sm px-4 py-3">Source</th>
                     <th scope="col" className="label-sm px-4 py-3">State</th>
                     <th scope="col" className="label-sm px-4 py-3">Records collected</th>
@@ -181,7 +202,10 @@ export function StatusPage() {
                     <th scope="col" className="label-sm px-4 py-3">Latest run</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-rule">
+                <tbody
+                  role="rowgroup"
+                  className="block divide-y divide-rule sm:table-row-group"
+                >
                   {sources.map((source) => (
                     <SourceRow key={source.adapter_key} source={source} />
                   ))}
@@ -266,15 +290,23 @@ function SourceRow({ source }: { source: PublicStatusSource }) {
   const zero = source.lifetime_records === 0;
 
   return (
-    <tr className="align-top">
-      <th scope="row" className="px-4 py-4 text-left font-normal">
+    <tr
+      role="row"
+      className="block p-4 align-top sm:table-row sm:p-0"
+    >
+      <th
+        scope="row"
+        role="rowheader"
+        className="block px-0 pb-3 text-left font-normal sm:table-cell sm:px-4 sm:py-4 sm:pb-4"
+      >
         <span className="block text-sm font-semibold text-ink">{source.adapter_key}</span>
         <span className="block text-xs text-muted">
           {source.jurisdiction.name}, {source.jurisdiction.state}
         </span>
       </th>
 
-      <td className="px-4 py-4">
+      <td role="cell" className="block px-0 py-2 sm:table-cell sm:px-4 sm:py-4">
+        <CellLabel>State</CellLabel>
         <span className={`text-sm font-semibold ${VERDICT_CLASS[source.verdict]}`}>
           {VERDICT_LABEL[source.verdict]}
         </span>
@@ -288,7 +320,8 @@ function SourceRow({ source }: { source: PublicStatusSource }) {
         )}
       </td>
 
-      <td className="px-4 py-4">
+      <td role="cell" className="block px-0 py-2 sm:table-cell sm:px-4 sm:py-4">
+        <CellLabel>Records collected</CellLabel>
         <span
           data-testid={`records-${source.adapter_key}`}
           className={`figure text-base tabular ${zero ? "font-semibold text-accent" : "text-ink"}`}
@@ -302,13 +335,25 @@ function SourceRow({ source }: { source: PublicStatusSource }) {
         )}
       </td>
 
-      <td className="px-4 py-4 text-sm text-ink tabular">{formatStamp(source.last_success_at)}</td>
+      <td
+        role="cell"
+        className="block px-0 py-2 text-sm text-ink tabular sm:table-cell sm:px-4 sm:py-4"
+      >
+        <CellLabel>Last success</CellLabel>
+        {formatStamp(source.last_success_at)}
+      </td>
 
-      <td className="px-4 py-4" data-testid={`silence-${source.adapter_key}`}>
+      <td
+        role="cell"
+        className="block px-0 py-2 sm:table-cell sm:px-4 sm:py-4"
+        data-testid={`silence-${source.adapter_key}`}
+      >
+        <CellLabel>Silence watch</CellLabel>
         <SilenceCell source={source} />
       </td>
 
-      <td className="px-4 py-4">
+      <td role="cell" className="block px-0 py-2 sm:table-cell sm:px-4 sm:py-4">
+        <CellLabel>Latest run</CellLabel>
         {source.latest_run === null ? (
           <span className="text-sm text-accent">Never run</span>
         ) : (

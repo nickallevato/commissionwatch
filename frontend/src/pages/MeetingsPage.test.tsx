@@ -26,7 +26,7 @@ describe("MeetingsPage", () => {
   it("renders the calendar headline and kicker", () => {
     renderWithProviders(<MeetingsPage />);
     expect(
-      screen.getByRole("heading", { name: "Meetings" }),
+      screen.getByRole("heading", { level: 1, name: "Meetings" }),
     ).toBeInTheDocument();
     expect(screen.getByText("The calendar")).toBeInTheDocument();
   });

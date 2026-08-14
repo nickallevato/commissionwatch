@@ -4,6 +4,7 @@ import { useVotes } from "@/hooks/useVotes";
 import { agendaItemsQuery, useMeetings } from "@/hooks/useMeetings";
 import { useMembers } from "@/hooks/useMembers";
 import { VoteBreakdown } from "@/components/VoteBreakdown";
+import { CellLabel } from "@/components/ui/CellLabel";
 import {
   VOTE_LABEL,
   VOTE_ORDER,
@@ -164,7 +165,7 @@ export function VotesPage() {
     <div>
       <header>
         <p className="kicker">The record</p>
-        <h2 className="headline mt-1">Votes</h2>
+        <h1 className="headline mt-1">Votes</h1>
         <p className="mt-3 max-w-xl text-sm text-muted">
           Every recorded decision, item by item, with the tally as it was cast
           and the outcome that followed.
@@ -252,11 +253,27 @@ export function VotesPage() {
           No vote records match these filters.
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[54rem] border-collapse text-left">
+        // Nine columns, and a phone is where this page is read: someone
+        // checking how a commissioner voted, during or just after the meeting.
+        // Horizontal scroll put the tally and the result — the two things
+        // anyone came for — off the right edge. Below `sm` each vote becomes a
+        // card: date, meeting, item, then the four tallies as a compact row of
+        // labelled figures, then the result. The scroll container only engages
+        // from `sm` up, where the grid really is wider than the viewport.
+        //
+        // The explicit `role`s are load-bearing, not belt-and-braces. Setting a
+        // table element to `display: block` drops its implicit table semantics
+        // in every browser, so without them the stacked layout would reach a
+        // screen reader as a pile of anonymous divs. From `sm` up they restate
+        // what the tags already mean.
+        <div className="sm:overflow-x-auto">
+          <table
+            role="table"
+            className="block w-full border-collapse text-left sm:table sm:min-w-[54rem]"
+          >
             <caption className="sr-only">Recorded votes</caption>
-            <thead>
-              <tr className="border-b border-ink">
+            <thead role="rowgroup" className="hidden sm:table-header-group">
+              <tr role="row" className="border-b border-ink">
                 <th scope="col" className="py-2 pr-4">
                   <span className="label-sm">Date</span>
                 </th>
@@ -276,18 +293,27 @@ export function VotesPage() {
                 </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody role="rowgroup" className="block sm:table-row-group">
               {filtered.map((record) => {
                 const open = openKey === record.key;
                 return (
                   <Fragment key={record.key}>
-                    <tr className="border-b border-rule align-top">
-                      <td className="whitespace-nowrap py-3 pr-4">
+                    <tr
+                      role="row"
+                      className="block border-b border-rule px-1 py-4 align-top sm:table-row sm:p-0"
+                    >
+                      <td
+                        role="cell"
+                        className="block whitespace-nowrap py-0 pr-0 sm:table-cell sm:py-3 sm:pr-4"
+                      >
                         <span className="figure text-xs text-muted">
                           {formatRecordDate(record.date)}
                         </span>
                       </td>
-                      <td className="py-3 pr-4">
+                      <td
+                        role="cell"
+                        className="block py-0 pr-0 sm:table-cell sm:py-3 sm:pr-4"
+                      >
                         <p className="text-sm text-ink-soft">
                           {record.meetingLabel}
                         </p>
@@ -295,7 +321,10 @@ export function VotesPage() {
                           {record.jurisdictionLabel}
                         </p>
                       </td>
-                      <td className="py-3 pr-4">
+                      <td
+                        role="cell"
+                        className="block pt-2 sm:table-cell sm:py-3 sm:pr-4 sm:pt-3"
+                      >
                         <button
                           type="button"
                           aria-expanded={open}
@@ -305,8 +334,16 @@ export function VotesPage() {
                           {record.itemTitle}
                         </button>
                       </td>
+                      {/* Stacked, the four tallies read as a row of small
+                          figures rather than four full-width rows — a tally is
+                          only meaningful next to the other three. */}
                       {VOTE_ORDER.map((value) => (
-                        <td key={value} className="px-2 py-3 text-right">
+                        <td
+                          key={value}
+                          role="cell"
+                          className="mt-3 inline-block w-1/4 px-0 py-0 text-left sm:mt-0 sm:table-cell sm:w-auto sm:px-2 sm:py-3 sm:text-right"
+                        >
+                          <CellLabel>{VOTE_LABEL[value]}</CellLabel>
                           <span
                             className={`figure text-sm ${
                               record.counts[value] > 0
@@ -318,7 +355,10 @@ export function VotesPage() {
                           </span>
                         </td>
                       ))}
-                      <td className="py-3 pl-4 text-right">
+                      <td
+                        role="cell"
+                        className="block pt-3 text-left sm:table-cell sm:py-3 sm:pl-4 sm:pt-3 sm:text-right"
+                      >
                         <span
                           className={`text-[0.6875rem] font-semibold uppercase tracking-label ${
                             record.passed ? "text-pass" : "text-fail"
@@ -329,10 +369,14 @@ export function VotesPage() {
                       </td>
                     </tr>
                     {open && (
-                      <tr className="border-b border-rule">
+                      <tr
+                        role="row"
+                        className="block border-b border-rule sm:table-row"
+                      >
                         <td
+                          role="cell"
                           colSpan={4 + VOTE_ORDER.length}
-                          className="bg-paper-sunk px-3 py-4"
+                          className="block bg-paper-sunk px-3 py-4 sm:table-cell"
                         >
                           <VoteBreakdown
                             mode="roll-call"

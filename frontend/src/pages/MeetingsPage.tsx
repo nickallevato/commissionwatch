@@ -117,7 +117,7 @@ export function MeetingsPage() {
     <div>
       <header>
         <p className="kicker">The calendar</p>
-        <h2 className="headline mt-1">Meetings</h2>
+        <h1 className="headline mt-1">Meetings</h1>
         <p className="mt-3 max-w-xl text-sm text-muted">
           Every sitting we track, newest first — when it was held, who held it,
           and what our checks flagged in the record it left behind.
@@ -263,9 +263,13 @@ function MeetingRow({ meeting, anomalies }: MeetingRowProps) {
         className="group flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 py-5"
       >
         <div className="min-w-0 flex-1">
-          <h3 className="font-display text-lg font-semibold leading-snug tracking-headline text-ink underline-offset-4 group-hover:underline">
+          {/* h2, not h3: the page heading became the h1 it should always have
+              been, and there is no intervening section heading between it and
+              a row, so h3 here would skip a level. Visual size is set by the
+              classes, not by the tag. */}
+          <h2 className="font-display text-lg font-semibold leading-snug tracking-headline text-ink underline-offset-4 group-hover:underline">
             {name}
-          </h3>
+          </h2>
           {/* Prose dateline, so the numerals are tabular but not mono — a
               monospaced weekday and month read as data, not as a dateline. */}
           <p className="tabular mt-1 text-[0.8125rem] leading-normal text-muted">
