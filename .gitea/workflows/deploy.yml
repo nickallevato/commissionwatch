@@ -215,10 +215,13 @@ jobs:
       # but this repository is public and an account number beside an instance
       # id is a free inventory.
       #
-      # ⚠ An unset variable here does NOT render as "". Measured on run 28290:
-      # this Gitea's expression evaluator substitutes the variable's own NAME,
-      # so `${{ vars.AWS_REGION }}` becomes the literal string `AWS_REGION` and
-      # ECR_REGISTRY becomes `AWS_REGION.dkr.ecr.AWS_REGION.amazonaws.com`.
+      # ⚠ An unset variable here does NOT render as "". This Gitea's expression
+      # evaluator substitutes a literal variable NAME — and not reliably the one
+      # you asked for. Run 28290: `${{ vars.AWS_REGION }}` became the string
+      # `AWS_REGION`, making ECR_REGISTRY `AWS_REGION.dkr.ecr.AWS_REGION…`.
+      # Run 28306: `${{ vars.AWS_ACCOUNT_ID }}` ALSO arrived as `AWS_REGION`.
+      # So the value cannot be trusted to identify even which variable it came
+      # from, which is why each is checked against its own expected shape.
       # An emptiness check therefore passes and the build dies much later on
       # `Provided region_name 'AWS_REGION' doesn't match a supported format`.
       # The preflight in "Log in to ECR" checks shape, not emptiness, for
@@ -262,7 +265,7 @@ jobs:
             esac
             case "$AWS_REGION" in
               [a-z][a-z]-*-[0-9]) ;;
-              *) bad="$bad AWS_REGION(e.g. us-west-2)" ;;
+              *) bad="$bad AWS_REGION(shape xx-name-N)" ;;
             esac
             case "$ECR_NAMESPACE" in
               ""|ECR_NAMESPACE|*[!a-z0-9._/-]*) bad="$bad ECR_NAMESPACE" ;;
