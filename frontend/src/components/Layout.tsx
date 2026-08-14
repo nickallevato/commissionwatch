@@ -23,6 +23,10 @@ interface NavItem {
 const navItems: NavItem[] = [
   { to: "/anomalies", label: "Findings" },
   { to: "/meetings", label: "Meetings" },
+  // The same record read the other way: meetings are when the body sat,
+  // matters are what it is deciding. Next to Meetings rather than at the end
+  // because a reader who wants one usually wants to know the other exists.
+  { to: "/matters", label: "Matters" },
   { to: "/members", label: "Officials" },
   { to: "/votes", label: "Votes" },
   // Scaffolded, and the page says so rather than showing placeholder

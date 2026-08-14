@@ -61,6 +61,7 @@ const A11Y_OPTIONS: RunOptions = {
 const PUBLIC_ROUTES = [
   "/",
   "/meetings",
+  "/matters",
   "/members",
   "/votes",
   "/anomalies",

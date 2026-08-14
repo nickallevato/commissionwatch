@@ -32,6 +32,7 @@ const router = Router();
 const STATIC_PATHS = [
   "/",
   "/meetings",
+  "/matters",
   "/officials",
   "/votes",
   "/elections",

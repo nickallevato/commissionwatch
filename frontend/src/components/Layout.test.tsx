@@ -39,6 +39,9 @@ describe("Layout", () => {
     const expected = [
       ["Findings", "/anomalies"],
       ["Meetings", "/meetings"],
+      // The same record read the other way: meetings are when the body sat,
+      // matters are what it is deciding.
+      ["Matters", "/matters"],
       ["Officials", "/members"],
       ["Votes", "/votes"],
       // Scaffolded module. In the masthead so it has a home to build into; the

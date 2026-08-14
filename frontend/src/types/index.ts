@@ -143,6 +143,63 @@ export interface DocumentTimeline {
   diffs: AgendaDiffPair[];
 }
 
+/* --------------------------------------------------------------- matters */
+
+/**
+ * A matter is a subject of decision — a rezone, an ordinance, a capital
+ * project — followed across every meeting that touched it.
+ *
+ * **`state` is derived by the API at read time and is never a stored column.**
+ * The same reasoning migration 038 gives for `overdue`: a terminal status set
+ * by a clock is indistinguishable, in the log, from a decision a person made.
+ * So the frontend must not cache it as though it were a fact about the row, and
+ * must not compute a competing version of it.
+ */
+export type MatterState = "pending" | "decided" | "withdrawn" | "dormant";
+
+export interface Matter {
+  id: string;
+  /** As first seen in the record, verbatim. */
+  title: string;
+  /** "Ordinance 2145" and the like. Null when identity came from the title. */
+  designator: string | null;
+  state: MatterState;
+  /** ISO date. Earliest *published* appearance. */
+  first_seen: string;
+  /** ISO date. Latest *published* appearance. */
+  last_seen: string;
+  /** Published appearances only, so it agrees with the list below it. */
+  appearance_count: number;
+  jurisdiction_name: string;
+  commission_name: string;
+}
+
+/**
+ * One agenda item, at one meeting, that concerns this matter.
+ *
+ * `title` is the title as printed at *that* meeting and may differ from the
+ * matter's — a body renaming an item between readings is exactly the kind of
+ * thing this page exists to make visible, so the per-appearance title is shown
+ * rather than normalised away.
+ *
+ * `match_rule` is the basis of the join, carried so a reader can see *why* two
+ * agenda items were treated as the same matter. There is no fuzzy rule: a
+ * near-match would be an inference, and inferences are not published here.
+ */
+export interface MatterAppearance {
+  agenda_item_id: string;
+  meeting_id: string;
+  meeting_date: string;
+  item_number: number;
+  title: string;
+  match_rule: "designator" | "normalized_title";
+}
+
+export interface MatterDetail extends Matter {
+  /** Ascending by meeting date — a timeline reads forwards. */
+  appearances: MatterAppearance[];
+}
+
 /** Postgres `vote_value` enum — see backend/migrations/010_create_votes.ts */
 export type VoteValue = "yes" | "no" | "abstain" | "absent";
 

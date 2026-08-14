@@ -8,6 +8,8 @@ import {
   members,
   votes,
   anomalyFlags,
+  matters,
+  matterAppearances,
 } from "./data";
 
 /** Newest first — matches `.orderBy("created_at", "desc")` on /votes and /anomalies. */
@@ -132,6 +134,20 @@ export const handlers = [
       .filter((d) => d.meeting_id === params.id)
       .sort(byCreatedAtDesc);
     return list(docs);
+  }),
+
+  http.get("/api/matters", ({ request }) => {
+    const state = new URL(request.url).searchParams.get("state");
+    return list(state ? matters.filter((m) => m.state === state) : matters);
+  }),
+
+  http.get("/api/matters/:id", ({ params }) => {
+    const matter = matters.find((m) => m.id === params.id);
+    if (!matter) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({
+      ...matter,
+      appearances: matterAppearances[matter.id] ?? [],
+    });
   }),
 
   http.get("/api/meetings/:id/votes", ({ params }) => {

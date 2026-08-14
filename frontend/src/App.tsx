@@ -11,6 +11,8 @@ import { SearchPage } from "./pages/SearchPage";
 import { VotesPage } from "./pages/VotesPage";
 import { ElectionsPage } from "./pages/ElectionsPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
+import { MatterDetailPage } from "./pages/MatterDetailPage";
+import { MattersPage } from "./pages/MattersPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
 import { PrivacyPage } from "./pages/PrivacyPage";
 import { PublicRecordsPage } from "./pages/PublicRecordsPage";
@@ -56,6 +58,8 @@ export function App() {
           <Route index element={<HomePage />} />
           <Route path="meetings" element={<MeetingsPage />} />
           <Route path="meetings/:id" element={<MeetingDetailPage />} />
+          <Route path="matters" element={<MattersPage />} />
+          <Route path="matters/:id" element={<MatterDetailPage />} />
           <Route path="members" element={<MembersPage />} />
           {/* One official as a subject: voting record, attendance, patterns
             and the campaign-finance overlay. Reached from the roster, not

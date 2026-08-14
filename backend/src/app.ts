@@ -8,6 +8,7 @@ import meetingsRouter from "./routes/meetings";
 import membersRouter from "./routes/members";
 import officialsRouter from "./routes/officials";
 import votesRouter from "./routes/votes";
+import mattersRouter from "./routes/matters";
 import anomaliesRouter from "./routes/anomalies";
 import ingestionRouter from "./routes/ingestion";
 import subscriptionsRouter from "./routes/subscriptions";
@@ -99,6 +100,10 @@ app.use("/api/members", membersRouter);
 app.use("/api/officials", officialsRouter);
 app.use("/api/votes", votesRouter);
 app.use("/api/anomalies", anomaliesRouter);
+// Matters — the subject of decision behind the per-meeting agenda item, so
+// "what happened to it?" has something to answer it. Derived from
+// `agenda_items`, published record only, state computed at read time.
+app.use("/api/matters", mattersRouter);
 // P6 · full-text search. Public and unauthenticated like the rest of the read
 // API, and restricted to published records inside the service.
 app.use("/api/search", searchRouter);

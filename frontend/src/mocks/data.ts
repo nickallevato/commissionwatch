@@ -7,6 +7,8 @@ import type {
   Member,
   Vote,
   AnomalyFlag,
+  Matter,
+  MatterAppearance,
 } from "@/types";
 
 /**
@@ -470,3 +472,108 @@ export const votes: Vote[] = [
     created_at: "2024-12-10T10:00:00Z",
   },
 ];
+
+/**
+ * Matters. `axxxxxxx…` — see the id convention above.
+ *
+ * Three fixtures, chosen to exercise the three things the pages have to get
+ * right rather than to look plausible: one designator-matched matter that
+ * spans three meetings (the whole point of the feature), one title-matched
+ * matter with a single appearance, and one dormant matter, which is the state
+ * no other page in this product can show.
+ */
+export const matters: Matter[] = [
+  {
+    id: "a0000000-0000-4000-8000-000000000001",
+    title: "Rezoning of 1234 Main St from R-2 to MU-3",
+    designator: "Ordinance 2145",
+    state: "pending",
+    first_seen: "2024-11-06",
+    last_seen: "2024-12-04",
+    appearance_count: 3,
+    jurisdiction_name: "City of Bozeman",
+    commission_name: "City Commission",
+  },
+  {
+    id: "a0000000-0000-4000-8000-000000000002",
+    title: "Riverside Commerce Park site plan",
+    designator: null,
+    state: "decided",
+    first_seen: "2024-12-04",
+    last_seen: "2024-12-04",
+    appearance_count: 1,
+    jurisdiction_name: "City of Bozeman",
+    commission_name: "City Commission",
+  },
+  {
+    id: "a0000000-0000-4000-8000-000000000003",
+    title: "Niwot rural area land use change",
+    designator: "Application Z-2023-041",
+    state: "dormant",
+    first_seen: "2023-04-18",
+    last_seen: "2023-06-20",
+    appearance_count: 2,
+    jurisdiction_name: "Gallatin County",
+    commission_name: "County Commission",
+  },
+];
+
+export const matterAppearances: Record<string, MatterAppearance[]> = {
+  "a0000000-0000-4000-8000-000000000001": [
+    {
+      agenda_item_id: "40000000-0000-4000-8000-0000000000a1",
+      meeting_id: "30000000-0000-4000-8000-000000000001",
+      meeting_date: "2024-11-06",
+      item_number: 7,
+      title: "Ordinance 2145 — rezoning of 1234 Main St, first reading",
+      match_rule: "designator",
+    },
+    {
+      agenda_item_id: "40000000-0000-4000-8000-0000000000a2",
+      meeting_id: "30000000-0000-4000-8000-000000000002",
+      meeting_date: "2024-11-20",
+      item_number: 4,
+      // Deliberately renamed between readings. The detail page shows the title
+      // as printed at each meeting rather than normalising it away, and this
+      // fixture is what proves it.
+      title: "Ordinance 2145 — Main St rezone, continued from 6 November",
+      match_rule: "designator",
+    },
+    {
+      agenda_item_id: "40000000-0000-4000-8000-0000000000a3",
+      meeting_id: "30000000-0000-4000-8000-000000000003",
+      meeting_date: "2024-12-04",
+      item_number: 2,
+      title: "Ordinance 2145 — rezoning of 1234 Main St, second reading",
+      match_rule: "designator",
+    },
+  ],
+  "a0000000-0000-4000-8000-000000000002": [
+    {
+      agenda_item_id: "40000000-0000-4000-8000-0000000000b1",
+      meeting_id: "30000000-0000-4000-8000-000000000003",
+      meeting_date: "2024-12-04",
+      item_number: 5,
+      title: "Riverside Commerce Park site plan",
+      match_rule: "normalized_title",
+    },
+  ],
+  "a0000000-0000-4000-8000-000000000003": [
+    {
+      agenda_item_id: "40000000-0000-4000-8000-0000000000c1",
+      meeting_id: "30000000-0000-4000-8000-000000000004",
+      meeting_date: "2023-04-18",
+      item_number: 3,
+      title: "Application Z-2023-041 — Niwot rural area land use change",
+      match_rule: "designator",
+    },
+    {
+      agenda_item_id: "40000000-0000-4000-8000-0000000000c2",
+      meeting_id: "30000000-0000-4000-8000-000000000004",
+      meeting_date: "2023-06-20",
+      item_number: 6,
+      title: "Application Z-2023-041 — Niwot land use change, continued",
+      match_rule: "designator",
+    },
+  ],
+};
