@@ -210,12 +210,22 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: dh1
     env:
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      # Account, instance and namespace are Gitea repository VARIABLES, not
+      # Account, region and namespace are Gitea repository VARIABLES, not
       # secrets and not literals. They are identifiers rather than credentials,
       # but this repository is public and an account number beside an instance
-      # id is a free inventory. Unset, they render as "" and the first aws call
-      # fails naming the empty value — see the guard in "Log in to ECR".
+      # id is a free inventory.
+      #
+      # ⚠ An unset variable here does NOT render as "". Measured on run 28290:
+      # this Gitea's expression evaluator substitutes the variable's own NAME,
+      # so `${{ vars.AWS_REGION }}` becomes the literal string `AWS_REGION` and
+      # ECR_REGISTRY becomes `AWS_REGION.dkr.ecr.AWS_REGION.amazonaws.com`.
+      # An emptiness check therefore passes and the build dies much later on
+      # `Provided region_name 'AWS_REGION' doesn't match a supported format`.
+      # The preflight in "Log in to ECR" checks shape, not emptiness, for
+      # exactly that reason. AWS_ACCOUNT_ID is passed separately so it can be
+      # checked on its own rather than inferred from the composed registry.
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
       ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
       ECR_NAMESPACE: ${{ vars.ECR_NAMESPACE }}
       # AWS CLI v2 pages output through less(1). On a runner TERM is
@@ -233,19 +243,34 @@ jobs:
         run: |
           set -o pipefail
           {
-            # An unset Gitea variable renders as "", never as an error, so
-            # ECR_REGISTRY silently becomes ".dkr.ecr..amazonaws.com" and the
-            # failure arrives several steps later as an unresolvable host. Name
-            # the missing variable here instead — this is the first step that
-            # would notice, and a fork will hit it on its very first push.
-            missing=""
-            [ -n "${AWS_REGION:-}" ]    || missing="$missing AWS_REGION"
-            [ -n "${ECR_NAMESPACE:-}" ] || missing="$missing ECR_NAMESPACE"
-            case "$ECR_REGISTRY" in
-              .dkr.ecr*|*ecr..amazonaws*) missing="$missing AWS_ACCOUNT_ID" ;;
+            # Preflight the repository variables by SHAPE, not by emptiness.
+            #
+            # An unset variable does not arrive empty here — this Gitea renders
+            # `${{ vars.AWS_REGION }}` as the literal string `AWS_REGION`, so
+            # `[ -n "$AWS_REGION" ]` is satisfied by the very thing it was
+            # meant to catch. That cost run 28290 a red build whose only
+            # symptom was an AWS CLI complaint about a region name, six steps
+            # from the actual cause.
+            #
+            # Each check below would also reject a genuinely malformed value,
+            # which is the point: a fork hits this on its first push, and the
+            # message names the variable rather than the symptom.
+            bad=""
+            case "$AWS_ACCOUNT_ID" in
+              [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+              *) bad="$bad AWS_ACCOUNT_ID(12 digits)" ;;
             esac
-            if [ -n "$missing" ]; then
-              echo "Unset Gitea repository variable(s):$missing" >&2
+            case "$AWS_REGION" in
+              [a-z][a-z]-*-[0-9]) ;;
+              *) bad="$bad AWS_REGION(e.g. us-west-2)" ;;
+            esac
+            case "$ECR_NAMESPACE" in
+              ""|ECR_NAMESPACE|*[!a-z0-9._/-]*) bad="$bad ECR_NAMESPACE" ;;
+            esac
+            if [ -n "$bad" ]; then
+              echo "Gitea repository variable(s) unset or malformed:$bad" >&2
+              echo "Got: AWS_ACCOUNT_ID='$AWS_ACCOUNT_ID' AWS_REGION='$AWS_REGION' ECR_NAMESPACE='$ECR_NAMESPACE'" >&2
+              echo "An unset variable arrives as its own NAME here, not as empty." >&2
               echo "Set them under Settings → Actions → Variables. See deploy/deployment.env.example." >&2
               exit 1
             fi
@@ -382,6 +407,20 @@ jobs:
               echo "THIS REPOSITORY." >&2
               exit 1
             fi
+
+            # Variables, unlike secrets, arrive as their own NAME when unset —
+            # see the note on this job's env block. So this is a shape check,
+            # and INSTANCE_ID gets one because sending a command to a
+            # nonexistent instance id is the failure that reads least like its
+            # cause: SSM answers InvalidInstanceId whether the id is malformed,
+            # belongs to another account, or simply has no agent running.
+            case "$INSTANCE_ID" in
+              i-[0-9a-f]*) ;;
+              *) echo "FATAL: INSTANCE_ID is unset or malformed: '$INSTANCE_ID'" >&2
+                 echo "Expected i-0123456789abcdef0. An unset Gitea variable arrives" >&2
+                 echo "as its own name, not as empty. Settings -> Actions -> Variables." >&2
+                 exit 1 ;;
+            esac
 
             TMPENV=""
             # `[ -n "$X" ] && rm ...` as the LAST command of an EXIT trap sets

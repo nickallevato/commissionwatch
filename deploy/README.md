@@ -83,9 +83,16 @@ For CI, the same four values are Gitea **variables** (not secrets), added under
 | `ECR_NAMESPACE` | `your-org` | The required repository path prefix (§2) |
 | `INSTANCE_ID` | `i-0123456789abcdef0` | The SSM target |
 
-An unset variable renders as `""`, so `ECR_REGISTRY` would become `.dkr.ecr..amazonaws.com` and the
-failure would arrive several steps later as an unresolvable host. The **Log in to ECR** step
-preflights all four and names the missing one.
+**An unset variable does not arrive empty.** Measured on run 28290: this Gitea's expression
+evaluator substitutes the variable's own *name*, so `${{ vars.AWS_REGION }}` becomes the literal
+string `AWS_REGION` and `ECR_REGISTRY` becomes `AWS_REGION.dkr.ecr.AWS_REGION.amazonaws.com`. An
+emptiness check is therefore satisfied by exactly the condition it was written to catch, and the
+build dies six steps later on `Provided region_name 'AWS_REGION' doesn't match a supported format`.
+
+This is the opposite of how Gitea *secrets* behave — those really do render as `""` — so the two
+cannot be preflighted the same way. The **Log in to ECR** step checks variables by **shape**
+(12 digits, `xx-region-N`) rather than by emptiness, and the deploy job does the same for
+`INSTANCE_ID`. Both print what they actually received.
 
 ### 1. Gitea secrets — repository level, not organisation
 
