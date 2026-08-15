@@ -7,6 +7,7 @@ import {
   findPlace,
   listPublicLinksFor,
   parseCoordinate,
+  parseNear,
   parseRadius,
   placesNear,
 } from "../services/places";
@@ -51,6 +52,7 @@ function single(value: unknown, name: string): string | undefined {
 }
 
 interface NearQuery {
+  near?: unknown;
   lat?: unknown;
   lon?: unknown;
   radius?: unknown;
@@ -73,10 +75,18 @@ interface NearQuery {
  */
 router.get("/near", async (req: Request<unknown, unknown, unknown, NearQuery>, res, next) => {
   try {
-    const { lat, lon } = parseCoordinate(
-      single(req.query.lat, "lat"),
-      single(req.query.lon, "lon"),
-    );
+    // Two spellings of one thing, because the rest of the product already has
+    // two. The Atom feed subscribes to a place with `?near=lat,lon` and the map
+    // page builds that form; this endpoint is literally called `/near` and took
+    // only `?lat=&lon=`. A caller who copied the feed's form got
+    // "lat must be a number between -90 and 90" — an error naming a parameter
+    // they had not used, on a machine-facing surface whose whole promise is
+    // that it can be used without reading the source.
+    const near = single(req.query.near, "near");
+    const { lat, lon } =
+      near === undefined
+        ? parseCoordinate(single(req.query.lat, "lat"), single(req.query.lon, "lon"))
+        : parseNear(near);
     const metres = parseRadius(single(req.query.radius, "radius"));
 
     const jurisdiction = single(req.query.jurisdiction_id, "jurisdiction_id");

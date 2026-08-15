@@ -209,7 +209,7 @@ describe("subscriptions on the unified delivery model", () => {
   });
 
   describe("the public /api/alerts surface", () => {
-    it("subscribes, returns the verify token once, and never the raw destination", async () => {
+    it("subscribes, never returns the verify token, and never the raw destination", async () => {
       const res = await request(app)
         .post("/api/alerts")
         .send({
@@ -220,7 +220,12 @@ describe("subscriptions on the unified delivery model", () => {
         })
         .expect(201);
 
-      assert.ok(res.body.verify_token);
+      // The verify token proves the requester reads the address. Returning it
+      // to the requester lets them verify an address they do not own, which is
+      // double opt-in with the opt-in removed — delivery §5d. It reaches the
+      // holder by mail and by no other route.
+      assert.equal(res.body.verify_token, undefined);
+      assert.equal(res.body.created, true);
       assert.equal(res.body.routes[0].cadence, "daily");
       assert.equal(
         JSON.stringify(res.body).includes(email("route-create")),
@@ -230,14 +235,40 @@ describe("subscriptions on the unified delivery model", () => {
     });
 
     it("verifies through the token, and 404s an unknown one", async () => {
-      const created = await request(app)
+      await request(app)
         .post("/api/alerts")
         .send({ channel_type: "email", destination: email("route-verify"), jurisdiction_id: BOZEMAN_ID })
         .expect(201);
 
-      await request(app).get(`/api/alerts/verify/${created.body.verify_token}`).expect(200);
+      // Read from the row, because the response no longer carries it — which is
+      // the point. Only something with database access, i.e. the mailer, can
+      // put this token in front of the person who owns the address.
+      const row = await db("delivery_channels")
+        .where({ name: email("route-verify") })
+        .first<{ verify_token: string }>("verify_token");
+      await request(app).get(`/api/alerts/verify/${row.verify_token}`).expect(200);
       await request(app).get(`/api/alerts/verify/${"a".repeat(64)}`).expect(404);
       await request(app).get("/api/alerts/verify/short").expect(400);
+    });
+
+    it("gives a re-subscriber no token for a channel it did not create", async () => {
+      const first = await request(app)
+        .post("/api/alerts")
+        .send({ channel_type: "email", destination: email("route-again"), jurisdiction_id: BOZEMAN_ID })
+        .expect(201);
+      assert.equal(first.body.created, true);
+      assert.ok(first.body.unsubscribe_token);
+
+      // The same address, typed by somebody else. `subscribe` resolves to the
+      // existing row, so an unconditional response would hand a stranger the
+      // token that reads, edits and cancels that subscriber's alerts.
+      const again = await request(app)
+        .post("/api/alerts")
+        .send({ channel_type: "email", destination: email("route-again"), jurisdiction_id: GALLATIN_ID })
+        .expect(201);
+      assert.equal(again.body.created, false);
+      assert.equal(again.body.unsubscribe_token, undefined);
+      assert.equal(again.body.verify_token, undefined);
     });
 
     it("lets the holder change cadence on their own route and nobody else's", async () => {

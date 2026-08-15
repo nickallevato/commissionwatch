@@ -60,9 +60,32 @@ router.post('/', async (req: Request<unknown, unknown, SubscribeBody>, res, next
       cadence: isString(body.cadence) ? (body.cadence as Cadence) : undefined,
     });
 
-    // The verify token is returned exactly once, at creation, so it can be
-    // delivered to the holder. It is never readable again.
-    res.status(201).json(result);
+    // **The verify token never leaves the server.** It is the only evidence
+    // that whoever asked for this subscription reads the address, and returning
+    // it to the caller lets that caller verify an address they do not own —
+    // which is double opt-in with the opt-in taken out. `/api/subscriptions`
+    // was fixed for this on 2026-08-13 and this surface was not; delivery §5d
+    // calls it a consent hole rather than a cosmetic one. It reaches the holder
+    // by mail, and until mail ships it reaches nobody, which is the correct
+    // state for a verification that nothing can yet perform.
+    //
+    // The management token is returned **only for a channel this request just
+    // created**. `subscribe` on an address that is already subscribed resolves
+    // to the existing row, so returning it unconditionally would hand a stranger
+    // who typed a known address the token that reads, edits and cancels that
+    // subscriber's alerts.
+    const { channel_id, channel_type, destination_masked, verified, enabled, routes } = result;
+    const payload: Record<string, unknown> = {
+      channel_id,
+      channel_type,
+      destination_masked,
+      verified,
+      enabled,
+      routes,
+      created: result.created,
+    };
+    if (result.created) payload.unsubscribe_token = result.unsubscribe_token;
+    res.status(201).json(payload);
   } catch (err) {
     if (err instanceof SubscriptionError) {
       res.status(err.statusCode).json({ error: err.message, statusCode: err.statusCode });

@@ -75,11 +75,28 @@ export interface SubscriptionView {
 
 export interface SubscribeResult extends SubscriptionView {
   /**
-   * Returned exactly once, at creation, so it can be mailed to the holder.
-   * Never readable again — `readByToken` does not return it.
+   * For the mailer, and for nothing that answers an HTTP request.
+   *
+   * The token's whole job is to prove that whoever holds it reads the address.
+   * Handing it back to the caller destroys that: the caller can then verify an
+   * address they do not own, which is double opt-in with the opt-in removed.
+   * Delivery §5d names this a consent hole rather than a cosmetic one, and
+   * `routes/alerts.ts` is where it is kept out of the response — the service
+   * still returns it because the thing that mails it needs it, and that thing
+   * does not exist yet.
    */
   verify_token: string | null;
   unsubscribe_token: string;
+  /**
+   * Did this request create the channel, or find one that was already there?
+   *
+   * The distinction is load-bearing. `subscribe` on an address that is already
+   * subscribed returns *that subscriber's* management token, so without this the
+   * route would hand a stranger who typed a known address the token that reads,
+   * edits and cancels it. Only a freshly minted token may be returned to the
+   * caller, because only then is the caller demonstrably the person who made it.
+   */
+  created: boolean;
 }
 
 export class SubscriptionError extends Error {
@@ -178,6 +195,7 @@ export class SubscriptionService {
       .first();
 
     let channel: ChannelRow;
+    let created = false;
     if (existing) {
       if (existing.owner_kind !== 'subscriber') {
         // The destination is already an operator channel. Refusing without
@@ -202,6 +220,7 @@ export class SubscriptionService {
         })
         .returning<ChannelRow[]>('*');
       channel = row;
+      created = true;
     }
 
     await this.db('channel_routes')
@@ -225,6 +244,7 @@ export class SubscriptionService {
       ...view,
       verify_token: channel.verify_token,
       unsubscribe_token: channel.unsubscribe_token ?? '',
+      created,
     };
   }
 

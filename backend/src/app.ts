@@ -25,6 +25,8 @@ import placesRouter from "./routes/places";
 import sourceRouter from "./routes/source";
 import transcriptsRouter from "./routes/transcripts";
 import feedRouter from "./routes/feed";
+import mcpRouter from "./routes/mcp";
+import listUnsubscribeRouter from "./routes/list-unsubscribe";
 import sitemapRouter from "./routes/sitemap";
 import calendarRouter from "./routes/calendar";
 import adminRouter from "./routes/admin";
@@ -130,6 +132,12 @@ app.use("/api/data", dataRouter);
 // The feeds own their own paths, so no prefix. Served from the site root like
 // the sitemap, because that is where a reader's client looks for them.
 app.use(feedRouter);
+// The machine channel: `POST /mcp` and `GET /.well-known/mcp.json`, at the site
+// root because RFC 8615 puts `/.well-known/` there and because an MCP endpoint
+// is pasted into a config file by hand. **Off unless `MCP_ENABLED=true`** — both
+// paths 404 otherwise, so deploying it changes nothing observable. See
+// `routes/mcp.ts`, including the nginx locations it still needs.
+app.use(mcpRouter);
 app.use("/sitemap.xml", sitemapRouter);
 // The public meeting calendar and the per-jurisdiction iCal feeds. Published
 // meetings only; a meeting with no published time is an all-day event rather
@@ -163,6 +171,15 @@ app.use("/api/notifications", notificationsRouter);
 // The unified self-serve alerts surface, scoped by the management token from
 // the subscriber's own email.
 app.use("/api/alerts", alertsRouter);
+// RFC 8058 one-click unsubscribe, the target of the `List-Unsubscribe` header.
+// Its own urlencoded parser because a mail provider posts `List-Unsubscribe=
+// One-Click` as a form, exactly like Twilio below. Unauthenticated on purpose:
+// an unsubscribe that demands a login is an unsubscribe that does not work.
+app.use(
+  "/api/list-unsubscribe",
+  express.urlencoded({ extended: false }),
+  listUnsubscribeRouter,
+);
 // Twilio posts form-encoded, not JSON, so this router needs its own parser.
 app.use("/api/sms", express.urlencoded({ extended: false }), smsRouter);
 // BEFORE the admin router, which ends in a guarded catch-all 404 — anything

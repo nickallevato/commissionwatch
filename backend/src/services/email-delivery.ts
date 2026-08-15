@@ -13,14 +13,50 @@ interface NotificationWithContext {
   unsubscribe_token: string;
 }
 
-interface ResendClient {
+/**
+ * The provider, reduced to the one call this service makes.
+ *
+ * Exported so a test can supply one. That seam exists because the properties
+ * worth asserting here are all properties of what leaves the process — that a
+ * suppressed address is never handed to a provider, that a list message carries
+ * both RFC 8058 headers and a transactional one carries neither — and none of
+ * them can be observed from outside without either a real network call or a way
+ * to stand in for the provider. It is the second.
+ */
+export interface ResendClient {
   emails: {
     send: (params: {
       from: string;
       to: string;
       subject: string;
       html: string;
+      headers?: Record<string, string>;
     }) => Promise<{ id?: string } | null | undefined>;
+  };
+}
+
+/**
+ * RFC 8058 one-click unsubscribe.
+ *
+ * Delivery §5c names both headers as a precondition for the first bulk send:
+ * Gmail and Yahoo require them, and the requirement is the right one. They are
+ * built here rather than by the callers because a header a caller can forget is
+ * a header that will be missing from exactly the message that needed it.
+ *
+ * `List-Unsubscribe` carries only the https URI and no `mailto:` — a mailto
+ * alternative would name an inbox nobody reads, and an unsubscribe address that
+ * silently discards is worse than none. `List-Unsubscribe-Post` is what makes it
+ * one-click; without it a provider treats the URI as an ordinary link and the
+ * one-click button does not appear.
+ *
+ * A transactional message gets neither, deliberately. There is no list to leave,
+ * and offering "unsubscribe" on the acknowledgement of somebody's own dispute
+ * would offer to stop a reply they are waiting for.
+ */
+export function listUnsubscribeHeaders(url: string): Record<string, string> {
+  return {
+    "List-Unsubscribe": `<${url}>`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
   };
 }
 
@@ -72,12 +108,15 @@ export class EmailDeliveryService {
     private db: Knex,
     apiKey?: string,
     fromEmail?: string,
+    /** A stand-in provider. Tests only — see `ResendClient`. */
+    private readonly injectedClient?: ResendClient,
   ) {
     this.fromEmail = fromEmail || process.env.ALERT_FROM_EMAIL || "alerts@commissionwatch.org";
     this.apiKey = apiKey || process.env.RESEND_API_KEY;
   }
 
   private async client(): Promise<ResendClient | null> {
+    if (this.injectedClient !== undefined) return this.injectedClient;
     if (!this.apiKey) return null;
     this.loading ??= (async () => {
       try {
@@ -103,7 +142,12 @@ export class EmailDeliveryService {
         const subject = `[${notification.severity.toUpperCase()}] Civic anomaly detected in ${notification.jurisdiction_name}`;
         const html = this.renderImmediateEmail(notification);
 
-        const outcome = await this.sendEmail(notification.email, subject, html);
+        const outcome = await this.sendEmail(
+          notification.email,
+          subject,
+          html,
+          notification.unsubscribe_token,
+        );
         const status = this.statusFor(outcome);
 
         await this.db("notifications")
@@ -164,7 +208,7 @@ export class EmailDeliveryService {
           : `Daily civic digest for ${jurisdiction}`;
 
         const html = this.renderDigestEmail(notifications, jurisdiction, unsubToken, isWeekly);
-        const outcome = await this.sendEmail(email, subject, html);
+        const outcome = await this.sendEmail(email, subject, html, unsubToken);
         const status = this.statusFor(outcome);
 
         const ids = notifications.map((n: { id: string }) => n.id);
@@ -226,7 +270,16 @@ export class EmailDeliveryService {
    * this process, and inferring delivery from the absence of an exception is
    * how the lie got in.
    */
-  private async sendEmail(to: string, subject: string, html: string): Promise<SendOutcome> {
+  private async sendEmail(
+    to: string,
+    subject: string,
+    html: string,
+    /**
+     * The holder's unsubscribe token, when this message is part of a list.
+     * Omitted for transactional mail — see `listUnsubscribeHeaders`.
+     */
+    unsubscribeToken?: string,
+  ): Promise<SendOutcome> {
     // The suppression check is **here**, at the one place every message passes
     // through, rather than at each caller. A caller that forgets is the whole
     // failure mode: one complaint damages deliverability for every future
@@ -246,7 +299,15 @@ export class EmailDeliveryService {
       return { delivered: false, reason: "dry_run" };
     }
 
-    const result = await resend.emails.send({ from: this.fromEmail, to, subject, html });
+    const result = await resend.emails.send({
+      from: this.fromEmail,
+      to,
+      subject,
+      html,
+      ...(unsubscribeToken === undefined
+        ? {}
+        : { headers: listUnsubscribeHeaders(this.unsubscribeUrl(unsubscribeToken)) }),
+    });
     const providerId = typeof result?.id === "string" && result.id.length > 0 ? result.id : null;
     if (providerId === null) {
       // The provider answered without an id. That is not a delivery, and
@@ -345,8 +406,18 @@ export class EmailDeliveryService {
       .replace(/"/g, "&quot;");
   }
 
+  /**
+   * The one-click endpoint, for the header and for the link in the body alike.
+   *
+   * It used to be `/api/subscriptions/unsubscribe/{token}`, which is a GET that
+   * acts — and a GET that acts is unsubscribed by the next link-prefetcher or
+   * corporate mail scanner that touches the message, on behalf of a person who
+   * never clicked. `routes/list-unsubscribe.ts` answers a GET with a one-button
+   * page and only acts on the POST, which is also the shape RFC 8058 requires
+   * for the header. The old route is untouched and still works.
+   */
   private unsubscribeUrl(token: string): string {
     const base = process.env.APP_BASE_URL || "http://localhost:3001";
-    return `${base}/api/subscriptions/unsubscribe/${token}`;
+    return `${base}/api/list-unsubscribe/${token}`;
   }
 }

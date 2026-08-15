@@ -428,6 +428,35 @@ describe("the routes", () => {
     }
   });
 
+  /**
+   * The endpoint is called `/near`, the Atom feed subscribes to a place with
+   * `?near=lat,lon`, and the map page builds that form — and this route took
+   * only `?lat=&lon=`. A caller who copied the feed's spelling got
+   * "lat must be a number between -90 and 90": an error naming a parameter they
+   * had never used, on the machine-facing surface whose entire promise is that
+   * it works without reading the source.
+   */
+  it("accepts the feed's ?near= spelling as well as ?lat=&lon=", async () => {
+    const viaPair = await request(app)
+      .get(`/api/places/near?lat=${CENTRE.lat}&lon=${CENTRE.lon}&radius=${RADIUS}`)
+      .expect(200);
+    const viaNear = await request(app)
+      .get(`/api/places/near?near=${CENTRE.lat},${CENTRE.lon}&radius=${RADIUS}`)
+      .expect(200);
+
+    assert.deepEqual(
+      (viaNear.body as { data: Array<{ id: string }> }).data.map((row) => row.id),
+      (viaPair.body as { data: Array<{ id: string }> }).data.map((row) => row.id),
+      "the two spellings must name the same point",
+    );
+  });
+
+  it("still refuses a malformed ?near=, and says which parameter it means", async () => {
+    for (const query of ["?near=45.6796", "?near=north,-111.0386", "?near=145.6,-111.0"]) {
+      await request(app).get(`/api/places/near${query}`).expect(400);
+    }
+  });
+
   it("400s an absurd radius rather than scanning the table", async () => {
     const res = await request(app)
       .get(`/api/places/near?lat=${CENTRE.lat}&lon=${CENTRE.lon}&radius=40000000`)
