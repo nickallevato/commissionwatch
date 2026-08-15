@@ -18,10 +18,20 @@
  * never **whether a check applies**, and `feature-registry-audit.test.ts` holds
  * the key set to that by vocabulary.
  *
- * `generated_narrative` is the entry that makes the distinction concrete. On
- * means composed prose reaches the *operator queue*. There is no value of any
- * flag that publishes generated prose about a person, because the review gate is
- * a wall and is not in this file.
+ * A capability whose output lands behind the review gate makes the distinction
+ * concrete: turning it on can mean composed prose reaches the *operator queue*,
+ * and there is still no value of any flag that publishes generated prose about a
+ * person, because the review gate is a wall and is not in this file.
+ *
+ * ## What may never stay here
+ *
+ * **A key nothing reads.** A switch that accepts a click and changes nothing is
+ * the failure this project exists to refuse about the public record, committed
+ * against our own console — and it is worse than a missing feature, because the
+ * row's description tells an operator that something happened. Every key here
+ * must have a reader outside this file, and
+ * `feature-registry-audit.test.ts` § 3 scans `src/` and fails by name when one
+ * does not. See the note below `FEATURES` for the two keys that failed it.
  *
  * ## The key type
  *
@@ -123,33 +133,6 @@ export const FEATURES = [
     requiresSeed: null,
   },
   {
-    key: "claim_publication",
-    title: "Published claims",
-    description:
-      "An approved claim renders for the public inside the meeting it was extracted from, at " +
-      "`#claim-{id}`, serving the pinned `rendered_text` bytes that were approved rather than " +
-      "a re-render. Approval is still a wall: this switch decides whether approved claims are " +
-      "shown, never whether a claim needs approving.",
-    risk: "publishes",
-    legacyEnv: null,
-    requiresSeed: null,
-  },
-  {
-    key: "generated_narrative",
-    title: "Generated finding narrative",
-    description:
-      "The findings composer drafts prose for a detected finding **into the operator review " +
-      "queue**, every sentence carrying its citation. Nothing it writes reaches a reader " +
-      "without an operator approving it, and there is no flag value that changes that — the " +
-      "review gate is a wall, not a feature.",
-    // `low`, and that is the whole point of the entry: the output of this
-    // capability lands behind the review gate, so turning it on changes what an
-    // operator sees and nothing a stranger sees.
-    risk: "low",
-    legacyEnv: null,
-    requiresSeed: null,
-  },
-  {
     key: "dated_export_archive",
     title: "Dated export archive",
     description:
@@ -170,6 +153,68 @@ export const FEATURES = [
     requiresSeed: null,
   },
 ] as const satisfies readonly FeatureDefinition[];
+
+/*
+ * ## Removed in 0.5.0: two switches that were wired to nothing
+ *
+ * `claim_publication` and `generated_narrative` shipped in 0.4.0 as rows in this
+ * array. Both rendered a toggle in the operator console, both accepted a typed
+ * reason and wrote a `features_audit` row when clicked, and neither key was read
+ * anywhere in `backend/src` outside this file. The whole registry has five
+ * consumers — `routes/mcp.ts`, `routes/data.ts`, `services/events/drain.ts`,
+ * `services/prerender/consumer.ts` and `services/export/snapshot-scheduler.ts` —
+ * and no version of either key ever appeared in one. Clicking them changed
+ * nothing, while the description on the row told an operator that something had
+ * changed. They are recorded here rather than deleted silently, because a switch
+ * that quietly vanishes is the same species of unexplained record as a switch
+ * that quietly does nothing.
+ *
+ * ### `claim_publication` — "Published claims", risk `publishes`
+ *
+ * Claimed: an approved claim renders for the public inside the meeting it was
+ * extracted from, at `#claim-{id}`, serving the pinned `rendered_text` bytes that
+ * were approved; the switch decides whether approved claims are *shown*, never
+ * whether a claim needs approving.
+ *
+ * What is actually true today: **approved claims are already public**, and no
+ * surface that serves them consulted this key. `services/feeds/entries.ts`
+ * (`whereClaimPublic` + `renderApprovedClaim`), `services/export/datasets.ts`
+ * and `services/public-corrections.ts` all query through `whereClaimPublic`
+ * directly, and `GET /api/meetings/:id/claims` serves `listPublicClaims`, which
+ * `services/prerender/pages.ts` and `services/delivery/mcp.ts` reuse whole. Every
+ * one of them is correctly walled — the claim wall did its job the whole time.
+ * The switch was not off, it was absent, and the reader saw the claims either
+ * way.
+ *
+ * Before it returns, the operator has to decide something this comment cannot:
+ * gating those surfaces on a key that defaults off would **retract claims that
+ * are public in production right now**, silently, on the next deploy. It
+ * would also break the property 0.4.0 rests on — with no registry row present,
+ * behaviour is byte-identical to before the registry existed. A returning key
+ * needs a decision about what happens to already-public claims on the deploy that
+ * introduces it, and that decision is the operator's.
+ *
+ * ### `generated_narrative` — "Generated finding narrative", risk `low`
+ *
+ * Claimed: a findings composer drafts prose for a detected finding **into the
+ * operator review queue**, every sentence carrying its citation.
+ *
+ * What is actually true today: there is no composer. No module in `backend/src`
+ * drafts prose for a finding. The key described a subsystem that was never built,
+ * which is the more ordinary of the two failures and the more misleading one — an
+ * operator reading the console had no way to tell it apart from a capability
+ * simply switched off.
+ *
+ * Before it returns: the composer has to exist, writing drafts to the review
+ * queue via `services/review/queue.ts` and never past it. The invariants it must
+ * satisfy are unchanged and are not settings — nothing naming a person
+ * auto-publishes, every sentence traces to a stored artifact with a locator, and
+ * the text describes the record rather than the motive.
+ *
+ * Re-adding either key means adding it back to this array **with its consumer in
+ * the same change**. `feature-registry-audit.test.ts` § 3 enforces that, and it
+ * is the check that would have caught both of these in 0.4.0.
+ */
 
 /** The literal union of shipped keys, read back off `FEATURES`. */
 export type FeatureKey = (typeof FEATURES)[number]["key"];

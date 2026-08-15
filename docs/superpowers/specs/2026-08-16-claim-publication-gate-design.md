@@ -18,17 +18,28 @@ named `claim_publication` was wired to nothing.
 Two of those sentences are true statements about the system. The third — *this switch decides
 whether approved claims are shown* — is false. The key appears nowhere outside `manifest.ts`.
 
-**Approved claims are already public**, through three surfaces, none of them gated:
+**Approved claims are already public**, through **six** surfaces, none of them gated. This document
+first said three; that was wrong, and the correction matters because it widens what a switch would
+have to reach:
 
-| Surface | Module | Route |
+| Surface | Module | Reached by |
 |---|---|---|
 | Syndication feeds | `services/feeds/entries.ts` | `routes/feed.ts` |
 | Bulk open data | `services/export/datasets.ts` | `routes/data.ts` |
 | Corrections log | `services/public-corrections.ts` | `routes/corrections.ts` |
+| The meeting's own claims API | `services/review/claims.ts` → `listPublicClaims` | `GET /api/meetings/:id/claims` |
+| **Prerendered public pages** | `services/prerender/pages.ts` | reuses `listPublicClaims` whole |
+| **The MCP server** | `services/delivery/mcp.ts` | reuses `listPublicClaims` whole |
 
-All three go through `whereClaimPublic` — migration 087's predicate: approved, unretracted, meeting
-public — so the **wall is intact and was never the problem**. The defect is only that the console
-advertises a control over these surfaces that does not exist.
+All six go through the wall — `whereClaimPublic`, migration 087's predicate: approved, unretracted,
+meeting public — so the **wall is intact and was never the problem**. The defect is only that the
+console advertises a control over these surfaces that does not exist.
+
+The last two are the awkward ones for any gating design. A prerendered page is a **file already
+written to disk**; turning a flag off does not unwrite it, and the consumer only rewrites a page when
+an event tells it to. So a switch over claims would have to enqueue a re-render of every affected
+meeting to take effect at all — which is a very different operation from "stop serving", and it is
+the kind of thing an operator would reasonably expect a switch to do instantly.
 
 ## Why the loop did not simply wire it
 

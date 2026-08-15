@@ -188,8 +188,10 @@ services:
       - FEATURE_EVENT_DRAIN=${FEATURE_EVENT_DRAIN:-}
       - FEATURE_PRERENDER=${FEATURE_PRERENDER:-}
       - FEATURE_MCP_SERVER=${FEATURE_MCP_SERVER:-}
-      - FEATURE_CLAIM_PUBLICATION=${FEATURE_CLAIM_PUBLICATION:-}
-      - FEATURE_GENERATED_NARRATIVE=${FEATURE_GENERATED_NARRATIVE:-}
+      # FEATURE_CLAIM_PUBLICATION and FEATURE_GENERATED_NARRATIVE were passed
+      # through here until 0.5.0 removed both keys from the manifest for having
+      # no reader in `backend/src`. A kill switch for a key that does not exist
+      # is one more control that accepts a value and changes nothing.
       - FEATURE_DATED_EXPORT_ARCHIVE=${FEATURE_DATED_EXPORT_ARCHIVE:-}
       - FEATURE_POLL_INTERVAL_MS=${FEATURE_POLL_INTERVAL_MS:-}
     volumes:

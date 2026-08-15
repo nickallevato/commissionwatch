@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import { FEATURES } from "../src/services/features/manifest";
 
@@ -22,17 +22,22 @@ import { FEATURES } from "../src/services/features/manifest";
  * `publication-wall-audit.test.ts` was written for, where two documents described
  * a rule that `GET /api/votes` had never followed.
  *
- * So this suite measures it from two sides:
+ * So this suite measures it from three sides:
  *
  *  1. **no key in the manifest names a wall.** A key matching the vocabulary of a
  *     check cannot ship, so there is nothing for a console to offer and nothing
- *     for `setFlag` to write. `claim_publication` is the one key that trips the
- *     vocabulary and is listed below with its reason, in the same style as
- *     `publication-wall-audit.test.ts`'s `ALLOWED`;
+ *     for `setFlag` to write. Any key that trips the vocabulary and is nevertheless
+ *     a capability is listed in `ALLOWED_KEYS` below with its reason, in the same
+ *     style as `publication-wall-audit.test.ts`'s `ALLOWED`;
  *  2. **the wall modules do not know the registry exists.** No import, no call, in
  *     any of them. A flag cannot gate a check that cannot read a flag, and that is
  *     a stronger guarantee than any assertion about behaviour at a particular call
- *     site.
+ *     site;
+ *  3. **every shipped key has a reader.** A key nothing under `src/` ever asks
+ *     about is a switch that lies about what it controls — the console renders it,
+ *     the operator clicks it, the audit row is written, and behaviour does not
+ *     move. 0.4.0 shipped two of those, and this is the check that would have
+ *     caught them.
  *
  * ## What it does not measure
  *
@@ -43,6 +48,12 @@ import { FEATURES } from "../src/services/features/manifest";
  * file this list does not name makes this suite **fail**, rather than quietly
  * measuring nothing, which is the failure mode of every hand-kept list beside
  * growing code.
+ *
+ * The third check is textual in the other direction: it proves a key is *named*
+ * somewhere outside the manifest, not that the naming sits on a live code path. A
+ * key mentioned in dead code would pass. It is still the difference between a
+ * switch with a reader and a switch with none, which is the whole of the defect it
+ * exists for.
  */
 
 const SRC = join(__dirname, "..", "src");
@@ -76,17 +87,17 @@ const WALL_VOCABULARY = [
 
 /**
  * A key that trips the vocabulary and is nevertheless a capability, with the
- * reason. Matched on the **whole key**, so `claim_publication` being here exempts
- * nothing else: `publication_wall`, `skip_publication` and
- * `claim_publication_check` all still fail.
+ * reason. Matched on the **whole key**, so an entry exempts nothing but itself:
+ * with `claim_publication` listed, `publication_wall`, `skip_publication` and
+ * `claim_publication_check` all still failed.
  */
 const ALLOWED_KEYS: Readonly<Record<string, string>> = {
-  // Gates whether an *already approved* claim renders for the public, serving the
-  // pinned bytes an operator approved. It cannot decide whether a claim needs
-  // approving: that is `reviewClaim`, it is a wall, and it has no flag. Turning
-  // this off hides approved claims; there is no value of it that shows an
-  // unapproved one.
-  claim_publication: "gates whether approved claims render, never whether approval is required",
+  // Empty since 0.5.0. `claim_publication` was the single entry: it tripped
+  // `publication` and was exempted as a capability that gated whether an already
+  // approved claim renders. It turned out to gate nothing at all — check 3 below
+  // is what found that — and it was removed from the manifest, so its exemption
+  // goes with it. The test under this one refuses to let a stale name sit here
+  // as a hole for a future key to fall into.
 };
 
 describe("no feature key can gate a wall", () => {
@@ -259,6 +270,119 @@ describe("the walls do not know the registry exists", () => {
       [],
       "A flag decided something inside a wall. There is no reading of this that is " +
         "not an invariant becoming a setting:\n  " + offenders.join("\n  "),
+    );
+  });
+});
+
+/* --------------------------------------------------------------------------
+   3. Every shipped key has a reader
+   -------------------------------------------------------------------------- */
+
+/**
+ * A switch that accepts a click and changes nothing is the failure this project
+ * exists to refuse about the public record, committed against our own console.
+ *
+ * 0.4.0 shipped `claim_publication` and `generated_narrative` into `FEATURES`.
+ * Both rendered a toggle, both wrote an audit row when clicked, and neither was
+ * read anywhere outside `manifest.ts`. The descriptions asserted otherwise — one
+ * claimed to decide "whether approved claims are shown" while approved claims
+ * were already public through three surfaces none of which consulted it. That is
+ * the same defect class as 0.4.0's F1j, a flag that reached no loop.
+ *
+ * The check is a scan of real source text off disk, deliberately: the only other
+ * way to state "these keys are wired" is a second hand-written list beside the
+ * manifest, and a hand-written list of what is wired is exactly the artifact that
+ * goes stale and starts lying — which is the defect, not the guard.
+ */
+
+/** The manifest is where a key is *declared*; a reader must be somewhere else. */
+const MANIFEST_PATH = join("services", "features", "manifest.ts");
+
+/** Every `.ts` file under `backend/src`, recursively. */
+function sourceFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...sourceFiles(full));
+    } else if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
+/**
+ * The key written as a string literal — which is the only way a call site can name
+ * one, since `featureEnabled` takes `FeatureKey` and every consumer passes a
+ * literal. Quoted so that `dated_export_archive` does not match a comment
+ * discussing the dated export archive in prose.
+ */
+function keyLiteral(key: string): RegExp {
+  return new RegExp(`["'\`]${key}["'\`]`);
+}
+
+/** Comment lines are prose. A key discussed in a comment is not a key with a reader. */
+function isComment(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith("*") || trimmed.startsWith("//") || trimmed.startsWith("/*");
+}
+
+describe("every feature key has a reader", () => {
+  const files = sourceFiles(SRC).sort();
+
+  it("scans a source tree that exists, with a matcher that still matches", () => {
+    // Guard the guard. Two empty sets are equal, and a scan that silently stopped
+    // matching would report no offenders for the same reason a clean tree does —
+    // this repository has already been bitten by exactly that shape.
+    assert.ok(FEATURES.length > 0, "the manifest is empty, so the check below asserts nothing");
+    assert.ok(
+      files.length > 20,
+      `found ${files.length} source files under ${SRC} — the scan is looking at the wrong tree`,
+    );
+
+    // The matcher, proved against the one file guaranteed to contain every key.
+    // If `keyLiteral` stops matching, this fails here rather than passing an
+    // empty offender list downstream.
+    const manifest = readFileSync(join(SRC, MANIFEST_PATH), "utf8");
+    for (const feature of FEATURES) {
+      assert.match(
+        manifest,
+        keyLiteral(feature.key),
+        `the scan cannot find ${feature.key} in the manifest that declares it — the matcher is broken`,
+      );
+    }
+  });
+
+  it("finds, for every shipped key, at least one file outside the manifest that names it", () => {
+    const readers = new Map<string, string[]>(FEATURES.map((feature) => [feature.key, []]));
+
+    for (const file of files) {
+      const relativePath = relative(SRC, file);
+      if (relativePath === MANIFEST_PATH) continue;
+
+      const lines = readFileSync(file, "utf8").split("\n");
+      for (const [key, found] of readers) {
+        const pattern = keyLiteral(key);
+        const hit = lines.findIndex((line) => !isComment(line) && pattern.test(line));
+        if (hit >= 0) found.push(`${relativePath}:${hit + 1}`);
+      }
+    }
+
+    const offenders = [...readers]
+      .filter(([, found]) => found.length === 0)
+      .map(([key]) => key);
+
+    assert.deepEqual(
+      offenders,
+      [],
+      "A key with no reader is a switch that lies about what it controls. The console " +
+        "renders it, the operator types a reason, `setFlag` writes the row and the audit " +
+        "trail — and no code under `backend/src` ever asks. Nothing changes, and the " +
+        "description on the row says something did. Either wire the key to the capability " +
+        "it names, or take it out of `FEATURES` and leave a comment recording what it " +
+        "claimed and what must exist before it returns:\n  " +
+        offenders.join("\n  "),
     );
   });
 });

@@ -90,14 +90,21 @@ const PRERENDER: FeatureRow = {
   },
 };
 
-const NARRATIVE: FeatureRow = {
-  key: "generated_narrative",
-  title: "Generated finding narrative",
-  description: "The composer drafts prose for a finding into the operator review queue.",
-  risk: "low",
-  legacyEnv: null,
+/**
+ * This slot held `generated_narrative` until 0.5.0, when the backend manifest
+ * dropped that key and `claim_publication` for having no reader anywhere in
+ * `backend/src` — two switches that rendered here, accepted a click, wrote an
+ * audit row and changed nothing. A fixture for a key that does not ship is a
+ * mock of a response the server cannot send, so it is a real key now.
+ */
+const MCP: FeatureRow = {
+  key: "mcp_server",
+  title: "MCP server",
+  description: "`POST /mcp` answers instead of returning 404, for model clients.",
+  risk: "publishes",
+  legacyEnv: "MCP_ENABLED",
   requiresSeed: null,
-  killSwitchEnv: "FEATURE_GENERATED_NARRATIVE",
+  killSwitchEnv: "FEATURE_MCP_SERVER",
   enabled: false,
   source: "default",
   loadedAt: LOADED_AT,
@@ -148,7 +155,7 @@ const TAKEN: SnapshotRunRow = {
   detail: "6 dataset(s), 1204 row(s)",
 };
 
-function listing(features: FeatureRow[] = [DRAIN, PRERENDER, NARRATIVE]): FeatureListing {
+function listing(features: FeatureRow[] = [DRAIN, PRERENDER, MCP]): FeatureListing {
   return {
     features,
     pollIntervalMs: 5000,
@@ -193,8 +200,14 @@ describe("AdminFeaturesPage", () => {
     // The one key that can cause a message to leave the building is not filed
     // next to a key that writes a file.
     expect(within(sends).queryByText("Prerendered pages")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("group-publishes")).getByText("Prerendered pages")).toBeInTheDocument();
-    expect(within(screen.getByTestId("group-low")).getByText("Generated finding narrative")).toBeInTheDocument();
+    const publishes = screen.getByTestId("group-publishes");
+    expect(within(publishes).getByText("Prerendered pages")).toBeInTheDocument();
+    expect(within(publishes).getByText("MCP server")).toBeInTheDocument();
+    // No `low` section, because no shipped key is graded `low` since 0.5.0
+    // removed `generated_narrative`. An empty grade renders nothing rather than
+    // an empty heading, and the grade itself stays in `FEATURE_RISKS` for the
+    // next capability whose output lands behind the review gate.
+    expect(screen.queryByTestId("group-low")).not.toBeInTheDocument();
   });
 
   it("names the deciding source on every row", async () => {
@@ -237,13 +250,13 @@ describe("AdminFeaturesPage", () => {
     renderPage();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByTestId("toggle-generated_narrative"));
-    const confirm = screen.getByTestId("confirm-generated_narrative");
+    await user.click(await screen.findByTestId("toggle-mcp_server"));
+    const confirm = screen.getByTestId("confirm-mcp_server");
     // Visibly required before the click, rather than a 400 afterwards.
     expect(confirm).toBeDisabled();
 
     await user.type(
-      screen.getByLabelText(/why is generated_narrative being turned on/i),
+      screen.getByLabelText(/why is mcp_server being turned on/i),
       "Drafting into the review queue to evaluate it.",
     );
     expect(confirm).toBeEnabled();
@@ -310,19 +323,19 @@ describe("AdminFeaturesPage", () => {
   it("shows the API's own refusal verbatim", async () => {
     serve(listing());
     server.use(
-      http.put("/api/admin/features/generated_narrative", () =>
-        HttpResponse.json({ error: "generated_narrative is already disabled", statusCode: 409 }, { status: 409 }),
+      http.put("/api/admin/features/mcp_server", () =>
+        HttpResponse.json({ error: "mcp_server is already disabled", statusCode: 409 }, { status: 409 }),
       ),
     );
     renderPage();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByTestId("toggle-generated_narrative"));
-    await user.type(screen.getByLabelText(/why is generated_narrative/i), "Trying it.");
-    await user.click(screen.getByTestId("confirm-generated_narrative"));
+    await user.click(await screen.findByTestId("toggle-mcp_server"));
+    await user.type(screen.getByLabelText(/why is mcp_server/i), "Trying it.");
+    await user.click(screen.getByTestId("confirm-mcp_server"));
 
     // A paraphrase would be a second thing to debug.
-    expect(await screen.findByText("generated_narrative is already disabled")).toBeInTheDocument();
+    expect(await screen.findByText("mcp_server is already disabled")).toBeInTheDocument();
   });
 
   it("prints the latency as a number, and neither as instant nor as a restart", async () => {
@@ -630,11 +643,11 @@ describe("AdminFeaturesPage", () => {
 
   it("renders a feature whose risk grade this build does not know", async () => {
     // A switch missing from this screen is a switch nobody knows exists.
-    serve(listing([{ ...NARRATIVE, risk: "cataclysmic" }]));
+    serve(listing([{ ...MCP, risk: "cataclysmic" }]));
     renderPage();
 
     const group = await screen.findByTestId("group-unknown");
-    expect(within(group).getByText("Generated finding narrative")).toBeInTheDocument();
+    expect(within(group).getByText("MCP server")).toBeInTheDocument();
     expect(group).toHaveTextContent(/no words for/i);
   });
 });

@@ -136,7 +136,10 @@ describe("resolution with nothing installed", () => {
   });
 
   it("has no legacy variable for the keys that never had one", () => {
-    for (const key of ["claim_publication", "generated_narrative", "dated_export_archive"]) {
+    // `claim_publication` and `generated_narrative` were also in this list until
+    // 0.5.0 removed them from the manifest for having no reader anywhere in
+    // `src/`. See the note under `FEATURES`.
+    for (const key of ["dated_export_archive"]) {
       const definition = findFeatureDefinition(key);
       assert.ok(definition, key);
       assert.equal(definition.legacyEnv, null, key);
@@ -587,13 +590,13 @@ describe("GET /api/admin/features", () => {
 
   it("reports the last change with its actor and reason", async () => {
     await request(app)
-      .put("/api/admin/features/claim_publication")
+      .put("/api/admin/features/dated_export_archive")
       .set("Cookie", cookie)
-      .send({ enabled: true, reason: "showing approved claims to readers" })
+      .send({ enabled: true, reason: "serving point-in-time exports" })
       .expect(200);
 
     const res = await request(app).get("/api/admin/features").set("Cookie", cookie).expect(200);
-    const claim = res.body.features.find((f: { key: string }) => f.key === "claim_publication");
+    const claim = res.body.features.find((f: { key: string }) => f.key === "dated_export_archive");
     assert.equal(claim.enabled, true);
     assert.equal(claim.source, "registry");
     assert.equal(claim.loadedAt !== null, true);
@@ -601,7 +604,7 @@ describe("GET /api/admin/features", () => {
     assert.equal(claim.lastChange.enabledTo, true);
     assert.equal(claim.lastChange.operatorId, operatorId);
     assert.equal(claim.lastChange.operatorEmail, OPERATOR_EMAIL);
-    assert.equal(claim.lastChange.reason, "showing approved claims to readers");
+    assert.equal(claim.lastChange.reason, "serving point-in-time exports");
   });
 });
 
@@ -641,20 +644,20 @@ describe("PUT /api/admin/features/:key", () => {
 
   it("409s a no-op", async () => {
     await request(app)
-      .put("/api/admin/features/generated_narrative")
+      .put("/api/admin/features/prerender")
       .set("Cookie", cookie)
-      .send({ enabled: true, reason: "drafting into the queue" })
+      .send({ enabled: true, reason: "writing static pages for crawlers" })
       .expect(200);
 
     const res = await request(app)
-      .put("/api/admin/features/generated_narrative")
+      .put("/api/admin/features/prerender")
       .set("Cookie", cookie)
       .send({ enabled: true, reason: "again" })
       .expect(409);
     assert.match(res.body.error, /already enabled/);
 
     const audit = await db("features_audit")
-      .where({ key: "generated_narrative" })
+      .where({ key: "prerender" })
       .count<[{ count: string }]>({ count: "*" });
     assert.equal(Number(audit[0].count), 1);
   });
