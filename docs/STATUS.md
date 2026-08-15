@@ -95,9 +95,27 @@ timestamp. `DigestScheduler` had been running that path against a service with n
 Underneath it, `initResend` was an `async` method called un-awaited from a synchronous constructor,
 so `this.resend` was null for a window *even when a key was set*. `dry_run` is now its own status.
 
-**A NULL CHECK result counts as satisfied.** `jsonb_typeof(counts -> 'absent')` is NULL for a
-missing key, so the obvious constraint on `vote_events.counts` accepted exactly the malformed tally
-it existed to refuse.
+**A CHECK constraint that evaluates to NULL is satisfied — four of them shipped in one day.**
+`jsonb_typeof(counts -> 'absent')` is NULL for a missing key, so the constraint on
+`vote_events.counts` accepted exactly the malformed tally it existed to refuse. Then
+`place_links_citation_check` let a `stated` link insert with **no citation at all**, and that one
+had been wrong for hours while invisible, because nothing had ever written to the table — the first
+writer found it on its first run. An audit for the shape then found two more:
+`minute_claims_approved_pin_check` would have let an approved claim carry no render pin, and
+`transcript_status_sha_check` would have let a published transcript carry no hash of the bytes it
+claims to have read.
+
+The rule is not about jsonb or about regex: **`A OR (B AND C)` with a nullable operand on the right
+enforces nothing**, and the row it admits is the one that violates it hardest — the one with the
+columns simply absent. Wrap the disjunct in `coalesce(..., false)`.
+
+Neither of the last two had ever bitten, because their writers happen to set the columns. That is
+why the response was a guard rather than four fixes: a constraint that is true only by the good
+manners of its one caller fails the day a second caller appears, silently.
+`test/migrations-selfcontained.test.ts` now audits the live schema, exempting by **name with a
+stated reason** plus two provably-safe shapes — because any regex loose enough to cover the safe
+ones covers the dangerous one too, which is exactly how this went unnoticed four times. Verified to
+bite by injecting one.
 
 **Restart safety was not free.** Nothing ever returned a claimed `ingestion_jobs` row to the queue,
 so moving extraction onto the queue would have relocated the permanent-limbo bug rather than
