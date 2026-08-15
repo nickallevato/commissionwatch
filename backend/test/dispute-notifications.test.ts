@@ -31,7 +31,12 @@ import {
   submitDispute,
   type DisputeReceipt,
 } from "../src/services/disputes";
-import { createChannel, createRoute, resolveRoutes } from "../src/services/delivery/channels";
+import {
+  createChannel,
+  createRoute,
+  decryptChannelConfig,
+  resolveRoutes,
+} from "../src/services/delivery/channels";
 import { DeliveryDispatcher } from "../src/services/delivery/dispatcher";
 import {
   emitEvent,
@@ -296,12 +301,30 @@ describe("the dispute reply loop", () => {
       assert.equal(row.owner_kind, "direct");
       assert.equal(row.audience, "ops");
 
-      // Whatever the encryption does, the ciphertext of an empty object cannot
-      // contain an address. The point of the kind is that there is nothing on
-      // this row to leak if the table is dumped.
-      assert.ok(
-        !row.config_encrypted.toString("utf8").includes("@"),
-        "a direct channel is holding a destination",
+      // Decrypted, not searched for an "@" in the ciphertext.
+      //
+      // The earlier version read `config_encrypted.toString("utf8")` and
+      // asserted it contained no "@". Ciphertext is random bytes, and 0x40 is
+      // "@" — for a ~30-byte AES-GCM blob (IV + two bytes of `{}` + tag) the
+      // chance of at least one 0x40 is about one in nine. So the test failed
+      // roughly one CI run in nine, on a fresh channel with a fresh IV, having
+      // passed locally every time. It failed on `f136509`, which changed
+      // nothing anywhere near it.
+      //
+      // A flaky assertion is worse than a missing one: it teaches everybody to
+      // re-run the build. And this one was flaky in the safe direction, which
+      // means it would also have *passed* at random over a row that really did
+      // hold an address.
+      //
+      // The property is exact, so state it exactly: the row decrypts to a
+      // config with nothing in it. The point of `direct` is that a dump of this
+      // table yields no destination — the address is supplied per send and held
+      // nowhere at rest.
+      const config = decryptChannelConfig(row);
+      assert.deepEqual(
+        Object.keys(config as Record<string, unknown>),
+        [],
+        `a direct channel is holding ${Object.keys(config as Record<string, unknown>).join(", ")}`,
       );
     });
   });
