@@ -20,6 +20,225 @@ reads as finished. The scale:
 
 ---
 
+## [0.4.0] — 2026-08-15
+
+The release in which the things shipped dark in 0.3.0 got a switch an operator can actually reach —
+and in which building that switch found it did not reach two of the six features it claimed to
+control.
+
+**Deployment status: partial, and that is not a formality.** `72c10b0` is live, so the registry, the
+console and the live toggle are in production. Everything after it — the extraction de-duplication,
+the taxonomy mirror guard, the From-address fix, the dated archive — is committed, pushed, and **not
+running**, because the deploy host filled its disk. See *The deploy that did not happen* below.
+
+### Breaking
+
+None. With no row in the `features` table every flag resolves byte-identically to 0.3.0. That is the
+property the compatibility layer exists to hold, and it is why the drain, prerender and MCP suites
+pass **unmodified** rather than rewritten.
+
+---
+
+### The feature registry
+
+**Completeness: Shipped.** Live in production, verified from outside the host.
+
+Three features shipped dark in 0.3.0 behind `process.env` reads. Right for shipping them, wrong for
+operating them: turning one on meant editing a SecureString and re-running the SSM deploy, nothing
+recorded who did it, and the console did not say which features were live — the answer was spread
+across a compose file, a Parameter Store value and three source comments.
+
+**What it deliberately cannot do is the load-bearing part.** The publication wall, the review gate
+and the claim wall get no key. A registry able to disable a wall converts an invariant into a
+setting, and a setting is something somebody eventually changes at 11pm for a reason that made sense
+at the time. The manifest is an allow-list, and `feature-registry-audit.test.ts` asserts six wall
+modules contain no import of and no call into the registry — **verified by mutation**: a `review_gate`
+key fails it by name, and a registry call inside `whereMeetingPublished` fails it twice with the
+offending line quoted. A guard never seen to fail is not known to work.
+
+Resolution falls off to **off** in every failure mode: kill switch → registry row → legacy env →
+default. A process that cannot reach the database enables nothing and never blocks startup finding
+out.
+
+**The env kill switch outranks the database, on purpose.** The case that most demands turning a
+feature off is the one where the feature is hammering Postgres, and a switch needing a healthy
+Postgres to say "stop" does not work when it matters. It is **one-directional**: `FEATURE_MCP_SERVER=true`
+enables nothing and logs that the variable has no on position, because forcing a feature on from the
+environment is the untraceable enable this replaces.
+
+Every write records the operator, the timestamp and a **required reason**, in one transaction across
+both tables. A no-op write is refused rather than recorded, so the log reads as a list of changes
+and not a list of clicks.
+
+### The console — `/admin/features`
+
+**Completeness: Shipped.**
+
+Grouped by risk, `sends` first and alone. Every row **names the source that decided it**, because the
+failure this screen prevents is an operator flipping a row, seeing nothing change, and concluding the
+console is broken rather than that `FEATURE_EVENT_DRAIN=false` sits in the deploy config.
+
+- A kill-switched row's control renders **disabled**, with the variable printed beside it in place
+  rather than in a tooltip. A control that accepts a click and changes nothing is worse than none.
+- Turning on a `sends` feature requires **typing the key** as well as a reason — an input, not a
+  checkbox, because a checkbox can be clicked without reading anything.
+- The latency is printed as a **number** (~15s worst case), composed from server-supplied intervals.
+  Not "instant", which invites a second click; not "takes effect on restart", false since the loops
+  were fixed.
+- `loadedAt` is shown, with the distinction spelled out: *the switch says on* and *this process has
+  confirmed the switch says on* are different facts.
+- A failed request renders an error and an explicit absence reason, **never an empty list**. Two
+  operator screens in 0.3.0 claimed "the record shows none" when the request had failed; this is not
+  a third.
+- A risk grade this build does not recognise renders in an "unrecognised" group rather than falling
+  through every branch — **a switch missing from the switch panel is a switch nobody knows exists.**
+
+### The switch now reaches the loops
+
+**Completeness: Shipped dark** (the features it gates remain off).
+
+`EventDrain` and `PrerenderConsumer` latched their flag in the constructor, so a console toggle
+reached only `mcp_server`. **Found by building the console, not by reading the code.** The early
+return in `start()` was the actual bug: with no timer armed there was nothing left running to notice
+a change.
+
+**Where the gate sits matters as much as that it exists.** For the drain it is before the transaction
+opens, so nothing is claimed and `dispatched_at` stays null. For the consumer it is after the cursor
+read and before the event query, so the cursor does not advance while off. **Off is a pause, not a
+loss** — and for the dispute mailer that is a person owed a reply still getting one when the flag
+comes back on.
+
+The test asserts on the **ledgers**, never a return value, because `sendEmail` returning void whether
+or not it reached a provider is how the email log lied daily in production. It settles to `dry_run`,
+asserted explicitly not to be `sent`.
+
+### Extraction — the repetition loop
+
+**Completeness: Operator-gated.** Extraction is still not scheduled.
+
+0.3.0 measured a fifth of chunks unread and 100% `truncated-reply`. 0.4.0 read the raw replies. **The
+model restates claims verbatim**: one reply emitted a single object 92 times and was cut mid-string;
+another cycled four claims 33/32/33 times. In both, the genuine claims come first and the loop starts
+at index 4.
+
+- **De-duplicating by claim signature took rejections from 1,007 to 336** across 30 captured replies.
+  **671 of them — 67% — were the model repeating itself**, not problems with the record. `proposed`
+  is now counted after de-duplication, because 95 on the operator console said the model found 95
+  facts in a passage containing four.
+- **`repetition-truncated`** splits off from `truncated-reply`, earned only when the trailing run
+  introducing nothing new is ≥5. Observed tails were 90–144; an honest cut has a tail of 0.
+- **The chunk still counts as unread.** The label says what was observed and deliberately not what
+  was lost, because one reply cannot establish that.
+- Token ceiling untouched, chunks not split — both refused with reasons in 0.3.0 and unchanged.
+
+**What the measurement says, and its limit.** At n=30, **0 of 6 truncated chunks lost a verified
+claim**. The first analysis compared raw claim signatures and was **thrown out as worthless**: the
+model is wildly nondeterministic at temperature 0 — five *complete* replies to one chunk produced
+20/21/27/31/38 distinct claims against a union of 104 — so that measure charges truncation for the
+model's variance.
+
+And the result is published with its own bound rather than as a headline: **this corpus verifies
+about one claim per chunk, and two of five chunks verify zero across all six runs.** A chunk with
+nothing to lose cannot demonstrate that nothing is lost. Sound for this corpus, weak as a general
+claim, and it must be re-run once the office gate is addressed — 283 of the 336 surviving rejections
+are `not-an-official`, because these are a Weed District board's minutes printing bare first names.
+
+**No early abort.** The client is a single non-streaming POST, so there is no stream to stop. The
+cost is filed rather than hidden: a looping reply burns ~31k characters and ~65s against ~5k and ~15s.
+
+### The dated export archive
+
+**Completeness: Shipped dark.** `dated_export_archive` unset; every archive path 404s.
+
+"What did this site say in March" was unanswerable, and `/data` said so rather than implying
+otherwise. Two decisions, both settled by reading the schema:
+
+- **A point in time means a snapshot somebody took — forward-only.** Publication state is
+  `meetings.published_at`, one mutable timestamp, and unpublishing sets it to **NULL**. A meeting
+  published in March and withdrawn in April leaves no trace of ever having been public, so filtering
+  on `published_at <= date` returns today's survivors wearing March's date — and is most wrong
+  exactly about the records later taken down, which are the ones the question is usually about. The
+  archive answers from the first snapshot onward and 404s before it, saying no snapshot was taken.
+  **That is a different statement from "the site published nothing."**
+- **An archived export is walled at read time, so retraction reaches it.** A snapshot stores row ids
+  and a sha256, **never the bytes**. Serving one calls the same builder `/api/data` calls and
+  intersects with the recorded ids, so the intersection can only *remove* rows. `archive.ts` does not
+  know what a retraction is and does not need to. A second copy of a wall rule is how `emitEvent`'s
+  claim wall went a clause stale; there is no second copy here.
+
+The cost is printed, not buried: an archived export is *the rows published then that are still
+published now*, not the bytes served that day. Every response carries `rows_recorded`, `rows_served`,
+`withheld_since`, `sha256_then`, `sha256_now` and `unchanged`, because a quietly shorter file is
+indistinguishable from a smaller record.
+
+---
+
+### The deploy that did not happen
+
+**Completeness: Blocked — operator action required.**
+
+`deploy.yml` run 29009 failed. Every check job is green on the same sha; only `deploy-aws` failed,
+**on the instance**, extracting a Docker layer: `no space left on device`.
+
+The site was never at risk — the pull failed before anything replaced the running containers, so
+production kept serving the previous good sha and answering health 200. A failed deploy that leaves
+the previous version running is the pipeline behaving correctly.
+
+**Nothing alerted, and that is the finding.** The external monitor watches whether the site is up,
+and the site is up. A deploy failing while the previous version keeps serving is invisible to it. The
+disk filled silently and the first symptom was a failed release. **A green check suite plus a healthy
+site does not mean the release deployed** — probe `/api/version` for the sha.
+
+Not remediated automatically: freeing space means deleting from a full production disk while unable
+to see it, and `docker image prune -af` would remove the images a rollback needs.
+
+---
+
+### Fixed
+
+- **`ALERT_FROM_EMAIL` defaulted to a domain this project does not deploy**, so it could never have
+  aligned with any SPF/DKIM/DMARC record that might one day exist. Now derived from
+  `PUBLIC_BASE_URL`'s host, making alignment a property of the code rather than of two literals in
+  different files agreeing. That variable already decides every canonical URL, citation and
+  unsubscribe link, so a deployment that gets it wrong is already visibly wrong in ways somebody
+  notices — which is exactly what the From address was not. **This does not make mail deliverable**;
+  the DNS records are an operator task and nothing in the codebase creates or checks one.
+- **`MCP_ENABLED` was an exact `=== "true"` compare** and the generic legacy reader accepts
+  `1|yes|on`. Routing MCP through the registry verbatim would have turned `MCP_ENABLED=1` into a live
+  public endpoint. The test pinning the exact string was right.
+- **The console's latency came from a constant copied frontend-side.** Now served from the loops' own
+  constants, with a mutation test comparing against what a real consumer instance runs on rather than
+  against the constant the route imported — the latter would pass just as happily against a hardcode.
+- **`docs/STATUS.md`'s top extraction task pointed at a branch measured to fire zero times.**
+  Retracted in place rather than deleted; silently absent text reads as never having been there.
+
+### Drift, guarded
+
+- **The frontend hand-mirrored the extraction failure taxonomy.** Adding a reason meant editing the
+  backend list and two frontend copies, and missing either would have printed `undefined` to a reader
+  on the public status page rather than failing a build. Now asserted in both directions, with the
+  `unclassified` allowance derived from the backend's own declaration so the exemption cannot itself
+  go stale.
+
+  The lesson outlives the test: **a set-comparison guard needs a guard of its own.** Two empty sets
+  are equal, so a regex that stopped matching turns the file green and blind in the same moment. A
+  non-empty assertion on each scan caught a real fault on its first run.
+
+### Operational traps, stated rather than implied
+
+- **A kill-switched key can still be written.** The row can read `true` while the feature is off, so
+  dropping `FEATURE_EVENT_DRAIN=false` from the deploy config later starts the drain with **no fresh
+  decision**. Refusing the write would leave the console unable to record a decision at all.
+- **A push that succeeds is not a push that ships.** `origin` is Gitea and drives the deploy;
+  `github` is the public mirror CI does not use. A push to the mirror returns exit 0 and looks
+  identical to a deploy trigger — check the printed sha range, not the exit code.
+- **A validation that cannot distinguish "absent" from "the tool errored" measures nothing.**
+  `docker compose config` appeared to drop all seven `FEATURE_*` keys; it was failing outright
+  because `IMAGE_FRONTEND` is unset outside CI. The same shape as `nginx -t` being happy with three
+  broken configs in this repository.
+
+---
+
 ## [0.3.0] — 2026-08-15
 
 The release in which the pipeline joined up end to end, and in which most of what was found was
