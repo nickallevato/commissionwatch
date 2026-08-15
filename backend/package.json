@@ -17,7 +17,8 @@
     "sweep": "tsx src/scripts/sweep.ts",
     "finance-sync": "tsx src/scripts/finance-sync.ts",
     "backfill:artifact-text": "tsx src/scripts/backfill-artifact-text.ts",
-    "receipt": "tsx src/scripts/receipt.ts"
+    "receipt": "tsx src/scripts/receipt.ts",
+    "prerender:rebuild": "tsx src/scripts/prerender-rebuild.ts"
   },
   "engines": {
     "node": ">=22"

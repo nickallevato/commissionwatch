@@ -69,6 +69,11 @@ const RAIL: readonly RailGroup[] = [
       // and the evidence an operator needs to decide them is not the same
       // evidence.
       { label: "Claims", to: "/admin/claims" },
+      // A third queue for the same reason there is a second: a place link is
+      // not a sentence about a person, it is an assertion about where a
+      // decision happened, and what an operator must read to decide one is a
+      // coordinate and its precision rather than a rendered sentence.
+      { label: "Place links", to: "/admin/place-links" },
     ],
   },
   {

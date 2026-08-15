@@ -535,6 +535,13 @@ export function AdminClaimsPage() {
         <p className="mt-8 label-sm" role="status">
           Loading claims…
         </p>
+      ) : listing === null ? (
+        // A failed request leaves `listing` null and `items` empty, and the two
+        // are not the same fact. Reporting "no claims are awaiting review" here
+        // would be the strongest available claim resting on the weakest
+        // available evidence — an operator would read an empty queue and stop
+        // looking, on a screen whose whole purpose is that somebody looks.
+        <Absence reason="request-failed" subject={EMPTY_SUBJECT[status]} />
       ) : items.length === 0 ? (
         <Absence reason="none-exist" subject={EMPTY_SUBJECT[status]} />
       ) : (

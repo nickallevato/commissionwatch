@@ -178,6 +178,18 @@ function install(body: ClaimQueueResponse) {
   server.use(http.get("/api/admin/claims/queue", () => HttpResponse.json(body)));
 }
 
+/**
+ * A request that failed leaves the page with no listing and an empty array, and
+ * those are not the same fact. This is asserted rather than assumed because the
+ * empty-queue copy is the strongest claim the screen can make — "the record
+ * shows nothing awaiting review" — and it was, for a while, what a 500 produced.
+ */
+function installFailure(status = 500) {
+  server.use(
+    http.get("/api/admin/claims/queue", () => new HttpResponse(null, { status })),
+  );
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={["/admin/claims"]}>
@@ -629,5 +641,17 @@ describe("AdminClaimsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The claims queue could not be loaded.",
     );
+  });
+});
+
+describe("AdminClaimsPage when the queue cannot be read", () => {
+  it("says the request failed rather than that nothing is awaiting review", async () => {
+    installFailure();
+    renderPage();
+
+    expect(
+      await screen.findByText(/could not be loaded\. That is a failure on our side/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^The record shows no /)).not.toBeInTheDocument();
   });
 });

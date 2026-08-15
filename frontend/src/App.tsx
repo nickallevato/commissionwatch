@@ -36,6 +36,7 @@ import { AdminRunDetailPage } from "./pages/AdminRunDetailPage";
 import { AdminMeetingDetailPage } from "./pages/AdminMeetingDetailPage";
 import { AdminReviewPage } from "./pages/AdminReviewPage";
 import { AdminClaimsPage } from "./pages/AdminClaimsPage";
+import { AdminPlaceLinksPage } from "./pages/AdminPlaceLinksPage";
 import { SubscribePage } from "./pages/SubscribePage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -176,6 +177,11 @@ export function App() {
             inference about a pattern; a claim is a sentence quoting the
             minutes, and they are decided differently. */}
           <Route path="admin/claims" element={<AdminClaimsPage />} />
+          {/* The third queue. A place link is not a sentence about a person —
+            it is an assertion about where a decision happened, and the only
+            thing that puts a pin on the public map. Until this screen existed
+            `place_links.status` could only ever read `held`. */}
+          <Route path="admin/place-links" element={<AdminPlaceLinksPage />} />
           <Route path="admin/meetings/:id" element={<AdminMeetingDetailPage />} />
         </Route>
 

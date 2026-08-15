@@ -72,6 +72,61 @@ linked claims must sum to the counts. Extraction as a real queue stage. `/api/me
 this project measured by its own standard. `/api/data/ocd.json`. The record receipt. `/bot`. The
 privacy page. Matters. Discord routing with audience separation. Email suppression.
 
+### Prerendering is wired into deploy, and it is OFF until an operator turns it on
+
+`backend/src/services/prerender/` writes one self-contained HTML document per public record. It is
+now connected to something that serves it:
+
+- **A named volume, `commissionwatch-prerender`** — `deploy/docker-compose.shared.yml`. Mounted
+  **rw** in the backend at `/var/lib/commissionwatch/prerender`, **ro** in the web container at
+  `/usr/share/nginx/html/_prerender`. Read-only there on purpose: `web` is the only container on the
+  `edge` network, so it is the only one an internet request can reach.
+- **`PRERENDER_OUTPUT_DIR`** is pinned to the mount point. Left at the code default it writes into
+  the container's writable layer — correct pages, served to nobody, lost on the next deploy.
+- **`PRERENDER_ENABLED` is passed through unset**, exactly like `EVENT_DRAIN_ENABLED`. Off, the
+  consumer writes nothing, every nginx lookup misses, and the site is byte-for-byte what it was.
+- **nginx serves the prerendered copy to crawlers only** — `frontend/nginx.conf`. The documents load
+  no stylesheet and no script (`document.ts` explains why the SPA bundle's hashed filename is not
+  knowable from the backend), so serving them to a browser would replace the React app with a bare
+  document on exactly the pages that matter. A `map $http_user_agent $prerender_prefix` sends known
+  crawlers and unfurlers to `/_prerender$uri/index.html` and everyone else to a prefix that cannot
+  exist. Same records at the same URL either way, so this is server-side rendering for clients that
+  do not run JavaScript, not cloaking.
+- **The tree is not directly addressable.** `location ^~ /_prerender/ { internal; }` — `^~` because
+  the static-extension regex runs before prefix locations and would otherwise serve
+  `/_prerender/.prerender-cursor.json`, the consumer's replication cursor, to anyone who asked.
+- **`Vary: User-Agent`** on `location /`, with the whole server-level security header set repeated
+  there because nginx's `add_header` does not merge across levels. Without the `Vary`, any cache
+  between here and a reader can hand a crawler's unstyled document to the next human.
+
+#### ⛔ OPERATOR ACTION — two steps, in this order
+
+1. Deploy. Nothing changes: the volume is empty, the flag is unset, every lookup falls through to
+   the SPA. This is verifiable and is the point of shipping it dark.
+2. Add `PRERENDER_ENABLED=true` to the SecureString at `/commissionwatch/env` (Parameter Store) and
+   redeploy. Then seed the tree from the database rather than waiting for the next publish, because
+   the consumer walks the **event log** and nothing replays a meeting published weeks ago:
+
+   ```bash
+   docker exec commissionwatch-backend node dist/src/scripts/prerender-rebuild.js
+   ```
+
+   Idempotent, safe at any time, and the tool to reach for whenever a page looks stale — it also
+   deletes the page of anything no longer public, which is the half that matters. `PUBLIC_BASE_URL`
+   must be set or it throws before writing anything; every page carries an absolute canonical.
+
+Verified in a container on 2026-08-15, not by `nginx -t`: prerendered and non-prerendered record
+paths under both a Googlebot and a Chrome UA, `/data`, `/api/data/meetings.csv`, `/sitemap.xml`,
+`/feed.xml`, `/version.json`, `/robots.txt`, a hashed asset, the `/anomalies` redirect, and
+`/_prerender/.prerender-cursor.json` (404, as required). Also verified: an empty volume serves the
+SPA with no error, and files written by the backend's root process are readable by the nginx worker.
+
+One trap found while doing it: **a volume cannot be mounted under a read-only bind mount**. Docker
+cannot create the mountpoint and the container fails to start. Production is unaffected — the
+document root there comes from the image layer — but a local test that bind-mounts `frontend/dist`
+read-only at `/usr/share/nginx/html` will fail with `read-only file system` until it is made rw or
+baked into a test image.
+
 ### The defects worth remembering
 
 **A fragment never leaves the browser.** `sourceHref` and the claims service, in three places

@@ -38,6 +38,26 @@ services:
       - edge
       - cw-internal
     mem_limit: 128m
+    volumes:
+      # The prerendered document tree, written by the backend and read here.
+      #
+      # READ-ONLY, and that is not decoration: this container is the only one on
+      # the `edge` network, i.e. the only one an internet request can reach. A
+      # writable mount would put the public-facing process one nginx defect away
+      # from being able to alter what the site serves. Nothing in nginx.conf
+      # writes, so ro costs nothing.
+      #
+      # Mounted UNDER the document root at a path the frontend image does not
+      # contain, so `try_files /_prerender$uri/index.html` in frontend/nginx.conf
+      # is a plain filesystem lookup with no aliasing. The tree is not directly
+      # addressable — `location ^~ /_prerender/ { internal; }` answers 404 to
+      # anyone who asks for it by name, including for the consumer's
+      # .prerender-cursor.json.
+      #
+      # An empty volume is a working configuration: every lookup misses and the
+      # SPA is served, exactly as before this existed. So the ordering between
+      # the two containers does not matter and there is no init step.
+      - commissionwatch-prerender:/usr/share/nginx/html/_prerender:ro
     # Ordering only, no longer load-bearing. The crash-loop this was added for —
     # nginx resolving a literal upstream at config-parse time and exiting with
     # `[emerg] host not found in upstream "backend"` — is fixed properly in
@@ -122,6 +142,32 @@ services:
       - OPERATOR_SEED_EMAIL=${OPERATOR_SEED_EMAIL:-}
       - OPERATOR_SEED_PASSWORD=${OPERATOR_SEED_PASSWORD:-}
       - OPERATOR_SEED_NAME=${OPERATOR_SEED_NAME:-}
+      # Prerendering. The consumer writes one self-contained HTML document per
+      # public record into the volume the web container reads.
+      #
+      # OUTPUT_DIR is pinned to the mount point rather than left at the code
+      # default (`process.cwd()/.prerender`), which writes into the container's
+      # writable layer — pages that exist, are correct, and are served to
+      # nobody, and are lost on the next deploy.
+      #
+      # ENABLED is passed through UNSET by default, and that is the deliberate
+      # state: the loop ships dark, the same way EVENT_DRAIN_ENABLED does. Off,
+      # the consumer writes nothing and the web container's lookups all miss, so
+      # the site is byte-for-byte what it was. An operator turns it on by adding
+      # PRERENDER_ENABLED=true to the SecureString at /commissionwatch/env — see
+      # docs/STATUS.md. The empty default matters because compose substitutes an
+      # absent variable to the empty string, and `prerenderEnabled` reads empty
+      # as off.
+      #
+      # PUBLIC_BASE_URL above is already required by this: every prerendered
+      # page carries an absolute canonical, and the consumer throws at
+      # construction rather than emitting a page that points at the wrong host.
+      - PRERENDER_ENABLED=${PRERENDER_ENABLED:-}
+      - PRERENDER_OUTPUT_DIR=/var/lib/commissionwatch/prerender
+    volumes:
+      # Read-write here — this is the writer. Same volume the web container
+      # mounts read-only.
+      - commissionwatch-prerender:/var/lib/commissionwatch/prerender
     depends_on:
       db:
         condition: service_healthy
@@ -213,3 +259,11 @@ networks:
 volumes:
   commissionwatch-pgdata:
   commissionwatch-minio:
+  # Prerendered pages. Rebuildable from the database at any time
+  # (`docker exec commissionwatch-backend node dist/src/scripts/prerender-rebuild.js`
+  # — the production image ships dist/, not src/), so unlike the two
+  # above this one is not backup-critical — but it is still a named volume
+  # rather than a bind mount, because the deploy script's compose invocation
+  # deliberately never passes --volumes and a named volume therefore survives
+  # every deploy.
+  commissionwatch-prerender:
