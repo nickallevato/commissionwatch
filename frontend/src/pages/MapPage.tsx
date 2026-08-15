@@ -351,11 +351,17 @@ export function MapPage() {
    * The only path to `navigator.geolocation` in this application.
    *
    * It is a click handler, it is never called on mount, and there is no effect
-   * anywhere on this page that touches it. The coordinate is rounded to four
-   * decimals — about eleven metres, far finer than the smallest radius offered
-   * — so a reader who presses this does not stamp a metre-accurate fix of their
-   * own doorstep into their browser history and into a URL they may later
-   * share.
+   * anywhere on this page that touches it.
+   *
+   * The coordinate is rounded to **three** decimals — about 110 m. Four was the
+   * first answer and it was the wrong one: eleven metres is a doorstep, and the
+   * argument written down for it, that eleven metres is far finer than the
+   * smallest radius offered, is an argument for coarsening further rather than
+   * for stopping there. The smallest search this page offers is a 250 m radius,
+   * so a centre good to 110 m returns materially the same decisions while not
+   * writing a reader's house into their browser history and into a URL they may
+   * later share. A reader who wants an exact centre can type one; nobody is
+   * prevented from being precise about themselves on purpose.
    */
   function requestMyLocation() {
     if (!("geolocation" in navigator)) {
@@ -366,8 +372,8 @@ export function MapPage() {
     }
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const lat = Number(position.coords.latitude.toFixed(4));
-        const lon = Number(position.coords.longitude.toFixed(4));
+        const lat = Number(position.coords.latitude.toFixed(3));
+        const lon = Number(position.coords.longitude.toFixed(3));
         setDraft(`${lat}, ${lon}`);
         setDraftError(null);
         setParams({ near: `${lat},${lon}`, radius: String(radius) }, { replace: true });

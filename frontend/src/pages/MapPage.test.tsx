@@ -337,6 +337,48 @@ describe("MapPage", () => {
     }
   });
 
+  it("coarsens the reader's own position before writing it anywhere", async () => {
+    // A browser hands back a fix good to a few metres. What this page does with
+    // it ends up in the address bar, in history, and in any link the reader
+    // shares — so the digits that identify a house must not survive the trip.
+    // 110 m is coarse enough for that and finer than the smallest radius the
+    // page offers, so the answer does not change.
+    const getCurrentPosition = vi.fn((onSuccess: PositionCallback) => {
+      onSuccess({
+        coords: {
+          latitude: 45.6791234,
+          longitude: -111.0384567,
+          accuracy: 5,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        timestamp: 0,
+      } as GeolocationPosition);
+    });
+    Object.defineProperty(navigator, "geolocation", {
+      value: { getCurrentPosition },
+      configurable: true,
+    });
+
+    try {
+      const user = userEvent.setup();
+      renderAt("/map");
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /use my location/i })).toBeEnabled(),
+      );
+
+      await user.click(screen.getByRole("button", { name: /use my location/i }));
+
+      const field = await screen.findByDisplayValue("45.679, -111.038");
+      expect(field).toBeInTheDocument();
+      expect(screen.queryByDisplayValue(/45\.6791/)).not.toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(navigator, "geolocation");
+    }
+  });
+
   it("fires no request at all until a coordinate is given", async () => {
     const asked: string[] = [];
     server.events.on("request:start", ({ request }) => {
