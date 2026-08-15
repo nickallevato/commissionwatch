@@ -439,12 +439,16 @@ function SnapshotLedger({
 }) {
   return (
     <div data-testid="snapshot-ledger" className="mt-4 border-t border-rule pt-4">
-      {/* "Most recent" and not "the last 30 days": the route asks for 30 *rows*,
-        and a day can produce a row per outcome, so the window this covers is
-        between six days and thirty and the screen cannot say which. Printing the
-        stronger claim would be the same defect as an empty list standing in for
-        a failed read. */}
-      <h4 className="label-sm text-ink">Snapshot cycles — most recent first</h4>
+      {/* Thirty UTC days counting today, and the heading may now say so: the route
+        bounds `run_day` (SNAPSHOT_RUN_WINDOW_DAYS), not the row count. It used to
+        ask for 30 *rows*, and a day can produce a row per outcome, so the real
+        window was somewhere between six days and thirty — this heading hedged to
+        "most recent" for exactly that reason, because printing the stronger claim
+        would have been the same defect as an empty list standing in for a failed
+        read. The claim is true now, so it is made: an empty ledger inside this
+        window is a real thirty-day absence rather than an unknowable one, which
+        is the whole reason an operator reads this panel. */}
+      <h4 className="label-sm text-ink">Snapshot cycles — the last 30 days, newest first</h4>
       <p className="mt-1 max-w-prose text-[12.5px] leading-relaxed text-ink-soft">
         Every cycle of the loop behind this switch is written down, skips and failures included,
         because <span className="font-mono">/api/data/archive</span> answers 404 while the switch is

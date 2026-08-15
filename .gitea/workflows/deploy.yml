@@ -511,6 +511,17 @@ jobs:
       # it took, so a settled deploy is distinguishable in the log from a
       # first-read match. Raising the allowance instead cannot work: drift is
       # aged from the COMMIT time, already ~12 minutes old by now.
+      #
+      # The same settle now covers the `version` check, which compares
+      # /api/version against /version.json. The two images roll independently, so
+      # a probe landing mid-swap can catch one rolled and the other not — a
+      # convincing "half-finished rollout" that is a deploy in progress. Both
+      # checks read one settle policy, so they cannot disagree about it.
+      #
+      # A mid-swap run can therefore pay the settle twice, up to 60s, and only
+      # ever on a mismatch. They deliberately do not share a probe: sharing one
+      # read between two checks is how one check's absence becomes the other's
+      # claim.
       - name: Probe the deployment with the external monitor
         shell: bash
         env:
