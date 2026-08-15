@@ -1,6 +1,7 @@
 import { Router, Request } from "express";
 import db from "../config/database";
 import { requireOperator } from "../middleware/requireOperator";
+import { whereMeetingPublished } from "../services/publication";
 
 const router = Router();
 
@@ -36,7 +37,33 @@ router.get("/", async (req: Request<unknown, unknown, unknown, VotesQuery>, res,
     const limit = Math.min(Math.max(parseInt(rawLimit || "50", 10) || 50, 1), 200);
     const offset = Math.max(parseInt(rawOffset || "0", 10) || 0, 0);
 
-    const query = db("votes");
+    /**
+     * The wall, which this route did not have.
+     *
+     * `GET /api/votes` is public, takes no id, and served **every row in the
+     * table** — including votes on meetings an operator has withheld. Two
+     * separate failures in one query: it disclosed the `meeting_id` of every
+     * unpublished meeting, which is exactly the enumeration
+     * `findPublishedMeeting` answers 404 rather than 403 to prevent; and it
+     * published how a named official voted at a meeting nobody had approved for
+     * publication. A vote row is this project's core published claim about how
+     * a named person acted — the POST below says so — and it was reachable
+     * without passing review.
+     *
+     * It has never leaked in production only because no vote row has been
+     * ingested yet. That is not a mitigation, it is a deadline.
+     *
+     * An `EXISTS` rather than a join: a join that is wrong returns everything,
+     * an EXISTS that is wrong returns nothing, and the same reasoning is
+     * written down in `public-corrections.ts`. The count below clones this
+     * builder, so it cannot drift from the rows.
+     */
+    const query = db("votes").whereExists(
+      whereMeetingPublished(
+        db("meetings").whereRaw("meetings.id = votes.meeting_id"),
+        "meetings.published_at",
+      ),
+    );
 
     if (meeting_id) query.where({ meeting_id });
     if (agenda_item_id) query.where({ agenda_item_id });

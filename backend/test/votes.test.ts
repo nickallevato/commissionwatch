@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
-import { signInOperator } from "./helpers/pressroom";
+import { cleanupByPrefix, createMeeting, createSource, signInOperator } from "./helpers/pressroom";
 
 const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
 // Bozeman's April 28 meeting — the completed meeting seeded with three votes
@@ -204,3 +204,88 @@ after(async () => {
 after(async () => {
   await db.destroy();
 });
+
+/**
+ * The wall on `GET /api/votes`, which it did not have until 2026-08-15.
+ *
+ * The route is public, takes no id, and returned every row in the table. A vote
+ * row carries a `meeting_id` and how a named official voted, so serving it for
+ * an unpublished meeting did two things at once: it disclosed which meetings
+ * have been ingested and withheld — the enumeration `findPublishedMeeting`
+ * answers 404 rather than 403 to prevent — and it published this project's core
+ * claim about a named person without anyone approving it.
+ *
+ * It had never leaked because no vote row had been ingested. That is a
+ * deadline, not a mitigation.
+ *
+ * Both directions, as everywhere else that guards this wall: withheld and
+ * absent, then published and present. Absence alone would also hold for a query
+ * that is simply broken.
+ */
+describe("GET /api/votes respects the publication wall", () => {
+  const PREFIX = "votes-wall-test";
+  let withheldMeeting = "";
+  let publishedMeeting = "";
+  let memberId = "";
+
+  before(async () => {
+    const source = await createSource(PREFIX);
+    withheldMeeting = await createMeeting(source.commissionId, {});
+    publishedMeeting = await createMeeting(source.commissionId, {
+      publishedAt: new Date(),
+    });
+
+    const [member] = await db("members")
+      .insert({
+        jurisdiction_id: source.jurisdictionId,
+        name: `${PREFIX} Councillor`,
+        title: "Commissioner",
+        term_start: "2024-01-01",
+      })
+      .returning<Array<{ id: string }>>("id");
+    memberId = member.id;
+
+    await db("votes").insert([
+      { meeting_id: withheldMeeting, member_id: memberId, vote: "no" },
+      { meeting_id: publishedMeeting, member_id: memberId, vote: "yes" },
+    ]);
+  });
+
+  after(async () => {
+    await db("votes").whereIn("meeting_id", [withheldMeeting, publishedMeeting]).del();
+    await db("members").where({ id: memberId }).del();
+    await cleanupByPrefix(PREFIX);
+  });
+
+  it("omits a vote on an unpublished meeting from the unfiltered list", async () => {
+    const res = await request(app).get("/api/votes?limit=200").expect(200);
+    const meetings = (res.body as { data: Array<{ meeting_id: string }> }).data.map(
+      (row) => row.meeting_id,
+    );
+    assert.ok(
+      !meetings.includes(withheldMeeting),
+      "an unpublished meeting's id reached an anonymous caller",
+    );
+    assert.ok(meetings.includes(publishedMeeting), "the published vote should be listed");
+  });
+
+  it("answers an empty list when asked for the withheld meeting by id", async () => {
+    const res = await request(app)
+      .get(`/api/votes?meeting_id=${withheldMeeting}`)
+      .expect(200);
+    assert.deepEqual((res.body as { data: unknown[] }).data, []);
+    assert.equal((res.body as { total: number }).total, 0);
+  });
+
+  it("counts what it returns, so the total cannot disclose what the rows do not", async () => {
+    // A `total` computed without the wall would say "3 votes" over a list of
+    // one, which tells a reader exactly how much is being withheld.
+    const res = await request(app)
+      .get(`/api/votes?meeting_id=${publishedMeeting}`)
+      .expect(200);
+    const body = res.body as { data: unknown[]; total: number };
+    assert.equal(body.total, body.data.length);
+    assert.equal(body.total, 1);
+  });
+});
+
