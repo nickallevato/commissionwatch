@@ -177,3 +177,22 @@ describe("AdminChannelsPage", () => {
     expect(alert).toHaveTextContent("Discord webhook URLs must be on discord.com");
   });
 });
+
+/**
+ * A screen that says both "this could not be loaded" and "there is none" is
+ * two answers to one question, and an operator scanning down the page reads the
+ * second one. The empty state is a claim about the record; a failed request is
+ * a statement that we did not reach it. Only one of them can be true at a time.
+ */
+describe("AdminChannelsPage when the list cannot be read", () => {
+  it("does not also report an empty record", async () => {
+    server.use(http.get("/api/admin/channels", () => new HttpResponse(null, { status: 500 })));
+    renderWithProviders(<AdminChannelsPage />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Channels could not be loaded.",
+    );
+    expect(screen.queryByText("No channels yet.")).not.toBeInTheDocument();
+  });
+});
+

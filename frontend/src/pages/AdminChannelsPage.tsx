@@ -271,6 +271,12 @@ export function AdminChannelsPage() {
         <p className="label-sm" role="status">
           Loading channels…
         </p>
+      ) : status.kind === "error" && channels.length === 0 ? (
+        // Nothing here. The alert above already says the load failed, and
+        // "No channels yet." underneath it is the same screen making a claim
+        // about the record it has just admitted it could not read — an operator
+        // scanning down the page reads the second sentence, not the first.
+        null
       ) : channels.length === 0 ? (
         <p className="text-sm text-muted">No channels yet.</p>
       ) : (
