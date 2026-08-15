@@ -37,12 +37,12 @@ describe("Layout", () => {
     const nav = screen.getByRole("navigation", { name: "Primary" });
 
     const expected = [
-      ["Findings", "/anomalies"],
+      ["Findings", "/findings"],
       ["Meetings", "/meetings"],
       // The same record read the other way: meetings are when the body sat,
       // matters are what it is deciding.
       ["Matters", "/matters"],
-      ["Officials", "/members"],
+      ["Officials", "/officials"],
       ["Votes", "/votes"],
       // Scaffolded module. In the masthead so it has a home to build into; the
       // page itself states that it holds no records rather than showing

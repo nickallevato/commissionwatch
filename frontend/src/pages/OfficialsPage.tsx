@@ -11,7 +11,7 @@ function emptyRecord(): MemberVotingRecord {
   return { yes: 0, no: 0, abstain: 0, absent: 0, total: 0 };
 }
 
-export function MembersPage() {
+export function OfficialsPage() {
   const [jurisdictionId, setJurisdictionId] = useState("");
 
   const { data: jurisdictions } = useJurisdictions();

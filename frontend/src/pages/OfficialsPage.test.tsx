@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, screen, waitFor } from "@/lib/test-utils";
-import { MembersPage } from "./MembersPage";
+import { OfficialsPage } from "./OfficialsPage";
 import { server } from "@/mocks/server";
 
 beforeAll(() => server.listen());
@@ -24,9 +24,9 @@ async function selectJurisdiction(
   );
 }
 
-describe("MembersPage", () => {
+describe("OfficialsPage", () => {
   it("renders the officials headline and kicker", () => {
-    renderWithProviders(<MembersPage />);
+    renderWithProviders(<OfficialsPage />);
     expect(
       screen.getByRole("heading", { level: 1, name: "Officials" }),
     ).toBeInTheDocument();
@@ -34,7 +34,7 @@ describe("MembersPage", () => {
   });
 
   it("renders a roster row per official once loaded", async () => {
-    renderWithProviders(<MembersPage />);
+    renderWithProviders(<OfficialsPage />);
     await screen.findByRole("article", { name: "Sarah Chen" });
     expect(
       screen.getByRole("article", { name: "Marcus Thompson" }),
@@ -43,13 +43,13 @@ describe("MembersPage", () => {
   });
 
   it("counts the roster in the filter strap", async () => {
-    renderWithProviders(<MembersPage />);
+    renderWithProviders(<OfficialsPage />);
     await screen.findByRole("article", { name: "Sarah Chen" });
     expect(screen.getByText("officials")).toHaveTextContent("5 officials");
   });
 
   it("renders each official's term as readable dates", async () => {
-    renderWithProviders(<MembersPage />);
+    renderWithProviders(<OfficialsPage />);
     const row = await screen.findByRole("article", { name: "Sarah Chen" });
     expect(
       within(row).getByText("Jan 15, 2023 – Jan 15, 2027"),
@@ -57,7 +57,7 @@ describe("MembersPage", () => {
   });
 
   it("summarises each official's voting record from the vote record", async () => {
-    renderWithProviders(<MembersPage />);
+    renderWithProviders(<OfficialsPage />);
     const chen = await screen.findByRole("article", { name: "Sarah Chen" });
     await waitFor(() => {
       expect(
@@ -73,7 +73,7 @@ describe("MembersPage", () => {
 
   it("filters the roster by jurisdiction", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<MembersPage />);
+    renderWithProviders(<OfficialsPage />);
     await screen.findByRole("article", { name: "Sarah Chen" });
 
     await selectJurisdiction(user, "Boulder County, CO");
@@ -86,7 +86,7 @@ describe("MembersPage", () => {
 
   it("reports an empty roster rather than rendering nothing", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<MembersPage />);
+    renderWithProviders(<OfficialsPage />);
     await screen.findByRole("article", { name: "Sarah Chen" });
 
     await selectJurisdiction(user, "Austin, TX");

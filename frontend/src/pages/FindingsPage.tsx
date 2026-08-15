@@ -20,7 +20,7 @@ const flagTypeOptions: AnomalyFlagType[] = [
   "missing_minutes",
 ];
 
-export function AnomaliesPage() {
+export function FindingsPage() {
   const [severity, setSeverity] = useState("");
   const [flagType, setFlagType] = useState("");
 
@@ -47,13 +47,24 @@ export function AnomaliesPage() {
     <div className="mx-auto max-w-3xl">
       <header>
         <p className="kicker">The ledger</p>
-        <h1 className="headline mt-1.5 text-3xl sm:text-4xl">
-          Flagged for review
-        </h1>
+        <h1 className="headline mt-1.5 text-3xl sm:text-4xl">Findings</h1>
+        {/* This copy used to end "nothing here is a finding", under a heading
+          that said "Flagged for review", reached from a nav link that said
+          "Findings", at a URL that said /anomalies. Four names for one thing,
+          one of them denying it was the thing.
+
+          The old sentence was not merely inconsistent, it had gone stale. It
+          was written when a detector's output went straight to the page, and
+          drawing a line between a machine's flag and a person's finding was
+          exactly right then. B-a shipped the review queue: `review_state`
+          reaches 'published' only when a named operator approves it, so
+          everything on this page has now been read by a person. Saying
+          otherwise undersold the one guarantee that matters most. */}
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-soft">
-          Entries in the public record that our checks singled out for a person
-          to read. A flag is a prompt to open the source document and judge for
-          yourself — nothing here is a finding.
+          Patterns in the public record that our checks singled out and a person
+          reviewed and published. Each one links to the documents it rests on,
+          so you can read the source and judge for yourself. A finding is not an
+          allegation.
         </p>
       </header>
 

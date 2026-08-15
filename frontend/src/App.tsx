@@ -1,16 +1,16 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { PressroomAuthLayout, PressroomLayout } from "./components/PressroomLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { HomePage } from "./pages/HomePage";
 import { MeetingsPage } from "./pages/MeetingsPage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
-import { MembersPage } from "./pages/MembersPage";
+import { OfficialsPage } from "./pages/OfficialsPage";
 import { OfficialPage } from "./pages/OfficialPage";
 import { SearchPage } from "./pages/SearchPage";
 import { VotesPage } from "./pages/VotesPage";
 import { ElectionsPage } from "./pages/ElectionsPage";
-import { AnomaliesPage } from "./pages/AnomaliesPage";
+import { FindingsPage } from "./pages/FindingsPage";
 import { MatterDetailPage } from "./pages/MatterDetailPage";
 import { MattersPage } from "./pages/MattersPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
@@ -60,7 +60,7 @@ export function App() {
           <Route path="meetings/:id" element={<MeetingDetailPage />} />
           <Route path="matters" element={<MattersPage />} />
           <Route path="matters/:id" element={<MatterDetailPage />} />
-          <Route path="members" element={<MembersPage />} />
+          <Route path="officials" element={<OfficialsPage />} />
           {/* One official as a subject: voting record, attendance, patterns
             and the campaign-finance overlay. Reached from the roster, not
             from the nav — the roster is the index of this page. */}
@@ -68,7 +68,7 @@ export function App() {
           <Route path="search" element={<SearchPage />} />
           <Route path="votes" element={<VotesPage />} />
           <Route path="elections" element={<ElectionsPage />} />
-          <Route path="anomalies" element={<AnomaliesPage />} />
+          <Route path="findings" element={<FindingsPage />} />
           <Route path="methodology" element={<MethodologyPage />} />
           <Route path="privacy" element={<PrivacyPage />} />
           {/* P7. The statutory route the Methodology page promises, as a page.
@@ -95,6 +95,19 @@ export function App() {
             links to. Published meetings only. */}
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="subscribe" element={<SubscribePage />} />
+
+          {/* Addresses this site published before the vocabulary was settled.
+            Both are in sitemap.xml and being crawled, and a transparency
+            project does not break a URL it asked people to cite — the same
+            reasoning that keeps /data-license alive beside /data.
+
+            `replace` so the old address does not sit in the reader's history
+            waiting to be reached by the back button. nginx also answers these
+            with a real 301 for a request that never reaches the app, which is
+            what a crawler gets; this handles an in-app link that still points
+            at the old path. See src/vocabulary.ts. */}
+          <Route path="anomalies" element={<Navigate to="/findings" replace />} />
+          <Route path="members" element={<Navigate to="/officials" replace />} />
 
         </Route>
 

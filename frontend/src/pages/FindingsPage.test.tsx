@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { within } from "@testing-library/react";
 import { renderWithProviders, screen, waitFor } from "@/lib/test-utils";
-import { AnomaliesPage } from "./AnomaliesPage";
+import { FindingsPage } from "./FindingsPage";
 import { server } from "@/mocks/server";
 
 beforeAll(() => server.listen());
@@ -23,16 +23,27 @@ function articleFor(name: string): HTMLElement {
   return article;
 }
 
-describe("AnomaliesPage", () => {
+describe("FindingsPage", () => {
+  /**
+   * The heading changed on 2026-08-15; what it was guarding did not.
+   *
+   * "Flagged for review" was one of four names this page used for one object —
+   * the nav said Findings, the URL said /anomalies, the body copy said "nothing
+   * here is a finding". The heading is now the vocabulary's word, and the thing
+   * worth protecting moves into the sentence under it: this page must say the
+   * entries were reviewed by a person and must not read as an accusation.
+   */
   it("leads with the review framing, not an accusation", () => {
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
     expect(
-      screen.getByRole("heading", { level: 1, name: "Flagged for review" }),
+      screen.getByRole("heading", { level: 1, name: "Findings" }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/a person\s+reviewed and published/i)).toBeInTheDocument();
+    expect(screen.getByText(/a finding is not an allegation/i)).toBeInTheDocument();
   });
 
   it("renders a ledger entry per flag once loaded", async () => {
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
 
     await waitFor(() => {
       expect(entry("Quorum issue")).toBeInTheDocument();
@@ -43,7 +54,7 @@ describe("AnomaliesPage", () => {
   });
 
   it("states severity as a numeral, not colour alone", async () => {
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
 
     await waitFor(() => {
       expect(entry("Quorum issue")).toBeInTheDocument();
@@ -64,7 +75,7 @@ describe("AnomaliesPage", () => {
   });
 
   it("datelines each entry with its jurisdiction and meeting date", async () => {
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
 
     await waitFor(() => {
       expect(entry("Quorum issue")).toBeInTheDocument();
@@ -76,7 +87,7 @@ describe("AnomaliesPage", () => {
   });
 
   it("cites a source document and the meeting record for each entry", async () => {
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
 
     const records = await screen.findAllByRole("link", {
       name: "Meeting record",
@@ -97,7 +108,7 @@ describe("AnomaliesPage", () => {
   });
 
   it("counts the entries on show", async () => {
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
 
     await waitFor(() => {
       expect(screen.getByText("entries")).toBeInTheDocument();
@@ -107,7 +118,7 @@ describe("AnomaliesPage", () => {
 
   it("filters the ledger by severity", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
 
     await waitFor(() => {
       expect(entry("Quorum issue")).toBeInTheDocument();
@@ -124,7 +135,7 @@ describe("AnomaliesPage", () => {
 
   it("filters the ledger by flag type and can be cleared", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
 
     await waitFor(() => {
       expect(entry("Quorum issue")).toBeInTheDocument();
@@ -149,7 +160,7 @@ describe("AnomaliesPage", () => {
 
   it("says so plainly when nothing matches the view", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<AnomaliesPage />);
+    renderWithProviders(<FindingsPage />);
 
     await waitFor(() => {
       expect(entry("Quorum issue")).toBeInTheDocument();
@@ -166,7 +177,7 @@ describe("AnomaliesPage", () => {
   });
 
   it("never asserts wrongdoing in its own copy", async () => {
-    const { container } = renderWithProviders(<AnomaliesPage />);
+    const { container } = renderWithProviders(<FindingsPage />);
 
     await waitFor(() => {
       expect(entry("Quorum issue")).toBeInTheDocument();
