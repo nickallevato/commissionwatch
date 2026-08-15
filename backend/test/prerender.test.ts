@@ -80,6 +80,43 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/**
+ * Start the consumer where this suite's fixtures start, not at the beginning of
+ * the log.
+ *
+ * `tick()` reads `batchSize` events in `(updated_at, id)` order from wherever
+ * its cursor stands, and `events` is append-only by design — migration 083 says
+ * so in as many words: "Retention: never delete." A fresh `PrerenderStore` root
+ * means no cursor file, which means a NULL cursor, which means the first ticks
+ * spend their whole batch on whatever else the table already holds. Past 200
+ * such rows the fixtures are never reached and the withdrawal assertion below
+ * fails — a *withdrawn meeting kept its page*, the worst report this suite can
+ * produce, for a reason that has nothing to do with the code under test. It has
+ * happened: 1,585 rows left by ad-hoc runs. A test that goes red for the
+ * environment on the assertion that matters most teaches the next reader to
+ * disbelieve it.
+ *
+ * So the cursor is seeded exactly the way `tick` writes one — same file, same
+ * `(updated_at, id)` pair — positioned on the newest event that exists before
+ * the suite emits any of its own. Everything this suite emits is strictly later
+ * on both parts of that key, so it is read; nothing older is. This bounds the
+ * work rather than changing what the consumer does, which is what the cursor is
+ * for: the consumer under test is untouched, and a run against an empty table
+ * behaves exactly as it did.
+ */
+async function seedCursorPastExistingEvents(): Promise<void> {
+  const [latest] = await db("events")
+    .orderBy([{ column: "updated_at", order: "desc" }, { column: "id", order: "desc" }])
+    .limit(1)
+    .select<Array<{ id: string; updated_at: Date | string }>>("id", "updated_at");
+  if (latest === undefined) return;
+  await consumer.writeCursor({
+    updated_at:
+      latest.updated_at instanceof Date ? latest.updated_at.toISOString() : String(latest.updated_at),
+    id: latest.id,
+  });
+}
+
 describe("prerendering", () => {
   before(async () => {
     await cleanupByPrefix(PREFIX);
@@ -194,6 +231,8 @@ describe("prerendering", () => {
       })
       .returning<Array<{ id: string }>>("id");
     claimId = claim.id;
+
+    await seedCursorPastExistingEvents();
   });
 
   after(async () => {
