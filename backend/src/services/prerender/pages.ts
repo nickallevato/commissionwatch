@@ -438,13 +438,22 @@ export async function buildFindingPage(
       ...(meetingId === null
         ? {}
         : { appearance: { "@type": "CreativeWork", url: absoluteUrl(baseUrl, `/meetings/${meetingId}`) } }),
-      citation: sources.map(
-        (source): JsonValue => ({
-          "@type": "CreativeWork",
-          name: source.title,
-          url: absoluteUrl(baseUrl, `/source/${source.sha256}`),
-        }),
-      ),
+      // Omitted entirely when there is nothing to cite, rather than emitted as
+      // `citation: []`. An empty array is a statement — "these citations were
+      // gathered and there are none" — and it is the wrong one: the finding
+      // rests on the meeting record itself, which the page says in words below.
+      // An absent field asserts nothing, which is the truth here.
+      ...(sources.length === 0
+        ? {}
+        : {
+            citation: sources.map(
+              (source): JsonValue => ({
+                "@type": "CreativeWork",
+                name: source.title,
+                url: absoluteUrl(baseUrl, `/source/${source.sha256}`),
+              }),
+            ),
+          }),
     },
   };
 
@@ -466,14 +475,29 @@ export async function buildFindingPage(
       items: [{ label: "The meeting record this was found in", path: `/meetings/${meetingId}` }],
     });
   }
+  blocks.push({ kind: "heading", level: 2, text: "Evidence" });
   if (sources.length > 0) {
-    blocks.push({ kind: "heading", level: 2, text: "Evidence" });
     blocks.push({
       kind: "links",
       items: sources.map((source) => ({
         label: `${source.title} — ${source.sha256}`,
         path: `/source/${source.sha256}`,
       })),
+    });
+  } else {
+    // The heading is unconditional on purpose. A finding whose meeting has no
+    // stored documents used to render with no Evidence section at all — the
+    // section simply was not there, and a reader has no way to tell an omitted
+    // section from a finding that happens to rest on nothing. What is true is
+    // that the detector read the meeting record itself, and the reader-facing
+    // page already says exactly that ("Source: meeting record"). This is the
+    // static copy saying the same thing rather than saying nothing.
+    blocks.push({
+      kind: "paragraph",
+      text:
+        meetingId === null
+          ? "No stored document is held for this finding. It rests on the meeting record, which is not published at an address we can link to."
+          : "No separate document is stored for this finding. It rests on the meeting record itself, linked above.",
     });
   }
 

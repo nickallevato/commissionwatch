@@ -50,6 +50,7 @@ let meetingId: string;
 let secondMeetingId: string;
 let memberId: string;
 let findingId: string;
+let bareFindingId: string;
 let claimId: string;
 let artifactSha: string;
 
@@ -126,6 +127,21 @@ describe("prerendering", () => {
       .returning<Array<{ id: string }>>("id");
     findingId = finding.id;
 
+    // A second published finding, on the meeting that has no stored documents.
+    // Without it the "what does a finding rest on" test only ever exercises the
+    // cited branch — verified by reverting the fix and watching the test pass
+    // anyway, which is the failure mode a fixture like this exists to close.
+    const [bareFinding] = await db("anomaly_flags")
+      .insert({
+        meeting_id: secondMeetingId,
+        flag_type: "missing_minutes",
+        severity: "medium",
+        description: "No minutes have been published for this meeting.",
+        review_state: "published",
+      })
+      .returning<Array<{ id: string }>>("id");
+    bareFindingId = bareFinding.id;
+
     // A stored document, so the meeting page can cite a content address and the
     // source page has something to render.
     artifactSha = sha256Of(`${PREFIX}-minutes`);
@@ -183,7 +199,7 @@ describe("prerendering", () => {
   after(async () => {
     await db("minute_claims").where({ meeting_id: meetingId }).del();
     await db("events")
-      .whereIn("subject_id", [meetingId, secondMeetingId, findingId, claimId])
+      .whereIn("subject_id", [meetingId, secondMeetingId, findingId, bareFindingId, claimId])
       .del();
     await db("members").where({ id: memberId }).del();
     await cleanupByPrefix(PREFIX);
@@ -370,6 +386,52 @@ describe("prerendering", () => {
       }
     }
     assert.ok(checked >= 4, `expected JSON-LD on several page types, checked ${checked}`);
+  });
+
+  /**
+   * A finding page states its evidence, or states that it has none.
+   *
+   * The Evidence section used to be conditional: a finding whose meeting held
+   * no stored documents rendered with the section simply absent, and a reader
+   * — or a crawler reading the JSON-LD — cannot tell an omitted section from a
+   * finding that rests on nothing. The reader-facing page has always said
+   * "Source: meeting record" in that case; this is the static copy saying the
+   * same thing rather than saying nothing.
+   *
+   * The JSON-LD half matters as much: `citation: []` asserts that citations
+   * were gathered and there are none, which is false. An absent field asserts
+   * nothing, which is true.
+   */
+  it("says what a finding rests on, including when nothing is stored", async () => {
+    await consumer.rebuild();
+
+    let findings = 0;
+    for (const path of await store.list()) {
+      if (!path.startsWith("/findings/")) continue;
+      findings += 1;
+      const html = await store.read(path);
+      assert.ok(html);
+      assert.match(html, /Evidence/, `${path} has no Evidence section at all`);
+      const cites = html.includes("/source/");
+      const statesNone = /rests on the meeting record/.test(html);
+      assert.ok(
+        cites || statesNone,
+        `${path} shows an Evidence section that neither cites nor explains itself`,
+      );
+
+      for (const block of jsonLdBlocks(html)) {
+        const record = asRecord(block);
+        if (record["@type"] !== "ClaimReview") continue;
+        const reviewed = asRecord(record.itemReviewed);
+        const citation = reviewed.citation;
+        assert.notDeepEqual(
+          citation,
+          [],
+          `${path} emits an empty citation array, which claims there are none`,
+        );
+      }
+    }
+    assert.ok(findings > 0, "the fixture rendered no finding pages to check");
   });
 
   /**
