@@ -5,6 +5,7 @@ import { Absence } from "@/components/ui/Absence";
 import { Citation, ReviewStamp } from "@/components/ui/Citation";
 import { abbreviateSha } from "@/components/ui/citation-source";
 import { markUnsupported } from "@/components/ui/governor-quote";
+import { reliedInWindow, type ReliedSpan } from "@/components/ui/relied-spans";
 import type {
   ClaimGovernorVerdict,
   ClaimQueueResponse,
@@ -116,7 +117,20 @@ function formatStamp(value: string | null): string {
  * The text came out of a third-party PDF. It renders as React text nodes and
  * there is no `dangerouslySetInnerHTML` anywhere near it.
  */
-function QuoteInContext({ context, claimId }: { context: ClaimQuoteContext; claimId: string }) {
+function QuoteInContext({
+  context,
+  claimId,
+  reliedOn,
+}: {
+  context: ClaimQuoteContext;
+  claimId: string;
+  reliedOn?: readonly ReliedSpan[];
+}) {
+  // Document coordinates, re-based into this window. `relied_on` itself indexes
+  // the governor's own window, which nothing serves — see the type's comment.
+  const relied = reliedOn
+    ? reliedInWindow(reliedOn, context.text, context.window_offset)
+    : null;
   const usable =
     context.quote_start >= 0 &&
     context.quote_end > context.quote_start &&
@@ -160,6 +174,28 @@ function QuoteInContext({ context, claimId }: { context: ClaimQuoteContext; clai
           The quote span does not fall inside this window, so nothing is marked. Read the document
           before deciding.
         </p>
+      )}
+      {relied && (relied.quotes.length > 0 || relied.outside > 0) && (
+        <div className="mt-3 border-l-2 border-rule pl-3" data-testid={`relied-${claimId}`}>
+          <p className="label-sm">What the judge read</p>
+          {relied.quotes.map((quote, index) => (
+            <p key={index} className="mt-1 max-w-prose text-xs leading-relaxed text-ink-soft">
+              “{quote}”
+            </p>
+          ))}
+          {relied.outside > 0 && (
+            // Not a defect. The governor judged ±2,000 characters and this
+            // screen shows ±500, so a span outside is the two windows being
+            // different sizes on purpose — but showing four and rendering two
+            // without saying so would misrepresent the evidence as thinner than
+            // it was.
+            <p className="mt-1 text-xs text-muted">
+              <span className="figure">{relied.outside}</span> further{" "}
+              {relied.outside === 1 ? "sentence falls" : "sentences fall"} outside this excerpt.
+              The judge saw a wider window than this screen shows.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
@@ -599,7 +635,11 @@ export function AdminClaimsPage() {
                   }}
                 />
                 {item.citation.context ? (
-                  <QuoteInContext context={item.citation.context} claimId={claimId} />
+                  <QuoteInContext
+                      context={item.citation.context}
+                      claimId={claimId}
+                      reliedOn={item.governor?.relied_on_document}
+                    />
                 ) : (
                   <p
                     data-testid={`no-context-${claimId}`}

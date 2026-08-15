@@ -34,6 +34,15 @@ describe("BotPage", () => {
       "/api/data/ocd.json",
       "/api/data/meetings.csv",
       "/api/metrics",
+      // Added 2026-08-15. This page went stale within hours of being written:
+      // the feeds, places, the source viewer and transcript coverage all
+      // shipped after it and none were listed. A discovery document that omits
+      // an endpoint is, to anything reading it, that endpoint not existing —
+      // the same defect the /api/data manifest had when it omitted ocd.json.
+      "/feed.xml",
+      "/api/places/near",
+      "/api/source/",
+      "/api/transcripts/coverage",
       "/sitemap.xml",
       "/robots.txt",
     ]) {

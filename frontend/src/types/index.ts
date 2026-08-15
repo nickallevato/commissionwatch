@@ -1292,7 +1292,23 @@ export interface ClaimGovernorVerdict {
    * a description of it. See `components/ui/governor-quote.ts`.
    */
   unsupported_fragments: string[];
+  /**
+   * The sentences the judge relied on, as offsets into the governor's own
+   * ±2,000-character window. Located against the bytes by the backend rather
+   * than supplied by the model — but that window is not served anywhere, so
+   * these are unusable for drawing.
+   */
   relied_on: GovernorReliedSpan[];
+  /**
+   * The same spans in **document** coordinates, which any window can map.
+   *
+   * Added after the review screen correctly refused to draw `relied_on`: those
+   * index a window nothing serves, and marking arbitrary characters *with the
+   * authority of a highlight* is worse than marking nothing. `citation.context`
+   * carries `window_offset`, so subtracting it puts these in the context
+   * window's own coordinates.
+   */
+  relied_on_document: GovernorReliedSpan[];
   confidence: GovernorConfidence;
   /** The model that answered, and the instructions it answered under. */
   model: string;

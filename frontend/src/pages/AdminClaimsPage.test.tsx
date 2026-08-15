@@ -152,6 +152,10 @@ function verdict(overrides: Partial<ClaimGovernorVerdict> = {}): ClaimGovernorVe
     supported: true,
     unsupported_fragments: [],
     relied_on: [{ start: 1980, end: 2046 }],
+    // Document coordinates. The backend re-bases `relied_on` by the governor
+    // window's own start so any window can map them; `relied_on` alone indexes
+    // a window nothing serves.
+    relied_on_document: [{ start: 1980, end: 2046 }],
     confidence: "high",
     model: "test-governor",
     prompt_version: "2026-08-15.1",

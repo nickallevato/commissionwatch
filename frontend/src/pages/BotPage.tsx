@@ -48,6 +48,29 @@ const MACHINE_SURFACES: readonly Surface[] = [
     what: "Our own numbers: how much is collected, how much published, how long it takes.",
   },
   {
+    path: "/feed.xml",
+    what: "Atom feed of everything published, newest first. /feed.rss is the same in RSS 2.0.",
+    note:
+      "Add ?q= to subscribe to a search, or ?near=<lat>,<lon>&radius=<m> to subscribe to a place. The query is the subscription — there is no account and we store nothing about who is subscribed.",
+  },
+  {
+    path: "/api/places/near",
+    what: "Decisions with a location, by coordinate and radius. Each carries its citation.",
+    note:
+      "Points only. Positions carry a precision grade and must not be drawn more precisely than it supports.",
+  },
+  {
+    path: "/api/source/",
+    what: "A stored document at its content address: /api/source/{sha256}. The other end of every citation.",
+    note:
+      "Addressed by the SHA-256 of the bytes rather than by a URL, so a citation still resolves after the source site is reorganised.",
+  },
+  {
+    path: "/api/transcripts/coverage",
+    what: "How much of the archive has captions, how much the custodian published nothing for, and how much we could not fetch.",
+    note: "Three different facts, reported separately, plus what has not been checked.",
+  },
+  {
     path: "/sitemap.xml",
     what: "Every public URL, generated from the database.",
     note: "Published meetings only — an unpublished record is absent, not hidden behind a 403.",
