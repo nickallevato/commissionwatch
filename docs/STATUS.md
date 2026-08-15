@@ -35,6 +35,119 @@
 > 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
 
+## 2026-08-15 (evening) — 0.4.0: a switch an operator can reach, and a deploy that did not land
+
+**Read this section first. The release is PARTIALLY DEPLOYED and that is not a formality.**
+
+Production serves `72c10b0`. The feature registry, the `/admin/features` console and the per-cycle
+flag read are **live**. Everything committed after that sha — the extraction de-duplication and
+`repetition-truncated` reason, the failure-taxonomy mirror guard, the `ALERT_FROM_EMAIL` fix, the
+dated export archive, the DataLicensePage pin — is **committed, pushed, and not running.**
+
+### ⛔ BLOCKING OPERATOR ACTION — the deploy host is out of disk
+
+`deploy.yml` run **29009** failed. `ci-backend`, `ci-frontend`, `ci-deploy-script` and
+`build-and-push` are all **green on the same sha**. Only `deploy-aws` failed, and it failed on the
+instance while extracting a Docker layer:
+
+```
+failed to register layer: write /root/.npm/_cacache/…: no space left on device
+failed to run commands: exit status 18
+FATAL: SSM command 81936702-62da-4a0c-8367-6c8895e7302f finished as Failed
+```
+
+**The site was never at risk.** The pull failed before anything replaced the running containers, so
+production kept serving the previous good sha and answering `/api/health` 200. A failed deploy that
+leaves the previous version running is the pipeline behaving correctly.
+
+Diagnose before deleting — the npm cache in the error is a *symptom* of a full disk, not necessarily
+what filled it:
+
+```bash
+aws ssm send-command --instance-id i-0e2ab5cb4d7ec5e52 --document-name AWS-RunShellScript \
+  --parameters 'commands=["df -h /","du -xh --max-depth=2 /var/lib/docker | sort -rh | head -20","docker system df"]'
+```
+
+Then reclaim — most likely from Docker. **`docker image prune -af` is the blunt version and will
+remove the images a rollback needs**; prefer pruning by age while keeping the running tag. Re-run
+`deploy/deploy-aws-ssm.sh` (never SSH). **Verify by probing, not by CI:**
+`curl https://commissionwatch.bmux.sh/api/version` must report the head sha, not `72c10b0`.
+
+**Nothing alerted on this, and that is the finding worth keeping.** The external monitor watches
+whether the *site* is up, and it is. A deploy that fails while the previous version keeps serving is
+invisible to it. The disk filled silently and the first symptom was a failed release. **A green check
+suite plus a healthy site does not mean the release deployed.**
+
+### What is now true
+
+- **Features are toggled from `/admin/features`**, with the operator, the timestamp and a required
+  reason recorded in one transaction. Resolution is kill switch → registry row → legacy env →
+  default, and falls off to **off** in every failure mode. With no row present, behaviour is
+  byte-identical to 0.3.0 — which is why the drain, prerender and MCP suites pass unmodified.
+- **`FEATURE_<KEY>=false|0|no|off` is a kill switch that the console cannot override**, and it is
+  one-directional: setting one to `true` enables nothing and logs that the variable has no on
+  position. It outranks the database because the case that most demands turning a feature off is the
+  one where the feature is hammering the database.
+- **A toggle reaches a running loop in ~15s**, not on restart. Both loops read the flag per cycle;
+  the gate sits inside `tick()`, before the drain's transaction opens and after the consumer's cursor
+  read, so **off is a pause and not a loss** — the backlog survives and the cursor does not skip.
+- **Extraction de-duplicates before verifying**, which cut rejections from 1,007 to 336 across 30
+  captured replies: 67% were the model repeating itself.
+
+### The defects worth remembering
+
+- **A kill-switched key can still be written.** The row can read `true` while the feature is off, so
+  **dropping `FEATURE_EVENT_DRAIN=false` from the deploy config later starts the drain with no fresh
+  decision.** Refusing the write would leave the console unable to record a decision at all, so it
+  records and names the deciding source. Watch for this when editing the deploy env.
+- **`MCP_ENABLED` was an exact `=== "true"` compare** while the generic legacy reader accepts
+  `1|yes|on`. Routing MCP through the registry verbatim would have turned `MCP_ENABLED=1` into a live
+  public endpoint. The test pinning the exact string was right and the compatibility layer bent to it.
+- **A push that succeeds is not a push that ships.** `origin` is Gitea and drives the deploy;
+  `github` is the public mirror CI does not use. A mirror push returns exit 0 and looks identical to
+  a deploy trigger — read the printed sha range, not the exit code.
+- **A validation that cannot distinguish "absent" from "the tool errored" measures nothing.**
+  `docker compose config` appeared to drop seven `FEATURE_*` keys; it was failing outright because
+  `IMAGE_FRONTEND` is unset outside CI. Same shape as `nginx -t` being happy with three broken
+  configs here.
+- **A set-comparison guard needs a guard of its own.** Two empty sets are equal, so a regex that
+  stops matching turns a mirror test green and blind in the same moment. Assert each scan is
+  non-empty; it caught a real fault on its first run.
+- **`prerender.test.ts` silently assumes the `events` table is nearly empty.** It drives
+  `consumer.tick()` from a null cursor and `tick` reads `limit(200)` in `(updated_at, id)` order, so
+  once the table holds >200 rows older than its fixtures the tick spends its batch elsewhere and the
+  suite fails — **including on "a withdrawn meeting kept its prerendered page", the worst failure
+  this system can produce.** It fired from 1,585 orphaned events left by ad-hoc test runs. A clean
+  full-suite run leaves 62. Filed as F9b: seed a cursor rather than starting from null.
+- **The Gitea API note in the old runbook was wrong.** `/actions/runs/{id}/jobs` **does** return
+  jobs on this instance; the run id is not a job id, so fetch the jobs list first and use its ids
+  with `/actions/jobs/{jobId}/logs`. Theorising from the stale note instead of reading the log would
+  have cost the disk diagnosis entirely.
+
+### Still not done, and known — new in 0.4.0
+
+- **Extraction is still not scheduled**, and the unread share is unchanged as a headline figure. What
+  changed is what it means: the label `repetition-truncated` now says the model was looping when the
+  ceiling stopped it, and at n=30 **0 of 6 truncated chunks lost a verified claim**. That result is
+  **bounded and must be re-run**: this corpus verifies ~1 claim per chunk and two of five chunks
+  verify zero, so a chunk with nothing to lose cannot demonstrate that nothing is lost.
+- **The office gate rejects a whole body's minutes.** 283 of the 336 surviving rejections are
+  `not-an-official`: these are a Weed District board printing bare first names with no office, while
+  the prompt demands Mayor/Deputy Mayor/Commissioner. **Not a cleanup task** — the gate is what lets
+  extraction run before a sourced roster exists, and loosening it to accept a bare first name is the
+  change that would put an unverifiable person's name on a page. It needs the roster or its own spec.
+- **`dated_export_archive` is forward-only by necessity.** `published_at` is one mutable column set
+  to NULL on withdrawal, so a meeting published in March and withdrawn in April leaves no trace of
+  ever having been public. The archive answers from the first snapshot onward and 404s before it.
+  **Nothing has taken a snapshot yet** — `npm run export:snapshot` is the writer, and without it the
+  feature has no data to serve.
+- **Turning on `prerender` still requires the rebuild.** The consumer walks the event log and nothing
+  replays an old publish, so `npm run prerender:rebuild` is a required seed. It is **not** a knex
+  seed — `seeds/` holds only `001_pilot_data.ts` — and an operator sent to look there will find
+  nothing and reasonably conclude the step is done.
+- **Email still cannot ship.** The From address now aligns by construction, but SPF/DKIM/DMARC are
+  unconfigured and **nothing in the codebase creates or checks those records.**
+
 ## 2026-08-15 — the pipeline joined up, end to end
 
 The through-line: **several pieces already existed and were simply unreachable**, and connecting
