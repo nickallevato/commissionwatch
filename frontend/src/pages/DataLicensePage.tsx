@@ -124,14 +124,42 @@ const WITHHELD: readonly Withheld[] = [
    API surface, as mounted
    ------------------------------------------------------------------------- */
 
-/** Mirrors the routers mounted in `backend/src/app.ts`. */
+/**
+ * The public API surface, mirrored from the routers mounted in
+ * `backend/src/app.ts`.
+ *
+ * It listed six of these when the backend mounted twenty-seven. Everything
+ * added after this page was written — matters, search, the source viewer,
+ * places, transcripts, metrics, the corrections log, the calendar, the bulk
+ * export itself — was absent, and to a reader an endpoint absent from the list
+ * of endpoints is an endpoint that does not exist. That is the same failure the
+ * `/bot` page had, and the sitemap had, and the corrections log had: a
+ * hand-kept list beside a growing router drifts by default rather than by
+ * accident.
+ *
+ * `DataLicensePage.test.tsx` now reads `app.ts` and fails on any public mount
+ * that is neither listed here nor excluded there with a written reason.
+ */
 const ENDPOINTS: readonly string[] = [
   "/api/jurisdictions",
   "/api/meetings",
   "/api/members",
+  "/api/officials",
   "/api/votes",
   "/api/anomalies",
+  "/api/matters",
+  "/api/search",
+  "/api/places",
+  "/api/source",
+  "/api/transcripts",
+  "/api/calendar",
+  "/api/corrections",
+  "/api/public-records",
+  "/api/data",
+  "/api/metrics",
+  "/api/ingestion",
   "/api/health",
+  "/api/version",
 ];
 
 /* ---------------------------------------------------------------------------

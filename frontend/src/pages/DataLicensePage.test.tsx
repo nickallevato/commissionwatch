@@ -6,6 +6,8 @@ import {
   afterAll,
   afterEach,
 } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { http, HttpResponse } from "msw";
 import { waitFor } from "@testing-library/react";
 import { renderWithProviders, screen } from "../lib/test-utils";
@@ -249,3 +251,61 @@ describe("DataLicensePage", () => {
     expect(screen.getByText("The compiled dataset")).toBeInTheDocument();
   });
 });
+
+/**
+ * The endpoint list against the routers that actually exist.
+ *
+ * The page listed six endpoints while the backend mounted twenty-seven, and to
+ * a reader an endpoint absent from the list of endpoints is an endpoint that
+ * does not exist. Everything shipped after the page was written — search, the
+ * source viewer, places, transcripts, metrics, the corrections log, the
+ * calendar, the bulk export itself — was missing.
+ *
+ * So the test reads `app.ts` rather than a copy of it. A mount is either on the
+ * page or in `NOT_PUBLIC` with a reason somebody wrote down.
+ */
+describe("the API surface the page advertises is the one that is mounted", () => {
+  /** Mounted, and deliberately not advertised as public read API. */
+  const NOT_PUBLIC: Readonly<Record<string, string>> = {
+    "/api/admin": "the operator console; behind requireOperator and never advertised",
+    "/api/admin/discord": "operator-only channel configuration",
+    "/api/sms": "a Twilio webhook, not a read endpoint — it is posted to, by one caller",
+    "/api/subscriptions": "write endpoints for alert signup, not a public read surface",
+    "/api/alerts": "the same; it takes an address and returns nothing to read",
+    "/api/notifications": "operator-only; requireOperator on the router's first line",
+    "/api/list-unsubscribe": "acted on from an email header, not browsed",
+    "/sitemap.xml": "not JSON and not an API; it is named in robots.txt where crawlers look",
+  };
+
+  it("lists every public mount, or says why one is absent", () => {
+    const appSource = readFileSync(
+      join(__dirname, "..", "..", "..", "backend", "src", "app.ts"),
+      "utf8",
+    );
+    const mounts = [...appSource.matchAll(/app\.use\(\s*"([^"]+)"/g)].map((m) => m[1]);
+    expect(mounts.length).toBeGreaterThan(20);
+
+    const page = readFileSync(join(__dirname, "DataLicensePage.tsx"), "utf8");
+    const missing = mounts.filter(
+      (mount) => !page.includes(`"${mount}"`) && !NOT_PUBLIC[mount],
+    );
+
+    expect(missing, `mounted and advertised nowhere: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  /**
+   * An allow-list is how a guard quietly stops guarding, so an exclusion has to
+   * name something that is still mounted.
+   */
+  it("carries no stale exclusion", () => {
+    const appSource = readFileSync(
+      join(__dirname, "..", "..", "..", "backend", "src", "app.ts"),
+      "utf8",
+    );
+    for (const [mount, reason] of Object.entries(NOT_PUBLIC)) {
+      expect(appSource, `${mount} is excluded but no longer mounted`).toContain(`"${mount}"`);
+      expect(reason.length).toBeGreaterThan(20);
+    }
+  });
+});
+
