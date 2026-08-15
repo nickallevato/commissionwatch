@@ -5,7 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AdminClaimsPage } from "./AdminClaimsPage";
 import { server } from "@/mocks/server";
-import type { ClaimQueueResponse, ClaimReviewItem } from "@/types";
+import type { ClaimGovernorVerdict, ClaimQueueResponse, ClaimReviewItem } from "@/types";
 
 /**
  * `/admin/claims` — the screen from which a sentence naming a living person
@@ -37,6 +37,11 @@ import type { ClaimQueueResponse, ClaimReviewItem } from "@/types";
  * let it get that far — a button that reliably produces an error it could have
  * prevented trains an operator to ignore errors.
  *
+ * **The governor annotates and decides nothing.** A second model's verdict may
+ * change what the operator reads and the order they read it in. It may not
+ * change what they are able to do, and it may not make a claim disappear. The
+ * block of tests at the end of this file is that constraint.
+ *
  * Every name here is invented, as everywhere else in this project's fixtures.
  */
 
@@ -46,6 +51,7 @@ afterAll(() => server.close());
 
 const CLAIM_ID = "aaaaaaaa-1111-4a00-9000-000000000001";
 const SECOND_ID = "aaaaaaaa-1111-4a00-9000-000000000002";
+const THIRD_ID = "aaaaaaaa-1111-4a00-9000-000000000003";
 const MEETING_ID = "bbbbbbbb-2222-4a00-9000-000000000001";
 const SHA = "c".repeat(64);
 
@@ -108,6 +114,10 @@ function makeItem(overrides: Partial<ClaimReviewItem> = {}): ClaimReviewItem {
         offset_matches_stored: true,
       },
     },
+    // Not checked, which is the honest default: most claims in this queue have
+    // no verdict, and a fixture that gave every claim one would let the third
+    // state go untested by accident.
+    governor: null,
     context: {
       meeting_date: "2026-03-12",
       meeting_published_at: "2026-03-14T00:00:00.000Z",
@@ -128,9 +138,37 @@ function queue(data: ClaimReviewItem[]): ClaimQueueResponse {
       rejected: data.filter((item) => item.claim.status === "rejected").length,
       retracted: data.filter((item) => item.claim.retracted_at !== null).length,
       overdue: data.filter((item) => item.claim.overdue).length,
+      governor_unjudged: data.filter(
+        (item) => item.claim.status === "held" && item.governor === null,
+      ).length,
     },
   };
 }
+
+/** A verdict, in the shape `services/governor/store.ts` serves one. */
+function verdict(overrides: Partial<ClaimGovernorVerdict> = {}): ClaimGovernorVerdict {
+  return {
+    state: "supported",
+    supported: true,
+    unsupported_fragments: [],
+    relied_on: [{ start: 1980, end: 2046 }],
+    confidence: "high",
+    model: "test-governor",
+    prompt_version: "2026-08-15.1",
+    window_sha256: "e".repeat(64),
+    created_at: "2026-08-14T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+const REFUSED = verdict({
+  state: "governor_rejected",
+  supported: false,
+  // The wording of the quote, which is what the prompt asks for and what can be
+  // marked in place.
+  unsupported_fragments: ["voted no"],
+  confidence: "medium",
+});
 
 function install(body: ClaimQueueResponse) {
   server.use(http.get("/api/admin/claims/queue", () => HttpResponse.json(body)));
@@ -422,6 +460,158 @@ describe("AdminClaimsPage", () => {
     expect(
       await screen.findByText("The record shows no claims awaiting review."),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * The governor's half of this screen.
+   *
+   * It exists because `verify.ts` cannot decide which of two names in one
+   * sentence a verb attaches to, and it must never grow past that: it annotates
+   * and it reorders, and a person still presses the button. Every test here is
+   * one of the four ways this feature turns into an auto-discarder — a verdict
+   * that gates the button, a refusal that hides the claim, a "not checked" that
+   * reads as a pass, or a verdict nobody can trace back to a model.
+   */
+  it("marks the fragments a refusal named, inside the quote", async () => {
+    install(queue([makeItem({ governor: REFUSED })]));
+    renderPage();
+
+    const marked = await screen.findByTestId(`governor-fragments-${CLAIM_ID}`);
+    // The whole quote, not just the objection: an operator reading a bare
+    // fragment cannot tell what it was a fragment of.
+    expect(marked.textContent).toBe(QUOTE);
+
+    const fragment = screen.getByTestId(`governor-fragment-${CLAIM_ID}`);
+    expect(fragment.tagName).toBe("MARK");
+    expect(fragment.textContent).toBe("voted no");
+  });
+
+  it("shows a fragment that is not wording of the quote rather than dropping it", async () => {
+    // The judge is asked to name "the person, the action, or the matter" in a
+    // few words, so this is a shape the backend really produces. Silently
+    // discarding it would leave the operator an unmarked quote to read as an
+    // unchallenged one.
+    install(
+      queue([
+        makeItem({ governor: verdict({ ...REFUSED, unsupported_fragments: ["the action"] }) }),
+      ]),
+    );
+    renderPage();
+
+    expect((await screen.findByTestId(`governor-unlocated-${CLAIM_ID}`)).textContent).toContain(
+      "the action",
+    );
+    expect(screen.queryByTestId(`governor-fragment-${CLAIM_ID}`)).toBeNull();
+  });
+
+  it("says a claim was not checked rather than leaving a blank that reads as a pass", async () => {
+    install(queue([makeItem({ governor: null })]));
+    renderPage();
+
+    const panel = await screen.findByTestId(`governor-${CLAIM_ID}`);
+    expect(panel.dataset.governorState).toBe("unchecked");
+    expect(panel.textContent).toContain("not checked");
+    expect(panel.textContent).toContain("That is not a pass");
+    // Distinguishable from both other states, not merely worded differently.
+    expect(panel.textContent).not.toContain("attribution supported");
+    expect(panel.textContent).not.toContain("attribution not supported");
+    // Nothing to mark, because there is no verdict to mark anything from.
+    expect(screen.queryByTestId(`governor-fragments-${CLAIM_ID}`)).toBeNull();
+    expect(screen.queryByTestId(`governor-provenance-${CLAIM_ID}`)).toBeNull();
+  });
+
+  it("labels a supported claim as one model's reading and not as a clearance", async () => {
+    install(queue([makeItem({ governor: verdict() })]));
+    renderPage();
+
+    const panel = await screen.findByTestId(`governor-${CLAIM_ID}`);
+    expect(panel.dataset.governorState).toBe("supported");
+    expect(panel.textContent).toContain("attribution supported");
+    expect(screen.queryByTestId(`governor-fragment-${CLAIM_ID}`)).toBeNull();
+  });
+
+  it("takes the approve button's state from render.approvable and never from the verdict", async () => {
+    // The same `render.approvable` across all three verdict states. If any one
+    // of these buttons disagrees with the other two, the governor has acquired
+    // a power the design says it does not have — and the failure mode is a
+    // claim a model refused that a person is no longer able to approve.
+    const held = makeItem().claim;
+    install(
+      queue([
+        makeItem({ governor: null }),
+        makeItem({ claim: { ...held, id: SECOND_ID }, governor: verdict() }),
+        makeItem({ claim: { ...held, id: THIRD_ID }, governor: REFUSED }),
+      ]),
+    );
+    const first = renderPage();
+
+    const approvals = await screen.findAllByRole("button", { name: "Approve and publish" });
+    expect(approvals).toHaveLength(3);
+    for (const button of approvals) expect(button).toBeEnabled();
+    first.unmount();
+
+    // And the other way: a claim the governor supported is still refused when
+    // the backend says it is not approvable, so the button is not reading the
+    // verdict in either direction.
+    install(
+      queue([
+        makeItem({
+          governor: verdict(),
+          render: {
+            ...makeItem().render,
+            approvable: false,
+            blocked_reason:
+              "the bytes this claim cites are not stored, so a reader could not check it",
+          },
+        }),
+      ]),
+    );
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Approve and publish" })).toBeDisabled();
+  });
+
+  it("leaves a refused claim fully readable, with its controls", async () => {
+    install(queue([makeItem({ governor: REFUSED })]));
+    renderPage();
+
+    // Sorted last by the backend, not hidden and not collapsed here. Everything
+    // an unjudged claim shows, this shows too.
+    expect((await screen.findByTestId(`render-text-${CLAIM_ID}`)).textContent).toBe(
+      "Avery Sample — voted no on Ordinance 2145, second reading",
+    );
+    expect(screen.getByTestId(`quote-context-${CLAIM_ID}`).textContent).toContain(
+      "The motion carried four to one.",
+    );
+    expect(screen.getByRole("button", { name: "Approve and publish" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+    expect(screen.getByLabelText(`Reason for ${CLAIM_ID}`)).toBeInTheDocument();
+  });
+
+  it("names the model and prompt version behind a verdict", async () => {
+    install(queue([makeItem({ governor: verdict() })]));
+    renderPage();
+
+    // A verdict whose model nobody recorded is a verdict nobody can re-examine
+    // when that model turns out to be bad.
+    const provenance = await screen.findByTestId(`governor-provenance-${CLAIM_ID}`);
+    expect(provenance.textContent).toContain("test-governor");
+    expect(provenance.textContent).toContain("2026-08-15.1");
+    expect(provenance.textContent).toContain("high confidence");
+  });
+
+  it("counts the claims the governor has never judged", async () => {
+    install(
+      queue([
+        makeItem({ governor: null }),
+        makeItem({ claim: { ...makeItem().claim, id: SECOND_ID }, governor: verdict() }),
+      ]),
+    );
+    renderPage();
+
+    // One of the two. A backlog that is not on the counts row is a backlog
+    // indistinguishable from a quiet week.
+    expect((await screen.findByTestId("governor-unjudged-count")).textContent).toBe("1");
   });
 
   it("reports a queue it could not load as a failure of ours", async () => {

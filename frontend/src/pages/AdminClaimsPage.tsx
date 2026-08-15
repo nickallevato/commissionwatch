@@ -4,7 +4,14 @@ import { FlagBar, PressroomCard, WorkTitle } from "@/components/PressroomUI";
 import { Absence } from "@/components/ui/Absence";
 import { Citation, ReviewStamp } from "@/components/ui/Citation";
 import { abbreviateSha } from "@/components/ui/citation-source";
-import type { ClaimQueueResponse, ClaimQueueStatus, ClaimQuoteContext, ClaimReviewItem } from "@/types";
+import { markUnsupported } from "@/components/ui/governor-quote";
+import type {
+  ClaimGovernorVerdict,
+  ClaimQueueResponse,
+  ClaimQueueStatus,
+  ClaimQuoteContext,
+  ClaimReviewItem,
+} from "@/types";
 
 /**
  * `/admin/claims` — the screen `minute_claims` waited for.
@@ -38,6 +45,11 @@ import type { ClaimQueueResponse, ClaimQueueStatus, ClaimQuoteContext, ClaimRevi
  * backend's own words, because paraphrasing "the bytes this claim cites are not
  * stored" into "cannot approve" gives the operator a dead button and no way to
  * fix it.
+ *
+ * **The governor annotates; it never decides.** The second model's verdict
+ * changes what the operator reads and the order they read it in. The approve
+ * button's state comes from `render.approvable` and from nothing else — see
+ * `GovernorVerdict`, which renders no controls at all.
  *
  * It follows `AdminReviewPage`'s idiom deliberately: same card, same reason
  * box, same verbatim API refusals. The two queues are one job — deciding
@@ -149,6 +161,136 @@ function QuoteInContext({ context, claimId }: { context: ClaimQuoteContext; clai
           before deciding.
         </p>
       )}
+    </div>
+  );
+}
+
+const CONFIDENCE_LABEL: Record<ClaimGovernorVerdict["confidence"], string> = {
+  low: "low confidence",
+  medium: "medium confidence",
+  high: "high confidence",
+};
+
+/**
+ * Who judged this, under which instructions, and when.
+ *
+ * The same reasoning `minute_claims.model` already carries: a verdict whose
+ * model nobody recorded is a verdict nobody can re-examine when that model turns
+ * out to be bad. `window_sha256` is here because the verdict is about a window
+ * of bytes rather than about a claim id — if the county reissues its minutes the
+ * sha changes and this verdict is stale.
+ */
+function VerdictProvenance({ verdict, claimId }: { verdict: ClaimGovernorVerdict; claimId: string }) {
+  return (
+    <p data-testid={`governor-provenance-${claimId}`} className="mt-2 text-xs text-muted">
+      Judged by <span className="font-mono">{verdict.model}</span> (prompt{" "}
+      <span className="font-mono">{verdict.prompt_version}</span>), {CONFIDENCE_LABEL[verdict.confidence]},{" "}
+      {formatStamp(verdict.created_at)}
+      {verdict.window_sha256 !== "" && (
+        <>
+          {" · window "}
+          <span className="font-mono" title={verdict.window_sha256}>
+            {abbreviateSha(verdict.window_sha256)}
+          </span>
+        </>
+      )}
+      {verdict.relied_on.length > 0 && (
+        <>
+          {" · relied on "}
+          <span className="figure">{verdict.relied_on.length}</span> span
+          {verdict.relied_on.length === 1 ? "" : "s"} of that window, which this screen does not
+          serve
+        </>
+      )}
+    </p>
+  );
+}
+
+/**
+ * The second model's verdict, or the fact that there is not one.
+ *
+ * Three states, and the third is the one that would otherwise be a blank:
+ *
+ * **Not checked.** `governor: null`. The API was down, the model was
+ * rate-limited, or the reply parsed to nothing — all of which leave the claim
+ * un-judged, and none of which is a pass. A blank here reads as "fine", so the
+ * screen says the words instead.
+ *
+ * **Supported.** The judge agrees the window's wording attaches this action to
+ * this person. It is one model's opinion of a sentence, so it is stated as that
+ * and not as a clearance.
+ *
+ * **Not supported.** The claim sorts last in the queue and is otherwise
+ * untouched: fully readable, still carrying its approve and reject buttons. A
+ * judge with a 5% error rate that hides what it refuses loses one true claim in
+ * twenty, silently, which is the one failure a transparency project cannot ship.
+ * The fragments it named are marked inside the quote, because the value of
+ * asking a model to point rather than opine is entirely in the pointing.
+ *
+ * No control is rendered anywhere in here. The governor cannot approve and
+ * cannot reject.
+ */
+function GovernorVerdict({ item, claimId }: { item: ClaimReviewItem; claimId: string }) {
+  const verdict = item.governor;
+
+  if (verdict === null) {
+    return (
+      <div className="mt-4" data-testid={`governor-${claimId}`} data-governor-state="unchecked">
+        <FlagBar label="Second model: not checked" tone="idle">
+          No second model has judged this attribution. That is not a pass — it is what an
+          unreachable API, a rate limit, or an unusable reply all leave behind. Read the quote
+          yourself before deciding.
+        </FlagBar>
+      </div>
+    );
+  }
+
+  if (verdict.supported) {
+    return (
+      <div className="mt-4" data-testid={`governor-${claimId}`} data-governor-state="supported">
+        <FlagBar label="Second model: attribution supported" tone="ok">
+          A second model, shown the surrounding minutes and this claim and nothing else, read the
+          record as attributing this action to this person.
+        </FlagBar>
+        <VerdictProvenance verdict={verdict} claimId={claimId} />
+      </div>
+    );
+  }
+
+  const marked = markUnsupported(item.citation.quote, verdict.unsupported_fragments);
+
+  return (
+    <div className="mt-4" data-testid={`governor-${claimId}`} data-governor-state="not-supported">
+      <FlagBar label="Second model: attribution not supported" tone="warn">
+        A second model read the surrounding minutes and did not find this action attributed to this
+        person. It decides nothing: the claim is still yours to approve or reject, and it is last in
+        this queue rather than hidden from it.
+      </FlagBar>
+      <p
+        data-testid={`governor-fragments-${claimId}`}
+        className="mt-2 whitespace-pre-wrap break-words border border-rule bg-paper p-3 font-mono text-xs leading-relaxed text-ink"
+      >
+        {marked.segments.map((segment, index) =>
+          segment.unsupported ? (
+            <mark
+              key={index}
+              data-testid={`governor-fragment-${claimId}`}
+              className="bg-sev3/30 text-ink underline decoration-sev3 decoration-2 underline-offset-2"
+            >
+              {segment.text}
+            </mark>
+          ) : (
+            <span key={index}>{segment.text}</span>
+          ),
+        )}
+      </p>
+      {marked.unlocated.length > 0 && (
+        <p data-testid={`governor-unlocated-${claimId}`} className="mt-2 text-sm text-ink-soft">
+          It also named wording that is not in the quote, so there is nothing to mark:{" "}
+          {marked.unlocated.join("; ")}.
+        </p>
+      )}
+      <VerdictProvenance verdict={verdict} claimId={claimId} />
     </div>
   );
 }
@@ -276,7 +418,7 @@ export function AdminClaimsPage() {
       </p>
 
       {listing && (
-        <dl className="mt-6 grid gap-4 sm:grid-cols-5">
+        <dl className="mt-6 grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
           <div>
             <dt className="label-sm">Awaiting review</dt>
             <dd className="mt-1 figure text-lg text-ink">{listing.counts.held}</dd>
@@ -303,6 +445,17 @@ export function AdminClaimsPage() {
           <div>
             <dt className="label-sm">Withdrawn</dt>
             <dd className="mt-1 figure text-lg text-ink">{listing.counts.retracted}</dd>
+          </div>
+          {/* A governor that has stopped running raises no error and hides no
+            page. It raises this number, and nothing else. */}
+          <div>
+            <dt className="label-sm">Not checked by the governor</dt>
+            <dd
+              data-testid="governor-unjudged-count"
+              className="mt-1 figure text-lg text-ink"
+            >
+              {listing.counts.governor_unjudged}
+            </dd>
           </div>
         </dl>
       )}
@@ -427,6 +580,11 @@ export function AdminClaimsPage() {
                     </FlagBar>
                   </div>
                 )}
+
+                {/* Above the quote and above the buttons: it is a reason to
+                  read the record more carefully, and a note placed after the
+                  decision is a note nobody read. */}
+                <GovernorVerdict item={item} claimId={claimId} />
 
                 <h3 className="mt-6 font-display text-base font-semibold text-ink">
                   The quote, in the document it came from

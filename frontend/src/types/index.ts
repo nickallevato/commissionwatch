@@ -1255,6 +1255,53 @@ export type ClaimRenderState =
   | { state: "renderable"; text: string }
   | { state: "awaiting_re_review"; reason: string };
 
+/** `claim_verdicts.confidence`. Mirrors migration 093's CHECK. */
+export type GovernorConfidence = "low" | "medium" | "high";
+
+/**
+ * A span of the governor's window, located by the backend rather than supplied
+ * by the model — `services/governor/verdict.ts` refuses a reply whose cited
+ * wording it cannot find in the bytes. The offsets index the ±2,000-character
+ * judged window, which this API does not serve, so nothing on the review screen
+ * draws them; `window_sha256` is what identifies the text they belong to.
+ */
+export interface GovernorReliedSpan {
+  start: number;
+  end: number;
+}
+
+/**
+ * The second model's verdict on one attribution.
+ *
+ * `verify.ts` already proves the quote is in the document and names the subject.
+ * What it cannot decide is which of two names in one sentence a verb attaches
+ * to, and that is the only question this answers.
+ *
+ * It approves nothing. There is no path from a verdict to `status = 'approved'`
+ * and `render.approvable` does not consult it — a verdict changes the order and
+ * the annotation of human review and nothing else. `state` is the store's own
+ * label: `governor_rejected` is not a claim status.
+ */
+export interface ClaimGovernorVerdict {
+  state: "supported" | "governor_rejected";
+  supported: boolean;
+  /**
+   * What the window does not support, in the judge's words. Free text, not
+   * offsets: the prompt asks it to name "the person, the action, or the matter"
+   * in a few words, so a fragment is sometimes the claim's wording and sometimes
+   * a description of it. See `components/ui/governor-quote.ts`.
+   */
+  unsupported_fragments: string[];
+  relied_on: GovernorReliedSpan[];
+  confidence: GovernorConfidence;
+  /** The model that answered, and the instructions it answered under. */
+  model: string;
+  prompt_version: string;
+  /** The exact bytes judged. A verdict whose window no longer matches is stale. */
+  window_sha256: string;
+  created_at: string;
+}
+
 export interface ClaimReviewItem {
   claim: {
     id: string;
@@ -1296,6 +1343,16 @@ export interface ClaimReviewItem {
     blocked_reason: string | null;
     pin: ClaimRenderState | null;
   };
+  /**
+   * The second model's opinion, or the absence of one.
+   *
+   * `null` is a third state — *not checked* — and the screen must say so. An API
+   * that was down, a rate limit, and a reply that parsed to nothing all land
+   * here, and none of them is a pass. Rendering it as a blank would let the one
+   * claim nobody could check look exactly like the ones that were checked and
+   * passed.
+   */
+  governor: ClaimGovernorVerdict | null;
   citation: ClaimCitation;
   context: {
     meeting_date: string | null;
@@ -1314,6 +1371,13 @@ export interface ClaimQueueResponse {
     rejected: number;
     retracted: number;
     overdue: number;
+    /**
+     * Held claims the governor has never judged. On the counts row because a
+     * silently growing backlog looks identical to a system with nothing to
+     * judge: a governor that has stopped running produces no error and no
+     * missing page, only this number climbing.
+     */
+    governor_unjudged: number;
   };
 }
 
