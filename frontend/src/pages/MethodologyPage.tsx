@@ -521,7 +521,7 @@ export function MethodologyPage() {
               looks incomplete or irregular, not that anyone did anything wrong.
               Every flag is listed, with its meeting and its source document, on{" "}
               <Link
-                to="/anomalies"
+                to="/findings"
                 className="underline underline-offset-2 hover:text-accent"
               >
                 the flag ledger

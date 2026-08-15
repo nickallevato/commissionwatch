@@ -69,7 +69,70 @@ function readerText(source: string): string {
     .join(" ");
 }
 
+/**
+ * Prose that reaches the reader as a string literal rather than as a JSX text
+ * node — the branches of a ternary in an expression container, a template
+ * literal that pluralises a count, an `aria-label`.
+ *
+ * `readerText` cannot see any of it, and that blind spot was not theoretical:
+ * `MeetingDetailPage.tsx` rendered "One anomaly on this record" as an `<h2>`
+ * for a day with this file already in the suite, because the sentence sat
+ * inside `{… ? "…" : "…"}` and the scan only looked between tags.
+ *
+ * The heuristic for "prose": at least two words, one of them lowercase with a
+ * space beside it, and no `/` — which drops every path, endpoint and import
+ * specifier, the exact things `vocabulary.ts` says are allowed to keep the
+ * database's names.
+ */
+function readerLiterals(source: string): string {
+  const withoutComments = source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^\s*\/\/.*$/gm, " ");
+  return (withoutComments.match(/["`]([^"`\\\n]{8,})["`]/g) ?? [])
+    .filter((literal) => !literal.includes("/") && /[a-z]+\s+[a-z]/i.test(literal))
+    .join(" ");
+}
+
 describe("the vocabulary is one set of words", () => {
+  it("uses no retired word in prose held in a string literal", () => {
+    const retired = /\b(anomal(?:y|ies)|members?)\b/i;
+    const offenders: string[] = [];
+
+    for (const file of sourceFiles(SRC)) {
+      const name = file.slice(file.lastIndexOf("/") + 1);
+      if (ALLOWED[name]) continue;
+      const found = readerLiterals(readFileSync(file, "utf8")).match(retired);
+      if (found) offenders.push(`${name}: "${found[0]}"`);
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * A redirect preserves what an old address has accrued from outside. Pointing
+   * our own navigation at one spends a round trip to learn something we already
+   * know, on every reader, forever.
+   */
+  it("links internally to the new address, never to the redirect", () => {
+    // App.tsx defines the redirects and vocabulary.ts names them; a file that
+    // declares a rename has to be able to write the old address down.
+    const declares = new Set(["App.tsx", "vocabulary.ts"]);
+    const offenders: string[] = [];
+
+    for (const file of sourceFiles(SRC)) {
+      const name = file.slice(file.lastIndexOf("/") + 1);
+      if (declares.has(name)) continue;
+      const source = readFileSync(file, "utf8");
+      for (const from of Object.keys(RENAMED_PATHS)) {
+        if (source.includes(`to="${from}"`) || source.includes(`to={"${from}"}`)) {
+          offenders.push(`${name} links to ${from}`);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
   it("uses no retired word in text a reader sees", () => {
     const retired = /\b(anomal(?:y|ies)|members?)\b/i;
     const offenders: string[] = [];

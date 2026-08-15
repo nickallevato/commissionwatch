@@ -56,7 +56,7 @@ describe("ElectionsPage", () => {
     renderWithProviders(<ElectionsPage />);
     expect(screen.getByRole("link", { name: "Officials" })).toHaveAttribute(
       "href",
-      "/members",
+      "/officials",
     );
     expect(screen.getByRole("link", { name: "Votes" })).toHaveAttribute(
       "href",

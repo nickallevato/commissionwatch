@@ -152,7 +152,7 @@ export function MeetingDetailPage() {
     if (recorded.size === 0) return { figure: "—", note: "No roll recorded" };
     return {
       figure: seats > 0 ? `${present.size}/${seats}` : String(present.size),
-      note: "Voting members present",
+      note: "Officials present and voting",
     };
   }, [votes, membersQuery.data, meeting]);
 
@@ -343,9 +343,9 @@ export function MeetingDetailPage() {
             className="font-display text-2xl leading-headline tracking-headline text-ink"
           >
             {sortedAnomalies.length === 1
-              ? "One anomaly on this record"
+              ? "One finding on this record"
               : sortedAnomalies.length > 1
-                ? `${sortedAnomalies.length} anomalies on this record`
+                ? `${sortedAnomalies.length} findings on this record`
                 : "Nothing flagged on this record"}
           </h2>
         </div>

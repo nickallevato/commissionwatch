@@ -280,7 +280,7 @@ export function HomePage() {
               >
                 Open flags
               </h2>
-              <Link to="/anomalies" className="label-sm hover:text-ink">
+              <Link to="/findings" className="label-sm hover:text-ink">
                 All flags
               </Link>
             </div>

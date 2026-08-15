@@ -134,7 +134,7 @@ export function OfficialPage() {
           Either no such official exists in the published record, or the request failed.
         </p>
         <p className="mt-4">
-          <Link className="cite" to="/members">
+          <Link className="cite" to="/officials">
             Back to the roster
           </Link>
         </p>

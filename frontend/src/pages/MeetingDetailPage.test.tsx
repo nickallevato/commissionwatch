@@ -636,7 +636,7 @@ describe("MeetingDetailPage", () => {
       await screen.findByText("Culvert replacement on Sample Road");
       // Three of the five seats answered the roll; the absence is not presence.
       expect(statValue("Attendance")).toBe("3/5");
-      expect(screen.getByText("Voting members present")).toBeInTheDocument();
+      expect(screen.getByText("Officials present and voting")).toBeInTheDocument();
     });
 
     it("takes the seat count from the roll when more members voted than the roster knows", async () => {
@@ -815,7 +815,7 @@ describe("MeetingDetailPage", () => {
 
       const chip = await screen.findByText("Source: meeting record");
       expect(chip.tagName).toBe("SPAN");
-      expect(screen.getByText("One anomaly on this record")).toBeInTheDocument();
+      expect(screen.getByText("One finding on this record")).toBeInTheDocument();
       expect(statValue("Flags")).toBe("1");
     });
   });

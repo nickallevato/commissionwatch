@@ -7,9 +7,12 @@ import { MethodologyPage } from "./MethodologyPage";
 const ROUTED_PATHS = [
   "/",
   "/meetings",
-  "/members",
+  // The canonical addresses. `/members` and `/anomalies` are still routed, as
+  // permanent redirects to these two, and are deliberately absent: nothing
+  // internal may link to a redirect, which `vocabulary.test.tsx` enforces.
+  "/officials",
   "/votes",
-  "/anomalies",
+  "/findings",
   "/methodology",
   "/data-license",
   // P7. The statutory route this page promises, now a page rather than prose.

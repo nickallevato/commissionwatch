@@ -86,7 +86,7 @@ function RollCall({ votes, members }: { votes: Vote[]; members: Member[] }) {
               className="flex items-baseline justify-between gap-6 border-b border-rule py-1.5"
             >
               <span className="text-sm text-ink-soft">
-                {member?.name ?? "Unidentified member"}
+                {member?.name ?? "Unidentified official"}
               </span>
               <span className={`${valueLabel} ${voteColor[vote.vote]}`}>
                 {VOTE_LABEL[vote.vote]}

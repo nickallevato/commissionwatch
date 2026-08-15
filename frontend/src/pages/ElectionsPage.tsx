@@ -99,7 +99,7 @@ export function ElectionsPage() {
           The voting record of people currently in office is already here.
         </p>
         <p className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
-          <Link className="cite" to="/members">
+          <Link className="cite" to="/officials">
             Officials
           </Link>
           <Link className="cite" to="/votes">
