@@ -4,6 +4,7 @@ import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
 import { collectMetrics } from "../src/services/metrics";
+import { totalTranscriptCoverage, transcriptCoverage } from "../src/services/transcript-coverage";
 
 /**
  * `/api/metrics` publishes this project's own numbers.
@@ -136,6 +137,64 @@ describe("GET /api/metrics", () => {
       false,
       "members carries no provenance columns; reporting true would be a claim we cannot support",
     );
+  });
+
+  /**
+   * Four numbers, not three. A body with two hundred unswept meetings must not
+   * be able to render as fully covered, which is exactly what dropping
+   * `unchecked` would allow — and `absent` and `unavailable` stay apart because
+   * one is the custodian's empty caption file and the other is our failure to
+   * read anything at all.
+   */
+  it("reports transcripts as four separate numbers in the quality block", async () => {
+    const metrics = await collectMetrics(db);
+    const keys = Object.keys(metrics.quality).filter((key) => key.startsWith("transcripts_"));
+    assert.deepEqual(
+      keys.sort(),
+      [
+        "transcripts_absent",
+        "transcripts_published",
+        "transcripts_unavailable",
+        "transcripts_unchecked",
+      ],
+      "all four transcript states are reported, and none is folded into another",
+    );
+  });
+
+  it("matches the totals the public coverage route breaks down", async () => {
+    // The summary and the breakdown are the same query. If these ever disagree
+    // there are two aggregations, which is the thing this reuses to avoid.
+    const metrics = await collectMetrics(db);
+    const rows = await transcriptCoverage(db);
+    const summed = totalTranscriptCoverage(rows);
+    assert.equal(metrics.quality.transcripts_published, summed.published);
+    assert.equal(metrics.quality.transcripts_absent, summed.absent);
+    assert.equal(metrics.quality.transcripts_unavailable, summed.unavailable);
+    assert.equal(metrics.quality.transcripts_unchecked, summed.unchecked);
+  });
+
+  it("counts a transcript on a withheld meeting nowhere at all", async () => {
+    // Unlike every other figure here, transcript coverage is inside the
+    // publication wall: it comes from `transcriptCoverage`, which joins through
+    // `meetings.published_at`. A transcript document on a meeting an operator
+    // has not published contributes to none of the four.
+    const before = await collectMetrics(db);
+    const [document] = await db("meeting_documents")
+      .insert({
+        meeting_id: withheldId,
+        title: "Captions (withheld probe)",
+        document_type: "transcript",
+        url: "https://metrics.invalid/videos/1/captions.vtt",
+      })
+      .returning("id");
+    const documentId = typeof document === "string" ? document : document.id;
+    try {
+      const after = await collectMetrics(db);
+      assert.equal(after.quality.transcripts_unchecked, before.quality.transcripts_unchecked);
+      assert.equal(after.quality.transcripts_published, before.quality.transcripts_published);
+    } finally {
+      await db("meeting_documents").where({ id: documentId }).del();
+    }
   });
 
   it("derives held findings so the parts always sum to the whole", async () => {

@@ -1,5 +1,10 @@
 import { randomInt } from "node:crypto";
 import type { Knex } from "knex";
+import {
+  listDisputeNotifications,
+  queueDisputeNotification,
+  type DisputeNotificationRow,
+} from "./dispute-notifications";
 import { appendCorrectionRow } from "./pressroom/corrections";
 import { whereFindingPublic, whereMeetingPublished } from "./publication";
 import { FixedWindowLimiter } from "./rate-limit";
@@ -8,8 +13,17 @@ import { FixedWindowLimiter } from "./rate-limit";
  * B3 — the dispute route.
  *
  * A person named in a record can contest it. What that produces is a row in
- * `record_disputes` and an entry in the one audit log, and nothing else: no
- * edit to the record, no public statement, no email to anyone.
+ * `record_disputes` and an entry in the one audit log — no edit to the record
+ * and no public statement.
+ *
+ * It used to say "and no email to anyone", which was true and was a defect.
+ * Read from the disputant's side it meant: they wrote to us, we filed it, and
+ * they never heard back. The `CW-XXXXXXXX` reference below exists to be quoted
+ * down a phone line and typed back into an email, and there was no email. Since
+ * 2026-08-14 a dispute produces exactly three messages over its whole life —
+ * one acknowledgement, then one outcome — and nothing else. The rules that keep
+ * that safe, above all the rule that an acknowledgement carries no dispute
+ * content, are in `services/dispute-notifications.ts`.
  *
  * Five properties, each of which is a mechanism below rather than a promise:
  *
@@ -373,6 +387,12 @@ export async function submitDispute(
       disputeId: row.id,
     });
 
+    // Inside the transaction, per the event spine. An acknowledgement queued
+    // against a submission that rolled back would tell somebody we hold a
+    // dispute we do not hold, and hand them a reference that resolves to
+    // nothing when they quote it back.
+    await queueDisputeNotification(trx, row, "received");
+
     return { reference: row.reference, status: row.status, received_at: row.created_at };
   });
 }
@@ -393,6 +413,16 @@ export interface DisputeContext {
 export interface DisputeItem {
   dispute: DisputeRow;
   context: DisputeContext;
+  /**
+   * What this project has written to the disputant, and what it could not.
+   *
+   * On the queue row rather than behind a second request, because the state that
+   * matters most is `no_notification_channel` — a contact that is a phone
+   * number, a postal address or a sentence — and that is a task only a person
+   * can clear. A console that showed the dispute without it would leave somebody
+   * waiting for a reply nothing was ever going to send.
+   */
+  notifications: DisputeNotificationRow[];
 }
 
 export interface DisputeFilters {
@@ -523,7 +553,11 @@ export async function listDisputes(
   const data: DisputeItem[] = [];
   for (const raw of rows) {
     const dispute = toDisputeRow(raw);
-    data.push({ dispute, context: await describeTarget(db, dispute) });
+    data.push({
+      dispute,
+      context: await describeTarget(db, dispute),
+      notifications: await listDisputeNotifications(db, dispute.id),
+    });
   }
 
   const tallies = await db("record_disputes")
@@ -545,7 +579,11 @@ export async function getDispute(db: Knex, id: string): Promise<DisputeItem | nu
   const raw: unknown = await db("record_disputes").where({ id }).first();
   if (!isRecord(raw)) return null;
   const dispute = toDisputeRow(raw);
-  return { dispute, context: await describeTarget(db, dispute) };
+  return {
+    dispute,
+    context: await describeTarget(db, dispute),
+    notifications: await listDisputeNotifications(db, dispute.id),
+  };
 }
 
 export interface DisputeDecisionInput {
@@ -602,6 +640,12 @@ export async function decideDispute(db: Knex, input: DisputeDecisionInput): Prom
         reviewed_at: trx.fn.now(),
         updated_at: trx.fn.now(),
       });
+
+    // The decision is recorded before the message is queued, in the same
+    // transaction. A notification about a decision that rolled back is worse
+    // than no notification: the person is told an outcome the database does not
+    // hold, and the operator's queue still shows the dispute as undecided.
+    await queueDisputeNotification(trx, current, input.decision);
   });
 
   const item = await getDispute(db, input.id);

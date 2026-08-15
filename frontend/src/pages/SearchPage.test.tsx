@@ -8,6 +8,7 @@ import { http, HttpResponse } from "msw";
 import { SearchPage } from "./SearchPage";
 import { splitSnippet } from "@/hooks/useSearch";
 import { server } from "@/mocks/server";
+import { DOCUMENT_KINDS } from "@/types";
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
@@ -233,12 +234,55 @@ describe("SearchPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("discloses that only published records, and only read agendas, are searchable", () => {
+  /**
+   * This test used to assert the opposite, and it was right when it was
+   * written: it required the page to say "minutes and agenda packets" were
+   * stored but not indexed. `handlers.ts` began writing `artifact_texts` for
+   * every extractable document, and transcripts were indexed on 2026-08-14, so
+   * the copy — and this assertion holding it in place — became a false
+   * statement about our own corpus. The premise is what changed; the discipline
+   * is the same one, pointed at what the code now does.
+   */
+  it("discloses that only published records are searchable", () => {
     renderAt("/search");
     expect(
       screen.getByText(/Only records an operator has published are searchable/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/minutes and agenda packets/i)).toBeInTheDocument();
+  });
+
+  it("names minutes and captions among what is searchable by body text", () => {
+    renderAt("/search");
+    const note = screen.getByText(
+      /Only records an operator has published are searchable/,
+    );
+    expect(note.textContent).toContain("minutes");
+    expect(note.textContent).toContain("caption files");
+  });
+
+  /**
+   * The disclosure has to draw its line where `services/search.ts` draws it.
+   * That branch reads `artifact_texts` with no filter on `document_type` at
+   * all, so what decides searchability is whether the bytes could be read into
+   * text — never which kind of document they were.
+   *
+   * Hence the check below: the clause naming what is *not* searchable may name
+   * a scan, a Word file or an empty caption file, and may not name a document
+   * kind. Written as a rule the copy survives a ninth kind being indexed with
+   * no edit, which is the honest reason it cannot go stale the way the
+   * enumeration did. What this test fails on is a return to enumerating —
+   * "minutes are not yet indexed" — which is exactly how it went stale before.
+   */
+  it("excludes documents by whether we could read them, never by kind", () => {
+    renderAt("/search");
+    const note = screen.getByText(
+      /Only records an operator has published are searchable/,
+    );
+    const text = note.textContent ?? "";
+    const exclusion = text.slice(text.indexOf("A document we could not read"));
+    expect(exclusion).not.toBe("");
+    for (const kind of DOCUMENT_KINDS) {
+      expect(exclusion.toLowerCase()).not.toContain(kind);
+    }
   });
 });
 

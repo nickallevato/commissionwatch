@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { Absence } from "@/components/ui/Absence";
 import { useMetrics } from "@/hooks/useMetrics";
+import { useTranscriptCoverage } from "@/hooks/useTranscriptCoverage";
+import { sumTranscriptCoverage } from "@/lib/transcript-coverage";
 
 /**
  * `/metrics` — this project's own numbers, on the terms it demands of others.
@@ -53,6 +55,13 @@ function Figure({
 
 export function MetricsPage() {
   const { data: metrics, isLoading, isError } = useMetrics();
+  // A second endpoint, not a second opinion: `/api/metrics` returns nothing
+  // about transcripts — `backend/src/services/metrics.ts` knows only the corpus
+  // counts — while `/api/transcripts/coverage` already publishes the figures
+  // this section needs. Fetching the read that exists beats adding a field to
+  // a backend another agent owns.
+  const coverage = useTranscriptCoverage();
+  const transcripts = sumTranscriptCoverage(coverage.data ?? []);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -161,6 +170,51 @@ export function MetricsPage() {
                 of={metrics.quality.vote_events_total}
               />
             </dl>
+            {/* Transcripts, and the reason this is four figures rather than a
+              percentage. `absent` is the custodian serving a well-formed
+              caption file with nothing in it — a fact about their record, and
+              era-shaped: 8 of 8 sampled 2013–2020 Bozeman clips are empty
+              against 1 of 22 from 2021–2026. `unavailable` is us failing to
+              get an answer. `unchecked` is a meeting nobody has asked about.
+              Fold any two together and one party's silence is published as
+              another's, which is the whole point of `transcript_status`. */}
+            <h3 className="mt-8 font-sans text-base font-semibold text-ink">
+              Transcripts
+            </h3>
+            <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-soft">
+              Meeting recordings whose captions the custodian publishes. These
+              are four separate numbers on purpose: a caption file with nothing
+              in it is what the city published, and a caption file we could not
+              fetch is our failure. Neither is the other.
+            </p>
+            {coverage.isError ? (
+              <Absence reason="request-failed" subject="Transcript coverage" />
+            ) : (
+              <dl className="mt-4 grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+                <Figure
+                  label="Recordings with captions"
+                  value={transcripts.published}
+                  of={transcripts.total}
+                  note="The custodian published captions and we hold them, indexed and searchable."
+                />
+                <Figure
+                  label="Custodian published nothing"
+                  value={transcripts.absent}
+                  note="An empty caption file, served by the custodian. A fact about their record — not a failed fetch."
+                />
+                <Figure
+                  label="We could not collect"
+                  value={transcripts.unavailable}
+                  note="We could not fetch or could not parse the caption file. This one is ours."
+                />
+                <Figure
+                  label="Not yet checked"
+                  value={transcripts.unchecked}
+                  note="A recording no sweep has asked about yet. Omitted, it would let an unswept archive read as fully covered."
+                />
+              </dl>
+            )}
+
             {metrics.quality.roster_sourced ? null : (
               <p className="mt-4 max-w-prose border-l-2 border-accent pl-4 text-sm leading-relaxed text-ink-soft">
                 <strong>Our roster of officials is not yet sourced.</strong> We

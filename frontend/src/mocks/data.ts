@@ -11,6 +11,7 @@ import type {
   MatterAppearance,
   Metrics,
   SourceWindow,
+  TranscriptCoverageRow,
 } from "@/types";
 
 /**
@@ -622,6 +623,59 @@ export const metrics: Metrics = {
   },
   generated_at: "2024-12-06T09:00:00Z",
 };
+
+/**
+ * Transcript coverage, for `GET /api/transcripts/coverage`.
+ *
+ * Three rows because the page has three shapes to get right, and the two that
+ * matter are the ones a single "coverage percentage" would erase:
+ *
+ * - Denver / Planning & Zoning, 2024 — mixed. Every state is present, so no
+ *   statement is true of every meeting in the year and the meeting page must
+ *   report the year rather than pick one.
+ * - Boulder County / Board of County Commissioners, 2024 — unanimously
+ *   `absent`. The custodian served an empty caption file for all of them. This
+ *   is the era-shaped case from `migrations/089_create_transcript_status.ts`,
+ *   and it must never render as a failure of ours.
+ * - Austin / Planning Commission, 2024 — unanimously `unavailable`. Ours, and
+ *   the one that has to link to the status page.
+ *
+ * The four counts never sum into one another here, because the whole reason
+ * the backend keeps them apart is that summing them publishes one party's
+ * silence as another's.
+ */
+export const transcriptCoverage: TranscriptCoverageRow[] = [
+  {
+    jurisdiction: "Denver",
+    body: "Planning & Zoning Commission",
+    year: 2024,
+    published: 9,
+    absent: 4,
+    unavailable: 2,
+    unchecked: 6,
+    checked_through: "2024-12-05T00:00:00Z",
+  },
+  {
+    jurisdiction: "Boulder County",
+    body: "Board of County Commissioners",
+    year: 2024,
+    published: 0,
+    absent: 11,
+    unavailable: 0,
+    unchecked: 0,
+    checked_through: "2024-12-11T00:00:00Z",
+  },
+  {
+    jurisdiction: "Austin",
+    body: "Planning Commission",
+    year: 2024,
+    published: 0,
+    absent: 0,
+    unavailable: 3,
+    unchecked: 0,
+    checked_through: "2024-12-10T00:00:00Z",
+  },
+];
 
 /**
  * Stored documents, keyed by content address, for `GET /api/source/:sha256`.

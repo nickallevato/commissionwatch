@@ -257,6 +257,25 @@ export class EmailDeliveryService {
     return { delivered: true, providerId };
   }
 
+  /**
+   * One message, to one person, about their own matter.
+   *
+   * A thin public door onto `sendEmail` and nothing else — deliberately, because
+   * the alternative was a second sender for transactional mail, and a second
+   * sender is a second place the suppression check can be forgotten. The
+   * dispute reply loop writes to an address a *stranger* typed into a public
+   * form; it is the last path in this codebase that should be allowed its own
+   * copy of the rules.
+   *
+   * The caller owns the subject and the body, and owns the decision about what
+   * may go in them. This function will not help with that: it does not
+   * interpolate, it does not template, and it adds no tracking pixel or wrapped
+   * link, so nobody's reading of our reply is logged.
+   */
+  async sendTransactional(to: string, subject: string, html: string): Promise<SendOutcome> {
+    return this.sendEmail(to, subject, html);
+  }
+
   /** What a send resolved to. `email_status` is derived from this, never assumed. */
   private statusFor(outcome: SendOutcome): "sent" | "dry_run" | "skipped" | "failed" {
     if (outcome.delivered) return "sent";

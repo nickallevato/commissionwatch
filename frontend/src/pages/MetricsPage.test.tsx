@@ -3,7 +3,8 @@ import { http, HttpResponse } from "msw";
 import { renderWithProviders, screen } from "@/lib/test-utils";
 import { MetricsPage } from "./MetricsPage";
 import { server } from "@/mocks/server";
-import { metrics } from "@/mocks/data";
+import { metrics, transcriptCoverage } from "@/mocks/data";
+import { sumTranscriptCoverage } from "@/lib/transcript-coverage";
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
@@ -122,5 +123,57 @@ describe("MetricsPage", () => {
   it("notes that an unreadable document is held but not searchable", async () => {
     renderWithProviders(<MetricsPage />);
     expect(await screen.findByText(/held but not searchable/i)).toBeInTheDocument();
+  });
+
+  /**
+   * Transcript coverage is four numbers and must stay four. `absent` is an
+   * empty caption file the custodian chose to serve; `unavailable` is our fetch
+   * failing; `unchecked` is a recording nobody has asked about. Publish a
+   * single coverage percentage and the city's silence and our outage become the
+   * same figure — which is the entire reason `transcript_status` exists.
+   */
+  it("reports transcript coverage as separate figures, none folded into another", async () => {
+    renderWithProviders(<MetricsPage />);
+
+    const totals = sumTranscriptCoverage(transcriptCoverage);
+    const withCaptions = await screen.findByText(/recordings with captions/i);
+    expect(withCaptions.closest("div")?.textContent).toContain(String(totals.published));
+
+    for (const [label, value] of [
+      [/custodian published nothing/i, totals.absent],
+      [/we could not collect/i, totals.unavailable],
+      [/not yet checked/i, totals.unchecked],
+    ] as const) {
+      const figure = screen.getByText(label);
+      expect(figure.closest("div")?.textContent).toContain(String(value));
+    }
+
+    // The four are distinct in the fixture, so a page that summed any two of
+    // them could not print all four of these and still be arithmetically
+    // consistent. Guard the sum explicitly anyway: it is the specific mistake.
+    expect(totals.published + totals.absent + totals.unavailable + totals.unchecked).toBe(
+      totals.total,
+    );
+    expect(new Set([totals.published, totals.absent, totals.unavailable, totals.unchecked]).size).toBe(4);
+  });
+
+  it("says whose failure an empty caption file is, and whose a failed fetch is", async () => {
+    renderWithProviders(<MetricsPage />);
+    expect(
+      await screen.findByText(/A fact about their record — not a failed fetch\./),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/This one is ours\./)).toBeInTheDocument();
+  });
+
+  it("does not report transcript coverage it could not load", async () => {
+    server.use(
+      http.get("/api/transcripts/coverage", () => new HttpResponse(null, { status: 500 })),
+    );
+    renderWithProviders(<MetricsPage />);
+
+    expect(
+      await screen.findByText(/Transcript coverage could not be loaded/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/recordings with captions/i)).not.toBeInTheDocument();
   });
 });

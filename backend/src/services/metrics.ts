@@ -1,5 +1,6 @@
 import type { Knex } from "knex";
 import { rosterCoverage } from "./roster-coverage";
+import { totalTranscriptCoverage, transcriptCoverage } from "./transcript-coverage";
 
 /**
  * This project's own numbers, published on the same terms it demands of others.
@@ -99,6 +100,27 @@ export interface QualityMetrics {
    * point — it is the gap that gates the whole claims pipeline.
    */
   roster_sourced: boolean;
+  /**
+   * Transcript documents by state, over published meetings.
+   *
+   * Four numbers, and the fourth is the one that would otherwise flatter us.
+   * `transcripts_unchecked` is a transcript document with no `transcript_status`
+   * row — nobody has swept it — and omitting it would let a body with two
+   * hundred unswept meetings render as fully covered. `absent` and `unavailable`
+   * stay apart for the reason `transcript-coverage.ts` gives at length: one is
+   * the custodian serving an empty caption file, the other is us failing to get
+   * an answer, and collapsing them would publish our outage as the city's
+   * silence.
+   *
+   * These are counted over *published* meetings only, unlike every other figure
+   * in this module, because they come from `transcriptCoverage` and that query
+   * is inside the publication wall. That is the right scope for a quality
+   * signal about the record a reader can actually reach.
+   */
+  transcripts_published: number;
+  transcripts_absent: number;
+  transcripts_unavailable: number;
+  transcripts_unchecked: number;
 }
 
 export interface Metrics {
@@ -162,6 +184,12 @@ export async function collectMetrics(db: Knex, now: Date = new Date()): Promise<
   // the per-jurisdiction breakdown available from the service directly.
   const coverage = await rosterCoverage(db, { asOf: now });
 
+  // Summed from the rows `/api/transcripts/coverage` already serves rather than
+  // aggregated again here. Two queries over the same tables would disagree the
+  // first time either one's publication predicate changed, and the coverage page
+  // is the one a reader drills into.
+  const transcripts = totalTranscriptCoverage(await transcriptCoverage(db));
+
   // `percentile_cont` over the published set. Postgres computes it; doing it in
   // JavaScript would mean pulling every published meeting into memory to answer
   // a single number.
@@ -208,6 +236,10 @@ export async function collectMetrics(db: Knex, now: Date = new Date()): Promise<
       roster_seats_sourced: coverage.reduce((total, row) => total + row.seats_sourced, 0),
       roster_seats_implied: coverage.reduce((total, row) => total + row.seats_implied, 0),
       roster_sourced: coverage.some((row) => row.provenance !== "unsourced"),
+      transcripts_published: transcripts.published,
+      transcripts_absent: transcripts.absent,
+      transcripts_unavailable: transcripts.unavailable,
+      transcripts_unchecked: transcripts.unchecked,
     },
     review: {
       findings_total,

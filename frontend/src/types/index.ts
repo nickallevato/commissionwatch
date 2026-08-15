@@ -1340,3 +1340,57 @@ export interface PublicClaims {
    */
   awaiting_re_review: number;
 }
+
+// ---------------------------------------------------------------------------
+// Transcripts — `GET /api/transcripts/coverage`
+// ---------------------------------------------------------------------------
+
+/**
+ * The kinds an adapter can put in `meeting_documents.document_type`, mirroring
+ * `backend/src/services/ingestion/adapters/types.ts`.
+ *
+ * Held here so a page that makes a claim about document kinds can be checked
+ * against the whole set rather than against whichever three the author
+ * remembered. The search disclosure is the reason it exists: it named agendas
+ * as the only indexed kind for months after minutes and transcripts were
+ * indexed too.
+ */
+export const DOCUMENT_KINDS = [
+  "agenda",
+  "minutes",
+  "packet",
+  "resolution",
+  "ordinance",
+  "attachment",
+  "transcript",
+  "other",
+] as const;
+
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+/**
+ * One body's transcript record for one calendar year, mirroring
+ * `TranscriptCoverageRow` in `backend/src/services/transcript-coverage.ts`.
+ *
+ * Four counts, and they must stay four. `absent` is the custodian serving a
+ * well-formed caption file with nothing in it — a fact about their record, and
+ * era-shaped rather than random. `unavailable` is us failing to get an answer.
+ * `unchecked` is a meeting we have not asked about yet, and dropping it would
+ * let a body with two hundred unswept meetings render as fully covered.
+ * Summing any two of them publishes one party's silence as another's.
+ */
+export interface TranscriptCoverageRow {
+  jurisdiction: string;
+  body: string;
+  year: number;
+  published: number;
+  absent: number;
+  unavailable: number;
+  unchecked: number;
+  /** Most recent check in this group, ISO 8601, or null if nothing was checked. */
+  checked_through: string | null;
+}
+
+export interface TranscriptCoverageResponse {
+  coverage: TranscriptCoverageRow[];
+}

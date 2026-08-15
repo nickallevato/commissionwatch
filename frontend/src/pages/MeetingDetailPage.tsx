@@ -12,6 +12,7 @@ import { useMembers } from "@/hooks/useMembers";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AgendaDiffTimeline } from "@/components/AgendaDiffTimeline";
 import { MeetingClaims } from "@/components/MeetingClaims";
+import { MeetingTranscript } from "@/components/MeetingTranscript";
 import { flagTypeLabels } from "@/components/flag-labels";
 import { SeverityMark } from "@/components/AnomalyBadge";
 import { severityRank } from "@/components/severity";
@@ -555,6 +556,18 @@ export function MeetingDetailPage() {
       <MeetingClaims
         meetingId={meeting.id}
         sourceLabel={`Minutes, ${bodyName}, ${formatMeetingDate(meeting.date)}`}
+      />
+
+      {/* Transcript ---------------------------------------------------- */}
+      {/* After the claims, because a transcript corroborates what was said
+        and never originates who said it — see migration 090. The jurisdiction
+        and body names are passed rather than ids: `/api/transcripts/coverage`
+        groups on `j.name` and `c.name`, so those are the keys that join. */}
+      <MeetingTranscript
+        jurisdiction={jurisdiction?.name ?? ""}
+        body={bodyName}
+        date={meeting.date}
+        documents={documents}
       />
 
       {/* Document history ---------------------------------------------- */}

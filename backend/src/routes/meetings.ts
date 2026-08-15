@@ -9,6 +9,7 @@ import {
   whereFindingPublic,
   whereMeetingPublished,
 } from "../services/publication";
+import { meetingTranscript } from "../services/transcript-coverage";
 
 const router = Router();
 
@@ -87,6 +88,23 @@ router.get("/", async (req: Request<unknown, unknown, unknown, MeetingsQuery>, r
   }
 });
 
+/**
+ * One meeting, with its agenda, its documents, and what we know about its
+ * transcript.
+ *
+ * `transcript` hangs here rather than on `/:id/documents` because the presence
+ * of a `transcript` document row proves nothing: it is written at discovery,
+ * before a byte is fetched, so an eight-byte empty caption file produces exactly
+ * the same row as a three-hour transcript. The state lives in
+ * `transcript_status`, keyed on the document, and the reader's question — does
+ * this meeting have a transcript — is a question about the meeting. This is also
+ * the only route in the router whose response is an object rather than a
+ * `{ data, total }` list, so it is the one place a summary can sit beside the
+ * rows without being mistaken for one of them.
+ *
+ * Null when the meeting has no transcript document at all. No `last_error`, ever
+ * — see `services/transcript-coverage.ts`.
+ */
 router.get("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -98,12 +116,13 @@ router.get("/:id", async (req, res, next) => {
       return;
     }
 
-    const [agendaItems, documents] = await Promise.all([
+    const [agendaItems, documents, transcript] = await Promise.all([
       db("agenda_items").where({ meeting_id: id }).orderBy("item_number"),
       db("meeting_documents").where({ meeting_id: id }).orderBy("created_at"),
+      meetingTranscript(db, id),
     ]);
 
-    res.json({ ...meeting, agenda_items: agendaItems, documents });
+    res.json({ ...meeting, agenda_items: agendaItems, documents, transcript });
   } catch (err) {
     next(err);
   }

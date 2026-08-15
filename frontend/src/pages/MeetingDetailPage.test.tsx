@@ -898,3 +898,56 @@ describe("MeetingDetailPage · claims", () => {
     );
   });
 });
+
+/**
+ * The transcript section, mounted.
+ *
+ * `MeetingTranscript.test.tsx` covers the three states; what is checked here is
+ * that the page hands it the keys `/api/transcripts/coverage` actually groups
+ * on — `j.name`, `c.name` and the meeting's calendar year. Passing ids instead
+ * would match nothing and the section would quietly report a body we have never
+ * swept, on a meeting whose transcript we hold.
+ */
+describe("MeetingDetailPage · transcript", () => {
+  it("reads coverage for this meeting's body and year", async () => {
+    install();
+    server.use(
+      http.get("/api/transcripts/coverage", () =>
+        HttpResponse.json({
+          coverage: [
+            {
+              jurisdiction: jurisdiction.name,
+              body: commission.name,
+              year: 2024,
+              published: 7,
+              absent: 0,
+              unavailable: 0,
+              unchecked: 0,
+              checked_through: "2024-12-04T00:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    const panel = await screen.findByTestId("transcript-published");
+    expect(panel.textContent).toContain("The custodian published captions");
+  });
+
+  it("says no sweep has run rather than inventing a state for an unswept body", async () => {
+    install();
+    server.use(
+      http.get("/api/transcripts/coverage", () =>
+        HttpResponse.json({ coverage: [] }),
+      ),
+    );
+    renderPage();
+
+    expect(
+      await screen.findByText(
+        /No sweep has collected transcripts for this body yet\./,
+      ),
+    ).toBeInTheDocument();
+  });
+});

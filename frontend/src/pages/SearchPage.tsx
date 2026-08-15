@@ -15,10 +15,21 @@ import type { SearchResult } from "@/types";
  * - Zero results says **"No published record matches"**. On a site with a review
  *   queue, "nothing found" and "nothing published" are different statements, and
  *   only one of them is true.
- * - The note under the box says only agenda text that has been read is
- *   searchable. Minutes and packets are stored, cited and *not* extracted, so a
- *   reader who finds nothing should know whether that is the record or the
- *   pipeline.
+ * - The note under the box says what is searchable by body text, so a reader
+ *   who finds nothing knows whether that is the record or the pipeline.
+ *
+ * That second sentence was false from the day minutes were indexed until
+ * 2026-08-15. It read "Document text covers agendas that have been read into
+ * text — minutes and agenda packets are stored and citable, but their contents
+ * are not yet indexed", and by then `handlers.ts` was writing `artifact_texts`
+ * for every document whose bytes it could extract, and transcripts were
+ * indexed too. A transparency project describing its own corpus out of date is
+ * the drift it exists to detect.
+ *
+ * The replacement states a **rule, not a list**: whether we could read the
+ * text. That is what `services/search.ts` actually implements — the document
+ * branch reads `artifact_texts` with no filter on `document_type` at all — so
+ * it stays true when a ninth kind is added, which an enumeration cannot.
  */
 
 const MONTHS = [
@@ -191,9 +202,10 @@ export function SearchPage() {
         <p className="kicker">The archive</p>
         <h1 className="headline mt-1">Search</h1>
         <p className="mt-3 max-w-xl text-sm text-muted">
-          Every published agenda item, meeting, official and extracted document
-          text we hold. Quote a phrase to match it exactly, and prefix a word
-          with a minus to exclude it.
+          Every published agenda item, meeting, matter, official, finding and
+          extracted document text we hold — including the captions a custodian
+          publishes for the meeting recording. Quote a phrase to match it
+          exactly, and prefix a word with a minus to exclude it.
         </p>
       </header>
 
@@ -288,12 +300,16 @@ export function SearchPage() {
       )}
 
       {/* A reader who finds nothing deserves to know whether that is the record
-          or the pipeline. Minutes and packets are stored and citable; only
-          agendas are read into text, so only agendas are searchable by body. */}
+          or the pipeline. The line is drawn where the code draws it — at
+          whether the text could be read — and never at a list of document
+          kinds, which is how it went stale before. */}
       <p className="mt-6 max-w-prose text-xs leading-relaxed text-muted">
         Only records an operator has published are searchable. Document text
-        covers agendas that have been read into text — minutes and agenda packets
-        are stored and citable, but their contents are not yet indexed.
+        covers every document whose text we could read, whatever kind it is —
+        agendas, minutes, packets, and the caption files custodians publish for
+        meeting recordings. A document we could not read into text — a scan, a
+        Word file, a caption file the custodian served empty — is stored and
+        citable, but its contents are not searchable.
       </p>
     </div>
   );

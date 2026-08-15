@@ -12,6 +12,7 @@ import {
   matterAppearances,
   metrics,
   sourceWindows,
+  transcriptCoverage,
 } from "./data";
 
 /** Newest first — matches `.orderBy("created_at", "desc")` on /votes and /anomalies. */
@@ -152,6 +153,17 @@ export const handlers = [
   ),
 
   http.get("/api/metrics", () => HttpResponse.json(metrics)),
+
+  /**
+   * `GET /api/transcripts/coverage` — a bare `{ coverage }` object, not the
+   * `{ data, total }` envelope, matching `backend/src/routes/transcripts.ts`.
+   * Every other list route here goes through `list()`; this one deliberately
+   * does not, because a handler that invented an envelope the API does not send
+   * would let a hook ship that cannot read the real response.
+   */
+  http.get("/api/transcripts/coverage", () =>
+    HttpResponse.json({ coverage: transcriptCoverage }),
+  ),
 
   /**
    * `GET /api/source/:sha256` — the other end of every citation.

@@ -139,7 +139,7 @@ const STAGES: readonly Stage[] = [
   {
     step: "04",
     name: "Parse",
-    body: "Agendas, minutes and vote tables are read out of the stored copy into structured records: meetings, agenda items, members, votes.",
+    body: "Agendas, minutes and vote tables are read out of the stored copy into structured records: meetings, agenda items, members, votes. Caption files the custodian publishes for a recording are read into timed cues the same way.",
   },
   {
     step: "05",
@@ -154,7 +154,13 @@ const STAGES: readonly Stage[] = [
 
 const NOT_DONE: readonly string[] = [
   "Assert motive, intent, corruption or illegality. This site describes what the record shows — votes, timing, procedure, patterns — and stops there.",
-  "Transcribe meeting video or attribute spoken statements to a speaker.",
+  // Sharpened 2026-08-15. This used to read "Transcribe meeting video or
+  // attribute spoken statements to a speaker", written when no caption file was
+  // collected at all. We now fetch the captions the custodian publishes
+  // themselves, so the flat sentence read as a denial that transcripts are in
+  // the corpus. What has not changed is the part that matters: we run no speech
+  // recognition of our own, and we do not put a name to a spoken line.
+  "Transcribe meeting video ourselves, or attribute a spoken statement to a speaker. Where a custodian publishes its own captions we collect that file as a document; we do not run speech recognition and we do not name who was talking.",
   "Use non-public records, leaked material, or anything obtained other than as a member of the public.",
   "Score, rank or grade officials.",
   "Predict how anyone will vote.",
@@ -334,8 +340,9 @@ export function MethodologyPage() {
                 Gallatin County, Montana
               </strong>
               . Everything on this site derives from documents those bodies
-              published themselves — agendas, minutes, and the vote records
-              inside them.
+              published themselves — agendas, minutes, the vote records inside
+              them, and the caption files their video systems publish alongside
+              a recording.
             </Prose>
             <Prose>
               There is no other kind of input. No tips are published as fact, no

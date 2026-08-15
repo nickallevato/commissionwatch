@@ -9,6 +9,7 @@ import { buildIngestionStack, startIngestion } from "./services/ingestion";
 import { registerPressroomStack } from "./routes/admin/pressroom";
 import { DeliveryDispatcher } from "./services/delivery/dispatcher";
 import { EventDrain } from "./services/events/drain";
+import { DisputeMailer, ensureDisputeReplyChannel } from "./services/dispute-notifications";
 
 const PORT = process.env.PORT || 3001;
 
@@ -46,7 +47,12 @@ operatorAuthService()
  * in production over an empty `channel_routes` table before any channel is
  * routed, which is the cheapest possible way to find out it works.
  */
-const dispatcher = new DeliveryDispatcher(db);
+// The `direct` transport: one message, to one address, supplied per send and
+// held nowhere at rest. It exists because a disputant is not a subscriber —
+// they went through no consent flow and there is no address to store — and
+// because `services/disputes.ts` guaranteed for months that a dispute produced
+// "no email to anyone", which read from the disputant's side as silence.
+const dispatcher = new DeliveryDispatcher(db, { direct: new DisputeMailer(db) });
 const eventDrain = new EventDrain(db, { dispatcher });
 
 const server = app.listen(PORT, () => {
@@ -63,6 +69,16 @@ const server = app.listen(PORT, () => {
   // No-op unless EVENT_DRAIN_ENABLED is set; the drain decides that itself
   // rather than making every caller remember to ask.
   eventDrain.start();
+
+  // Without this row a dispute event resolves to nothing and the ledger stays
+  // `queued` — the reply is composed, recorded, and never handed to anything.
+  // It must be `audience: 'ops'` and `owner_kind: 'direct'`: migration 088's
+  // trigger refuses a `dispute.*` route on a public channel, and either
+  // attribute alone leaves the event unroutable or routable to a webhook.
+  // Nothing sends regardless until EVENT_DRAIN_ENABLED is set.
+  ensureDisputeReplyChannel(db).catch((err: unknown) =>
+    console.error("Dispute reply channel setup failed", err),
+  );
 });
 
 function shutdown() {

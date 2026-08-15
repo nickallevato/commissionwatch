@@ -902,6 +902,145 @@ describe("the publication wall holds for transcripts", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Part 4b — per-meeting transcript state on GET /api/meetings/:id.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a meeting page may say about *this* meeting's transcript.
+ *
+ * Before this existed the only public read of `transcript_status` was
+ * `/api/transcripts/coverage`, aggregated by body and calendar year, so a page
+ * could speak only when a whole year was unanimous. The obvious substitute —
+ * "there is a `transcript` document row, so there is a transcript" — is false:
+ * the row is written at discovery, before a byte is fetched, and the eight-byte
+ * empty caption file produces exactly the same row.
+ */
+describe("a meeting reports its own transcript state", () => {
+  async function meetingId(externalId: string): Promise<string> {
+    const row = await db("meetings")
+      .where({ commission_id: commissionId, external_id: externalId })
+      .first("id");
+    assert.ok(row, `expected a meeting row for ${externalId}`);
+    return String(row.id);
+  }
+
+  async function publishAll(): Promise<void> {
+    await db("meetings").where({ commission_id: commissionId }).update({ published_at: new Date() });
+  }
+
+  /** All four states in one sweep: published, absent, unavailable, unchecked. */
+  async function sweepFourStates(): Promise<void> {
+    meetings = [
+      meetingRef("real", "2024-07-17", [transcriptRef(CAPTIONS_REAL, "2325", "real")]),
+      meetingRef("stub-a", "2013-09-23", [transcriptRef(CAPTIONS_STUB_A, "1301", "stub-a")]),
+      meetingRef("htmlerr", "2020-01-06", [transcriptRef(CAPTIONS_HTML, "2109", "htmlerr")]),
+      meetingRef("stub-b", "2015-04-06", [transcriptRef(CAPTIONS_STUB_B, "1415", "stub-b")]),
+    ];
+    await sweep();
+    // The fourth state is the absence of a row, so it is made by removing one.
+    // A meeting nobody has swept must not read as one the city answered about.
+    await db("transcript_status")
+      .whereIn(
+        "meeting_document_id",
+        db("meeting_documents").where({ url: CAPTIONS_STUB_B }).select("id"),
+      )
+      .del();
+  }
+
+  it("withholds the state on an unpublished meeting, then reports it once published", async () => {
+    // Both halves. A test that only proved absence would also pass against a
+    // route that returned nothing to anybody.
+    meetings = [meetingRef("real", "2024-07-17", [transcriptRef(CAPTIONS_REAL, "2325", "real")])];
+    await sweep();
+    const id = await meetingId("real");
+
+    const withheld = await request(app).get(`/api/meetings/${id}`);
+    assert.equal(withheld.status, 404, "an unpublished meeting is a 404, transcript and all");
+
+    await publishAll();
+    const published = await request(app).get(`/api/meetings/${id}`);
+    assert.equal(published.status, 200);
+    assert.equal(published.body.transcript.published, 1);
+    assert.equal(published.body.transcript.documents[0].state, "published");
+    assert.equal(published.body.transcript.documents[0].cue_count, 349);
+    assert.equal(published.body.transcript.documents[0].clip_id, "2325");
+    // The bytes are named, so a stranger can check the claim.
+    assert.equal(published.body.transcript.documents[0].observed_sha256, sha256Hex(REAL_VTT));
+    assert.ok(published.body.transcript.checked_through);
+  });
+
+  it("tells all four states apart, and folds none into another", async () => {
+    await sweepFourStates();
+    await publishAll();
+
+    const stateOf = async (externalId: string): Promise<string> => {
+      const res = await request(app).get(`/api/meetings/${await meetingId(externalId)}`);
+      assert.equal(res.status, 200);
+      return String(res.body.transcript.documents[0].state);
+    };
+
+    assert.equal(await stateOf("real"), "published");
+    // The custodian served a well-formed file with nothing in it.
+    assert.equal(await stateOf("stub-a"), "absent");
+    // We could not read what was served. This one describes us.
+    assert.equal(await stateOf("htmlerr"), "unavailable");
+    // Nobody has asked yet, which is not the same as being told there is nothing.
+    assert.equal(await stateOf("stub-b"), "unchecked");
+  });
+
+  it("says zero cues for an absence and nothing at all where it does not know", async () => {
+    // `cue_count: 0` on an absence is a fact about the custodian's file. `null`
+    // on the other two is the honest answer, and a JSON renderer that turned
+    // either into the other would restate our silence as theirs.
+    await sweepFourStates();
+    await publishAll();
+
+    const cuesOf = async (externalId: string): Promise<unknown> => {
+      const res = await request(app).get(`/api/meetings/${await meetingId(externalId)}`);
+      return res.body.transcript.documents[0].cue_count;
+    };
+
+    assert.equal(await cuesOf("stub-a"), 0);
+    assert.equal(await cuesOf("htmlerr"), null);
+    assert.equal(await cuesOf("stub-b"), null);
+    assert.equal(await cuesOf("real"), 349);
+  });
+
+  it("returns null, not a row of zeroes, for a meeting with no transcript document", async () => {
+    // A fifth thing, and it is not `unchecked`. `unchecked` names a document we
+    // have not asked about; here there is no document to ask about.
+    meetings = [meetingRef("nodocs", "2026-03-03", [])];
+    await sweep();
+    await publishAll();
+    const res = await request(app).get(`/api/meetings/${await meetingId("nodocs")}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.transcript, null);
+  });
+
+  it("never puts transcript error text in the response", async () => {
+    // `last_error` carries a URL, an HTTP status and the first bytes of whatever
+    // was served — a vendor stack trace, on this host. Coverage withholds it
+    // deliberately and reading the same column one meeting at a time changes
+    // nothing about that.
+    await sweepFourStates();
+    await publishAll();
+
+    for (const externalId of ["real", "stub-a", "htmlerr", "stub-b"]) {
+      const res = await request(app).get(`/api/meetings/${await meetingId(externalId)}`);
+      const body = JSON.stringify(res.body);
+      assert.equal(body.includes("last_error"), false, `${externalId} leaked the error column`);
+      assert.equal(body.includes("Slim Application Error"), false);
+      assert.equal(body.includes("expected WebVTT"), false);
+    }
+
+    // And the stored error really is there to be leaked, so the assertions above
+    // are testing withholding rather than an empty column.
+    const stored = await statusFor(CAPTIONS_HTML);
+    assert.match(String(stored?.last_error), /text\/html/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Part 5 — the rule the schema has to enforce.
 // ---------------------------------------------------------------------------
 
