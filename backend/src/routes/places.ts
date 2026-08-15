@@ -5,6 +5,7 @@ import {
   MAX_PLACE_RESULTS,
   PlaceQueryError,
   findPlace,
+  listPublicLinksFor,
   parseCoordinate,
   parseRadius,
   placesNear,
@@ -89,13 +90,24 @@ router.get("/near", async (req: Request<unknown, unknown, unknown, NearQuery>, r
       MAX_PLACE_RESULTS,
     );
 
-    const data = await placesNear(db, {
+    const places = await placesNear(db, {
       lat,
       lon,
       metres,
       jurisdictionId: jurisdiction,
       limit,
     });
+
+    // Citations travel with the coordinates.
+    //
+    // This route used to return positions and nothing else, so a client holding
+    // to "every place shows its citation" had to fetch each place's detail
+    // separately — an N+1 the reader pays for, and a rule the client could
+    // silently drop. A pin is a claim about where a decision happened; shipping
+    // its source alongside makes an uncited pin unrenderable rather than merely
+    // discouraged. One extra query for the whole page, not one per result.
+    const links = await listPublicLinksFor(db, places.map((place) => place.id));
+    const data = places.map((place) => ({ ...place, links: links.get(place.id) ?? [] }));
 
     // The radius is echoed because the caller may have omitted it, and a client
     // drawing a circle needs to know which one was actually applied.

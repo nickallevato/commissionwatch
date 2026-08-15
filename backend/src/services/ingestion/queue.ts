@@ -17,7 +17,8 @@ export type IngestionStage =
   | "parse"
   | "analyze"
   | "extract"
-  | "govern";
+  | "govern"
+  | "locate";
 
 export type IngestionJobStatus =
   | "pending"
@@ -117,6 +118,27 @@ export interface GovernTarget {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Read the addresses out of a meeting's agenda and record them as places.
+ *
+ * The same shape as `ExtractTarget`, and post-`fetch` for the same reason: a
+ * content address and no URL. Its one outbound call is to the US Census
+ * geocoder, and unlike the model calls above, that call **is** a source — for
+ * the coordinate, not for the record — which is why every row it produces
+ * carries `places.geocoder` and `places.geocoded_at`. Nothing it returns is
+ * stored until the address it answered about has been located in these bytes.
+ *
+ * `meetingId` is required, as on extract and govern: the unit of work is a
+ * meeting's agenda and its items, and there is no meaningful location pass over
+ * an artifact belonging to no meeting.
+ */
+export interface LocateTarget {
+  /** Content address of a stored artifact. Lowercase hex SHA-256. */
+  sha256: string;
+  meetingId: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface StageTargets {
   discover: DiscoverTarget;
   fetch: FetchTarget;
@@ -124,6 +146,7 @@ export interface StageTargets {
   analyze: AnalyzeTarget;
   extract: ExtractTarget;
   govern: GovernTarget;
+  locate: LocateTarget;
 }
 
 export type JobTarget = StageTargets[IngestionStage];
@@ -204,6 +227,7 @@ const STAGES: readonly IngestionStage[] = [
   "analyze",
   "extract",
   "govern",
+  "locate",
 ];
 
 const STATUSES: readonly IngestionJobStatus[] = [
@@ -416,6 +440,16 @@ export function parseExtractTarget(raw: unknown): ExtractTarget {
   };
 }
 
+export function parseLocateTarget(raw: unknown): LocateTarget {
+  const target = asTargetRecord(raw, "locate");
+  rejectNetworkTarget(target, "locate");
+  return {
+    sha256: parseSha256(target, "locate"),
+    meetingId: requiredTargetString(target, "meetingId", "locate"),
+    metadata: optionalMetadata(target, "locate"),
+  };
+}
+
 export function parseGovernTarget(raw: unknown): GovernTarget {
   const target = asTargetRecord(raw, "govern");
   rejectNetworkTarget(target, "govern");
@@ -447,6 +481,8 @@ export function toClaimedJob(record: JobRecord): ClaimedJob {
       return { ...base, stage: "extract", target: parseExtractTarget(record.target) };
     case "govern":
       return { ...base, stage: "govern", target: parseGovernTarget(record.target) };
+    case "locate":
+      return { ...base, stage: "locate", target: parseLocateTarget(record.target) };
   }
 }
 
@@ -613,6 +649,9 @@ export class IngestionQueue {
         return;
       case "govern":
         parseGovernTarget(target);
+        return;
+      case "locate":
+        parseLocateTarget(target);
         return;
       default:
         throw new InvalidJobError(`unknown stage ${String(stage)}`);

@@ -13,6 +13,8 @@ import { OpenRouterClient, OpenRouterError } from "../extraction/openrouter";
 import { createExtractHandler, EXTRACT_CONCURRENCY } from "../extraction/stage";
 import { createGovernorClient, GovernorMisconfigured } from "../governor/model";
 import { createGovernHandler, GOVERN_CONCURRENCY } from "../governor/stage";
+import { CensusGeocoder } from "../locate/census";
+import { createLocateHandler, LOCATE_CONCURRENCY } from "../locate/stage";
 
 /**
  * Assembles the ingestion stack.
@@ -81,6 +83,20 @@ export const EXTRACT_STAGES = ["extract"] as const;
  */
 export const GOVERN_STAGES = ["govern"] as const;
 
+/**
+ * `locate` gets its own loop, for `EXTRACT_STAGES`' reasons and one more.
+ *
+ * The geocoder is a free public service with published rate limits, and the
+ * politeness interval lives inside `CensusGeocoder` — one client, one loop, one
+ * request at a time. Sharing the extraction worker would put two geocoders
+ * behind one interval and quietly double the rate.
+ *
+ * Still a post-`fetch` stage: content address in, no URL anywhere, so running it
+ * from boot cannot turn a restart into a crawl of a county web server. The one
+ * host it can reach is the geocoder its handler was constructed with.
+ */
+export const LOCATE_STAGES = ["locate"] as const;
+
 export interface IngestionStack {
   registry: AdapterRegistry;
   queue: IngestionQueue;
@@ -99,6 +115,8 @@ export interface IngestionStack {
    * visible in the console and reversible once the environment is fixed.
    */
   governorWorker: IngestionWorker | null;
+  /** Polls `locate` from boot, one job at a time. */
+  locateWorker: IngestionWorker;
   scheduler: SourceScheduler;
 }
 
@@ -198,6 +216,23 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     // same failure as a backlog nobody counts.
     console.error(`Ingestion: the governor will not run — ${error.message}`);
   }
+  /**
+   * The location loop.
+   *
+   * Its geocoder is built here for the reason the extraction handler's client
+   * is: it is the only stage that needs one, and a client constructed in the
+   * shared handler factory would be built by every test that builds handlers.
+   * `CensusGeocoder` needs no key and no configuration, so unlike the governor
+   * there is no misconfiguration to refuse at startup — the failure it can have
+   * is the service being unreachable, and that is a retry, not a boot decision.
+   */
+  const locateWorker = new IngestionWorker(db, queue, {
+    handlers: { locate: createLocateHandler({ geocoder: new CensusGeocoder() }) },
+    artifacts: createArtifactStore(options.read ?? downloadDocument),
+    batchSize: LOCATE_CONCURRENCY,
+    stages: LOCATE_STAGES,
+    idleDelayMs: 5000,
+  });
   const scheduler = new SourceScheduler(db, {
     queue,
     worker,
@@ -212,6 +247,7 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     stationaryWorker,
     extractionWorker,
     governorWorker,
+    locateWorker,
     scheduler,
   };
 }
@@ -311,6 +347,17 @@ export async function startIngestion(
         console.error("Ingestion: govern worker loop stopped", error);
       });
     }
+    // Fourth loop, same gate. Without it a queued `locate` job would sit
+    // `pending` forever and `places` would stay empty while the console reported
+    // the enqueue as a success — which is exactly the failure re-parse had for a
+    // day.
+    //
+    // NOTE FOR THE SHUTDOWN PATH: `src/index.ts` needs
+    // `ingestion.locateWorker.stop();` beside the other two, and
+    // `ingestion.governorWorker?.stop();` which is still missing.
+    void stack.locateWorker.start().catch((error: unknown) => {
+      console.error("Ingestion: locate worker loop stopped", error);
+    });
   }
 
   return registered;

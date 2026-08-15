@@ -21,6 +21,7 @@ import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services
 import { ExtractionUnavailable } from "../../services/extraction/run";
 import { enqueueExtraction } from "../../services/extraction/stage";
 import { enqueueGovernance } from "../../services/governor/stage";
+import { enqueueLocation, LocationUnavailable } from "../../services/locate/stage";
 import { isExtracting, listRuns } from "../../services/extraction/runs";
 import { listSources, setSourceEnabled } from "../../services/pressroom/sources";
 
@@ -414,6 +415,49 @@ router.post("/meetings/:id/extract", async (req: Request<{ id: string }>, res, n
     next(err);
   }
 });
+
+/**
+ * Read locations out of this meeting's agenda.
+ *
+ * Deterministic parsing, not a model: an address is a formatted string and a
+ * model is the wrong tool for a well-formed pattern. What comes out is
+ * geocoded through the US Census service — keyless, public domain, and terms
+ * that permit storing the result, which matters because geocoding at render
+ * time would leak a reader's browsing to a third party.
+ *
+ * Everything it writes is `held`. A pin is a claim about where a decision
+ * happened and it names a place on a public map; the review gate that covers a
+ * claim covers this too.
+ *
+ * Separate from `/extract` because it reads the agenda rather than the minutes
+ * and answers a different question, and separate from `/govern` because
+ * re-running it after a geocoder change is a deliberate act.
+ */
+router.post("/meetings/:id/locate", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) return badId(res, "meeting");
+    const live = requireStack(res);
+    if (live === null) return;
+
+    const queued = await enqueueLocation(db, live.queue, id);
+
+    res.status(202).json({
+      ...queued,
+      status: "queued",
+      message:
+        "Location pass queued. It reads addresses out of the parsed agenda and " +
+        "geocodes them; every place link it writes is held for review.",
+    });
+  } catch (err) {
+    if (err instanceof LocationUnavailable) {
+      res.status(err.statusCode).json({ error: err.message, statusCode: err.statusCode });
+      return;
+    }
+    next(err);
+  }
+});
+
 
 /**
  * Ask the governor to judge this meeting's claims.

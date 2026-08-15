@@ -517,6 +517,58 @@ export interface PlaceDetail extends Place {
   links: PlaceLinkView[];
 }
 
+
+/**
+ * Public links for many places at once.
+ *
+ * `/api/places/near` used to return coordinates and no citations, so a client
+ * that honours "every place shows its citation" had to fetch each place's
+ * detail separately — an N+1 the reader pays for, and one the map page worked
+ * around by capping its own request at 25 results and holding back anything it
+ * could not resolve.
+ *
+ * A pin is a claim about where a decision happened, and this project's oldest
+ * invariant is that no unsourced claim reaches the public site. That guarantee
+ * should not cost a round trip per pin, and it should not be something a client
+ * can forget: shipping the links with the coordinates makes an uncited place
+ * unrenderable rather than merely discouraged.
+ *
+ * Same predicate as `listPublicLinks` — `wherePlaceLinkPublic` — because a
+ * second copy of the wall is how the two start disagreeing about which links a
+ * reader may see.
+ */
+export async function listPublicLinksFor(
+  db: Knex,
+  placeIds: readonly string[],
+): Promise<Map<string, PlaceLinkView[]>> {
+  const byPlace = new Map<string, PlaceLinkView[]>();
+  if (placeIds.length === 0) return byPlace;
+
+  const query = db("place_links as pl")
+    .whereIn("pl.place_id", [...placeIds])
+    .select<Array<PlaceLinkView & { place_id: string }>>(
+      "pl.place_id",
+      "pl.id",
+      "pl.subject_kind",
+      "pl.subject_id",
+      "pl.relation",
+      "pl.confidence",
+      "pl.artifact_sha256",
+      "pl.quote",
+      "pl.quote_offset",
+      "pl.updated_at",
+    )
+    .orderBy([{ column: "pl.updated_at", order: "asc" }, { column: "pl.id", order: "asc" }]);
+
+  for (const row of await wherePlaceLinkPublic(db, query, "pl")) {
+    const list = byPlace.get(row.place_id);
+    if (list) list.push(row);
+    else byPlace.set(row.place_id, [row]);
+  }
+  return byPlace;
+}
+
+
 /** Every link on a place that a reader may see, oldest first. */
 export async function listPublicLinks(db: Knex, placeId: string): Promise<PlaceLinkView[]> {
   const query = db("place_links as pl")

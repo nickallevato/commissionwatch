@@ -12,6 +12,7 @@ import {
   type FetchTarget,
   type GovernTarget,
   type IngestionStage,
+  type LocateTarget,
   type ParseTarget,
   type StageTargets,
 } from "./queue";
@@ -146,6 +147,19 @@ export interface GovernContext extends StoredArtifactContext {
   readonly target: GovernTarget;
 }
 
+/**
+ * Reading the addresses out of an agenda and recording them as places.
+ *
+ * A stored-artifact context for the governor's second reason: the citation on
+ * every `place_link` is an offset into the text derived from *these* bytes, so
+ * the handler must be handed the bytes it will cite rather than fetch a copy
+ * that could differ by a line break and move every offset.
+ */
+export interface LocateContext extends StoredArtifactContext {
+  readonly stage: "locate";
+  readonly target: LocateTarget;
+}
+
 export type StageOutcome = Promise<StageResult | void>;
 
 /**
@@ -159,6 +173,7 @@ export interface HandlerRegistry {
   analyze?: (ctx: AnalyzeContext) => StageOutcome;
   extract?: (ctx: ExtractContext) => StageOutcome;
   govern?: (ctx: GovernContext) => StageOutcome;
+  locate?: (ctx: LocateContext) => StageOutcome;
 }
 
 /** Count key recorded when a stage succeeds. */
@@ -169,6 +184,7 @@ const SUCCESS_COUNT_KEY: Record<IngestionStage, string> = {
   analyze: "analyzed",
   extract: "extracted",
   govern: "governed",
+  locate: "located",
 };
 
 // ---------------------------------------------------------------------------
@@ -435,6 +451,17 @@ export class IngestionWorker {
         return handler({
           ...base,
           stage: "govern",
+          target: job.target,
+          artifact,
+          content,
+        });
+      }
+      case "locate": {
+        const handler = this.requireHandler("locate", this.handlers.locate);
+        const { artifact, content } = await this.loadArtifact(job.target.sha256);
+        return handler({
+          ...base,
+          stage: "locate",
           target: job.target,
           artifact,
           content,

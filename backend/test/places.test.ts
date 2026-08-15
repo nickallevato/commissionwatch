@@ -689,3 +689,58 @@ describe("parsing", () => {
     assert.throws(() => parseRadius("wide"), PlaceQueryError);
   });
 });
+
+
+/**
+ * A pin is a claim about where a decision happened, and this project's oldest
+ * invariant is that no unsourced claim reaches the public site.
+ *
+ * `/near` used to return coordinates alone, so a client holding to that rule had
+ * to fetch each place's detail separately — an N+1 the reader pays for, and a
+ * rule the client could silently drop. Shipping the links alongside makes an
+ * uncited pin unrenderable rather than merely discouraged.
+ */
+describe("GET /api/places/near · citations travel with the coordinates", () => {
+  it("carries each place's public links in the same response", async () => {
+    const res = await request(app)
+      .get(`/api/places/near?lat=${CENTRE.lat}&lon=${CENTRE.lon}&radius=1000`)
+      .expect(200);
+
+    assert.ok(Array.isArray(res.body.data));
+    for (const place of res.body.data) {
+      assert.ok(Array.isArray(place.links), "every place must carry its links");
+      for (const link of place.links) {
+        // The database CHECK guarantees these for anything not `inferred`, and
+        // an inferred link is never public — so a public link always cites.
+        assert.match(link.artifact_sha256, /^[0-9a-f]{64}$/);
+        assert.ok(link.quote.trim().length > 0);
+        assert.ok(link.quote_offset >= 0);
+      }
+    }
+  });
+
+  /**
+   * The batch loader must apply the same predicate as `listPublicLinks`. A
+   * second copy of the wall is how the two start disagreeing about which links
+   * a reader may see — and this one would disagree in the direction of showing
+   * more.
+   */
+  it("shows no link on /near that /:id would withhold", async () => {
+    const near = await request(app)
+      .get(`/api/places/near?lat=${CENTRE.lat}&lon=${CENTRE.lon}&radius=1000`)
+      .expect(200);
+
+    for (const place of near.body.data) {
+      const detail = await request(app).get(`/api/places/${place.id}`).expect(200);
+      const detailIds = new Set(
+        (detail.body.links ?? []).map((link: { id: string }) => link.id),
+      );
+      for (const link of place.links) {
+        assert.ok(
+          detailIds.has(link.id),
+          `/near exposed link ${link.id} that /:id withholds`,
+        );
+      }
+    }
+  });
+});
