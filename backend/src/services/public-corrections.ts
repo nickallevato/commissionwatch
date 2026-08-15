@@ -1,5 +1,5 @@
 import type { Knex } from "knex";
-import { whereFindingPublic, whereMeetingPublished } from "./publication";
+import { whereClaimPublic, whereFindingPublic, whereMeetingPublished } from "./publication";
 
 /**
  * B3 — the public corrections log.
@@ -26,13 +26,35 @@ import { whereFindingPublic, whereMeetingPublished } from "./publication";
  * | `agenda_items`      | its meeting is published                             |
  * | `meeting_documents` | its meeting is published                             |
  * | `anomaly_flags`     | `whereFindingPublic` — approved *and* meeting public  |
+ * | `minute_claims`     | `whereClaimPublic` — approved, unretracted, meeting public |
  * | `review_policy`     | never                                                 |
  * | `record_disputes`   | never                                                 |
+ * | `entity_resolution_decisions` | never                                       |
+ * | `place_links`       | never, for now — see below                            |
  *
  * `review_policy` is our operating configuration rather than a record about
  * anybody, and `record_disputes` is a private communication from a member of
- * the public that may name people. Neither is a correction to a published
- * record, which is what this page is.
+ * the public that may name people. `entity_resolution_decisions` is an internal
+ * judgement that two names are the same entity. None of the three is a
+ * correction to a published record, which is what this page is.
+ *
+ * `place_links` is excluded for a different and narrower reason. A link's
+ * publicity test is a **polymorphic** subject wall — the subject may be a
+ * meeting, a claim, an official or a matter — and that wall exists today only
+ * as TypeScript, in `placeLinkSubjectIsPublic`. Reproducing it here as SQL
+ * would be a second copy of a wall, which is the defect this project has now
+ * shipped three times: `emitEvent`'s claim wall went a clause stale the day
+ * migration 087 added `retracted_at`, and nothing said so. The table joins this
+ * page when that predicate exists once, as a query builder, and not before.
+ *
+ * **Every table the CHECK admits must appear in `TARGET_DECISION` below**, and
+ * `test/public-corrections.test.ts` reads the live constraint and fails if one
+ * does not. That guard exists because three tables became correctable after
+ * this file was written — `entity_resolution_decisions`, `minute_claims`,
+ * `place_links` — and all three fell silently through the allow-list. Silently
+ * is the problem: the page went on describing itself as the complete log of
+ * corrections to published records while a whole class of them was missing,
+ * and no test, type or comment disagreed.
  *
  * Two consequences that are intended:
  *
@@ -48,30 +70,64 @@ import { whereFindingPublic, whereMeetingPublished } from "./publication";
  * row adds no accountability the masthead does not already carry.
  */
 
-/** Every table a correction may target, and whether a reader may see it. */
-const PUBLIC_TARGET_TABLES = [
-  "meetings",
-  "agenda_items",
-  "meeting_documents",
-  "anomaly_flags",
-] as const;
+/**
+ * Every table a correction may target, and the decision taken about it.
+ *
+ * A decision, not an omission. `"withheld"` carries the reason it is withheld
+ * so that adding a table without thinking is impossible: the type demands an
+ * entry, and the test demands the entry exist for every table the database's
+ * own CHECK admits.
+ */
+type TargetDecision =
+  | { readonly public: true; readonly kind: CorrectionRecordKind }
+  | { readonly public: false; readonly withheldBecause: string };
 
-type PublicTargetTable = (typeof PUBLIC_TARGET_TABLES)[number];
+export type CorrectionRecordKind =
+  | "meeting"
+  | "agenda_item"
+  | "document"
+  | "finding"
+  | "claim";
 
-export type CorrectionRecordKind = "meeting" | "agenda_item" | "document" | "finding";
-
-const RECORD_KIND: Record<PublicTargetTable, CorrectionRecordKind> = {
-  meetings: "meeting",
-  agenda_items: "agenda_item",
-  meeting_documents: "document",
-  anomaly_flags: "finding",
+const TARGET_DECISION: Readonly<Record<string, TargetDecision>> = {
+  meetings: { public: true, kind: "meeting" },
+  agenda_items: { public: true, kind: "agenda_item" },
+  meeting_documents: { public: true, kind: "document" },
+  anomaly_flags: { public: true, kind: "finding" },
+  minute_claims: { public: true, kind: "claim" },
+  review_policy: {
+    public: false,
+    withheldBecause: "our operating configuration, not a record about anybody",
+  },
+  record_disputes: {
+    public: false,
+    withheldBecause: "a private communication from a member of the public",
+  },
+  entity_resolution_decisions: {
+    public: false,
+    withheldBecause: "an internal judgement that two names are one entity",
+  },
+  place_links: {
+    public: false,
+    withheldBecause:
+      "its publicity test is a polymorphic subject wall that exists only in TypeScript; copying it here would be a second copy of a wall",
+  },
 };
+
+/** The tables this page reads, derived rather than restated. */
+const PUBLIC_TARGET_TABLES: readonly string[] = Object.keys(TARGET_DECISION).filter(
+  (table) => TARGET_DECISION[table].public,
+);
+
+/** Every table the correction CHECK admits — what the guard test measures against. */
+export const CORRECTION_TARGET_DECISIONS = TARGET_DECISION;
 
 const RECORD_LABEL: Record<CorrectionRecordKind, string> = {
   meeting: "Meeting",
   agenda_item: "Agenda item",
   document: "Document",
   finding: "Finding",
+  claim: "Claim",
 };
 
 /**
@@ -144,8 +200,10 @@ function asIso(value: unknown): string {
   return new Date(0).toISOString();
 }
 
-function isPublicTargetTable(value: string): value is PublicTargetTable {
-  return (PUBLIC_TARGET_TABLES as readonly string[]).includes(value);
+/** The reader-facing kind for a target table, or `null` if it has none. */
+function kindFor(value: string): CorrectionRecordKind | null {
+  const decision = TARGET_DECISION[value];
+  return decision !== undefined && decision.public ? decision.kind : null;
 }
 
 /**
@@ -182,12 +240,11 @@ function summarise(
 
 function toPublicCorrection(row: JoinedRow): PublicCorrection {
   const targetTable = text(row.target_table);
-  // Unreachable through `publicCorrectionsQuery`, which filters on exactly
-  // these four. Narrowed rather than cast, because a cast here would be the
-  // one place a future sixth table could leak through unnoticed.
-  const kind: CorrectionRecordKind = isPublicTargetTable(targetTable)
-    ? RECORD_KIND[targetTable]
-    : "meeting";
+  // Unreachable through `publicCorrectionsQuery`, which filters on exactly the
+  // public tables. Narrowed rather than cast, because a cast here would be the
+  // one place a newly correctable table could leak through unnoticed — which is
+  // precisely what happened to the allow-list this replaces.
+  const kind: CorrectionRecordKind = kindFor(targetTable) ?? "meeting";
   const field = text(row.field);
   const oldValue = textOrNull(row.old_value);
   const newValue = textOrNull(row.new_value);
@@ -223,7 +280,7 @@ function toPublicCorrection(row: JoinedRow): PublicCorrection {
  */
 function publicCorrectionsQuery(db: Knex): Knex.QueryBuilder {
   return db("record_corrections")
-    .whereIn("record_corrections.target_table", [...PUBLIC_TARGET_TABLES])
+    .whereIn("record_corrections.target_table", PUBLIC_TARGET_TABLES)
     .where((outer) => {
       outer
         .where((branch) => {
@@ -258,6 +315,18 @@ function publicCorrectionsQuery(db: Knex): Knex.QueryBuilder {
             whereFindingPublic(
               db,
               db("anomaly_flags").whereRaw("anomaly_flags.id = record_corrections.target_id"),
+            ),
+          );
+        })
+        .orWhere((branch) => {
+          // A claim is the one target here whose text names a living person, so
+          // it gets the strictest of the walls: approved, not retracted, and
+          // its meeting published. `whereClaimPublic` is that rule; this is not
+          // a restatement of it.
+          branch.where("record_corrections.target_table", "minute_claims").whereExists(
+            whereClaimPublic(
+              db,
+              db("minute_claims").whereRaw("minute_claims.id = record_corrections.target_id"),
             ),
           );
         });
@@ -306,6 +375,8 @@ export async function listPublicCorrections(
             (SELECT meeting_id FROM meeting_documents WHERE meeting_documents.id = record_corrections.target_id)
           WHEN 'anomaly_flags' THEN
             (SELECT meeting_id FROM anomaly_flags WHERE anomaly_flags.id = record_corrections.target_id)
+          WHEN 'minute_claims' THEN
+            (SELECT meeting_id FROM minute_claims WHERE minute_claims.id = record_corrections.target_id)
         END AS public_meeting_id
       `),
     ])

@@ -767,7 +767,11 @@ export type CorrectionRecordKind =
   | "meeting"
   | "agenda_item"
   | "document"
-  | "finding";
+  | "finding"
+  // A correction to a claim — the sentence quoting a named person. Added when
+  // the public log started carrying them; a frontend union narrower than what
+  // the API returns is how a value reaches a reader with no label at all.
+  | "claim";
 
 /**
  * One row of `GET /api/corrections`.

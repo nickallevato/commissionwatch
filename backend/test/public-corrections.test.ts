@@ -4,6 +4,7 @@ import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
 import { appendCorrectionRow, CorrectionError } from "../src/services/pressroom/corrections";
+import { CORRECTION_TARGET_DECISIONS } from "../src/services/public-corrections";
 import type { PublicCorrection } from "../src/services/public-corrections";
 import { cleanupByPrefix, createMeeting, createSource } from "./helpers/pressroom";
 
@@ -211,7 +212,6 @@ describe("the public corrections log", () => {
   after(async () => {
     await db("record_disputes").where("contact", "like", `${PREFIX}%`).del();
     await cleanupByPrefix(PREFIX);
-    await db.destroy();
   });
 
   it("publishes a correction to a published meeting", async () => {
@@ -377,4 +377,193 @@ describe("the public corrections log", () => {
     const far = await request(app).get("/api/corrections?limit=1&offset=100000").expect(200);
     assert.deepEqual((far.body as LogBody).data, []);
   });
+});
+
+/**
+ * The guard, and the reason this file grew a third describe.
+ *
+ * `record_corrections_target_table_check` names every table a correction may
+ * target. When this page was written it named six; it now names nine, and the
+ * three that arrived later — `entity_resolution_decisions` (migration 084),
+ * `minute_claims` (087) and `place_links` (097) — all fell through an
+ * allow-list that mentioned none of them. Nothing failed. The page went on
+ * calling itself the log of corrections to published records while a class of
+ * them was silently absent, which is the failure mode a transparency project
+ * can least afford: not a wrong answer, a quietly incomplete one.
+ *
+ * So the assertion is made against the **database**, not against a constant in
+ * the same module that would drift with it. Adding a tenth table to the CHECK
+ * and not deciding about it fails here.
+ */
+describe("every correctable table has a stated decision", () => {
+  it("decides about every table the live CHECK admits", async () => {
+    const row = await db
+      .select<{ def: string } | undefined>(db.raw("pg_get_constraintdef(oid) as def"))
+      .from("pg_constraint")
+      .where("conname", "record_corrections_target_table_check")
+      .first();
+
+    assert.ok(row, "record_corrections_target_table_check should exist");
+
+    // The CHECK is an `ANY (ARRAY['meetings'::text, ...])`. The quoted strings
+    // are the tables; nothing else in the definition is quoted.
+    const tables = [...row.def.matchAll(/'([a-z_]+)'::text/g)].map((match) => match[1]);
+    assert.ok(tables.length >= 8, `expected the table list, parsed: ${tables.join(", ")}`);
+
+    const undecided = tables.filter(
+      (table) => CORRECTION_TARGET_DECISIONS[table] === undefined,
+    );
+    assert.deepEqual(
+      undecided,
+      [],
+      `these tables may be corrected and nothing decides whether a reader sees them: ${undecided.join(", ")}`,
+    );
+  });
+
+  it("gives every withheld table a written reason", () => {
+    for (const [table, decision] of Object.entries(CORRECTION_TARGET_DECISIONS)) {
+      if (decision.public) continue;
+      assert.ok(
+        decision.withheldBecause.length > 20,
+        `${table} is withheld with no stated reason`,
+      );
+    }
+  });
+});
+
+/**
+ * `minute_claims`, in both directions, like every other target here.
+ *
+ * This is the table whose rows quote a sentence naming a living person, so it
+ * is the one where publishing a correction about a withheld record would matter
+ * most — and it is the one that was missing.
+ */
+describe("corrections to claims follow the claim wall", () => {
+  const CLAIM_PREFIX = `${PREFIX}-claim`;
+  let publicClaimId = "";
+  let heldClaimId = "";
+  let withheldMeetingClaimId = "";
+  let publicCorrectionId = "";
+  let heldCorrectionId = "";
+  let withheldMeetingCorrectionId = "";
+
+  let claimCounter = 0;
+
+  async function createClaim(
+    meetingId: string,
+    status: "held" | "approved",
+  ): Promise<string> {
+    // `minute_claims_dedupe` is unique over the extracted tuple, so two claims
+    // on one meeting must genuinely differ. The counter is what makes them.
+    claimCounter += 1;
+    const pin =
+      status === "approved"
+        ? {
+            rendered_text: "Commissioner Fixture voted no on Ordinance 9999.",
+            render_sha256: "a".repeat(64),
+            render_version: "claim-render@1",
+            approved_by: "00000000-0000-4000-8000-000000000001",
+            approved_at: new Date(),
+          }
+        : {};
+    const [row] = await db("minute_claims")
+      .insert({
+        meeting_id: meetingId,
+        artifact_sha256: "b".repeat(64),
+        subject_name: `Commissioner Fixture ${claimCounter}`,
+        action: "voted_no",
+        matter: "Ordinance 9999",
+        quote: "Commissioner Fixture voted no.",
+        quote_offset: claimCounter,
+        model: "test-model",
+        prompt_version: "public-corrections-test-v1",
+        status,
+        ...pin,
+      })
+      .returning<Array<{ id: string }>>("id");
+    return row.id;
+  }
+
+  async function correct(claimId: string): Promise<string> {
+    const written = await appendCorrectionRow(db, {
+      targetTable: "minute_claims",
+      targetId: claimId,
+      field: "matter",
+      oldValue: "Ordinance 9998",
+      newValue: "Ordinance 9999",
+      reason: "The ordinance number in the extracted sentence did not match the minutes.",
+      actor: { id: null, email: null },
+    });
+    return String(written.id);
+  }
+
+  before(async () => {
+    const source = await createSource(CLAIM_PREFIX);
+    const publishedMeeting = await createMeeting(source.commissionId, {
+      publishedAt: new Date(),
+    });
+    const withheldMeeting = await createMeeting(source.commissionId, {});
+
+    publicClaimId = await createClaim(publishedMeeting, "approved");
+    heldClaimId = await createClaim(publishedMeeting, "held");
+    withheldMeetingClaimId = await createClaim(withheldMeeting, "approved");
+
+    publicCorrectionId = await correct(publicClaimId);
+    heldCorrectionId = await correct(heldClaimId);
+    withheldMeetingCorrectionId = await correct(withheldMeetingClaimId);
+  });
+
+  after(async () => {
+    // `record_corrections` forbids DELETE by design, so only the claims go.
+    await db("minute_claims")
+      .whereIn("id", [publicClaimId, heldClaimId, withheldMeetingClaimId])
+      .delete();
+    await cleanupByPrefix(CLAIM_PREFIX);
+  });
+
+  it("publishes a correction to an approved claim on a published meeting", async () => {
+    const log = await fetchLog();
+    assert.ok(
+      ids(log).includes(publicCorrectionId),
+      "a correction to a public claim should appear in the log",
+    );
+    const entry = log.find((correction) => correction.id === publicCorrectionId);
+    assert.equal(entry?.record_kind, "claim");
+    assert.equal(entry?.record_label, "Claim");
+  });
+
+  it("withholds a correction to a claim an operator has not approved", async () => {
+    const log = await fetchLog();
+    assert.ok(!ids(log).includes(heldCorrectionId));
+  });
+
+  it("withholds a correction to an approved claim whose meeting is withheld", async () => {
+    // The third predicate of the claim wall, and the one a status-only rule
+    // would miss: approving a claim on a withheld meeting is a legitimate act.
+    const log = await fetchLog();
+    assert.ok(!ids(log).includes(withheldMeetingCorrectionId));
+  });
+
+  it("withholds it again once the claim is retracted", async () => {
+    await db("minute_claims").where({ id: publicClaimId }).update({
+      retracted_at: new Date(),
+      retracted_reason: "Withdrawn for this test.",
+    });
+    const log = await fetchLog();
+    assert.ok(
+      !ids(log).includes(publicCorrectionId),
+      "retraction takes the claim off the page, so it takes the correction with it",
+    );
+    await db("minute_claims").where({ id: publicClaimId }).update({
+      retracted_at: null,
+      retracted_reason: null,
+    });
+  });
+});
+
+// Pool teardown at file scope. Inside the first describe's `after` it kills the
+// pool for every suite below — which is exactly what happened the moment a
+// second describe was added to this file, and is why the trap is written down.
+after(async () => {
+  await db.destroy();
 });
