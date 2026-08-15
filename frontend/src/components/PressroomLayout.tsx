@@ -74,6 +74,11 @@ const RAIL: readonly RailGroup[] = [
       // decision happened, and what an operator must read to decide one is a
       // coordinate and its precision rather than a rendered sentence.
       { label: "Place links", to: "/admin/place-links" },
+      // Under Operate rather than beside the queues: nothing here is reviewed
+      // and no row here names a person. It is the switch panel — what is
+      // running, what decided it, and the one place to change it without a
+      // redeploy. Nothing it can write gates a wall.
+      { label: "Features", to: "/admin/features" },
     ],
   },
   {

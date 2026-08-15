@@ -38,6 +38,7 @@ import { AdminReviewPage } from "./pages/AdminReviewPage";
 import { AdminClaimsPage } from "./pages/AdminClaimsPage";
 import { AdminPlaceLinksPage } from "./pages/AdminPlaceLinksPage";
 import { AdminRosterPage } from "./pages/AdminRosterPage";
+import { AdminFeaturesPage } from "./pages/AdminFeaturesPage";
 import { SubscribePage } from "./pages/SubscribePage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -189,6 +190,11 @@ export function App() {
             endpoint is public and naming a body on it would enumerate the
             counties we hold withheld records for. */}
           <Route path="admin/roster" element={<AdminRosterPage />} />
+          {/* The switch panel. Not a queue and not a record: it is the one
+            screen that changes what this system does, and deliberately not one
+            that changes what it refuses — no key it can write gates the
+            publication wall, the review gate or the claim wall. */}
+          <Route path="admin/features" element={<AdminFeaturesPage />} />
           <Route path="admin/meetings/:id" element={<AdminMeetingDetailPage />} />
         </Route>
 

@@ -1930,3 +1930,91 @@ export interface RosterRoll {
   };
   provenance: RosterProvenance;
 }
+
+/* ------------------------------------------------ the feature switches (admin) */
+
+/**
+ * The operator's switch panel — `GET`/`PUT /api/admin/features`.
+ *
+ * Read off `backend/src/routes/admin/features.ts`, not off the manifest: the
+ * route adds `killSwitchEnv`, `forcedOff`, the resolved value and its deciding
+ * source, and none of those exist on a manifest entry.
+ *
+ * **A feature flag is not a wall.** No key here gates the publication wall, the
+ * review gate or the claim wall — those are invariants, and
+ * `backend/test/feature-registry-audit.test.ts` holds the key set to capabilities
+ * by vocabulary. Nothing this screen can send turns off a check.
+ */
+
+/**
+ * What turning a feature on can cost.
+ *
+ * `low` changes nothing a stranger sees; `publishes` changes what a stranger can
+ * read; `sends` emits something that leaves the building and cannot be recalled.
+ */
+export const FEATURE_RISKS = ["sends", "publishes", "low"] as const;
+
+export type FeatureRisk = (typeof FEATURE_RISKS)[number];
+
+/** Which of the four resolution steps decided the value. */
+export const FEATURE_SOURCES = ["kill-switch", "registry", "legacy-env", "default"] as const;
+
+export type FeatureSource = (typeof FEATURE_SOURCES)[number];
+
+/** The last change to a key, from `features_audit` rather than from the mirror. */
+export interface FeatureLastChange {
+  /** Null on the first write for a key: before it, no row recorded a state. */
+  enabledFrom: boolean | null;
+  enabledTo: boolean;
+  operatorId: string | null;
+  /** Null when the operator account has since been deleted. The record survives. */
+  operatorEmail: string | null;
+  reason: string;
+  at: string;
+}
+
+export interface FeatureRow {
+  key: string;
+  title: string;
+  description: string;
+  /**
+   * `string`, not the union, for the reason `PlaceLinkReviewItem.link.status` is:
+   * a value this build does not recognise must render as itself. A narrowed type
+   * here would let an unknown risk fall through a grouping branch and drop the
+   * row — and a switch that is missing from this screen is a switch nobody knows
+   * exists.
+   */
+  risk: string;
+  legacyEnv: string | null;
+  /** A step besides flipping the switch, or null. Rendered on the row. */
+  requiresSeed: string | null;
+  /** `FEATURE_<UPPER_SNAKE_KEY>`, so the operator can go and find it. */
+  killSwitchEnv: string;
+  enabled: boolean;
+  /** As above: `string` on the wire, matched against `FEATURE_SOURCES`. */
+  source: string;
+  /**
+   * When the serving process last read the `features` table, or null if it never
+   * has. Not the same fact as `enabled`, and the screen must not conflate them.
+   */
+  loadedAt: string | null;
+  /** The environment is holding this key off. The control renders disabled. */
+  forcedOff: boolean;
+  lastChange: FeatureLastChange | null;
+}
+
+export interface FeatureListing {
+  features: FeatureRow[];
+  /** `FEATURE_POLL_INTERVAL_MS`. Half of how long a change takes to land. */
+  pollIntervalMs: number;
+}
+
+/** What `PUT /api/admin/features/:key` answers with. A subset of the row. */
+export interface FeatureWriteResult {
+  key: string;
+  enabled: boolean;
+  source: string;
+  loadedAt: string | null;
+  forcedOff: boolean;
+  lastChange: FeatureLastChange | null;
+}

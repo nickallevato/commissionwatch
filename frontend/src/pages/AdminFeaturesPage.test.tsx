@@ -1,0 +1,360 @@
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import userEvent from "@testing-library/user-event";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { AdminFeaturesPage } from "./AdminFeaturesPage";
+import { server } from "@/mocks/server";
+import type { FeatureListing, FeatureRow, FeatureWriteResult } from "@/types";
+
+/**
+ * `/admin/features` — the switch panel.
+ *
+ * What this suite guards is not layout. It is the seven things that make this
+ * screen safe to act on:
+ *
+ * **No switch on it gates a wall, and it says so.** The publication wall, the
+ * review gate and the claim wall are invariants. A console that implied one of
+ * them was a setting would be worse than no console, because a setting is
+ * something somebody eventually changes at 11pm.
+ *
+ * **The deciding source is named on every row.** An operator who flips a row and
+ * sees nothing change must be told `FEATURE_EVENT_DRAIN=false` is in the deploy
+ * config, not left to conclude the console is broken and flip it again.
+ *
+ * **A kill-switched row's control is disabled, with the variable named in
+ * place.** A control that accepts a click and changes nothing is worse than no
+ * control.
+ *
+ * **`sends` is grouped apart and demands the key typed out.** It is the one grade
+ * whose consequence switching back does not undo.
+ *
+ * **A reason is required before the click, not after a 400.**
+ *
+ * **The latency is a number, and it is neither "instant" nor "restart".** Both of
+ * those are false, and each is false in a way that produces a wrong action.
+ *
+ * **A failed request is not an empty list.** On the screen whose whole purpose is
+ * to say what is running, "there are no features" is the one answer that must
+ * never be guessed.
+ *
+ * Every operator name here is invented.
+ */
+
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+const LOADED_AT = "2026-08-15T21:40:00.000Z";
+
+const DRAIN: FeatureRow = {
+  key: "event_drain",
+  title: "Event drain",
+  description: "The drain claims undispatched rows from events and hands them to the dispatcher.",
+  risk: "sends",
+  legacyEnv: "EVENT_DRAIN_ENABLED",
+  requiresSeed: null,
+  killSwitchEnv: "FEATURE_EVENT_DRAIN",
+  enabled: false,
+  source: "default",
+  loadedAt: LOADED_AT,
+  forcedOff: false,
+  lastChange: null,
+};
+
+const PRERENDER: FeatureRow = {
+  key: "prerender",
+  title: "Prerendered pages",
+  description: "The consumer writes a static document per published record for crawlers.",
+  risk: "publishes",
+  legacyEnv: "PRERENDER_ENABLED",
+  requiresSeed:
+    "Run `npm run prerender:rebuild` after enabling. The consumer only walks events past its cursor.",
+  killSwitchEnv: "FEATURE_PRERENDER",
+  enabled: true,
+  source: "registry",
+  loadedAt: LOADED_AT,
+  forcedOff: false,
+  lastChange: {
+    enabledFrom: null,
+    enabledTo: true,
+    operatorId: "11111111-2222-4333-8444-000000000001",
+    operatorEmail: "invented.operator@example.invalid",
+    reason: "Serving static copies for readers without JavaScript.",
+    at: "2026-08-15T20:00:00.000Z",
+  },
+};
+
+const NARRATIVE: FeatureRow = {
+  key: "generated_narrative",
+  title: "Generated finding narrative",
+  description: "The composer drafts prose for a finding into the operator review queue.",
+  risk: "low",
+  legacyEnv: null,
+  requiresSeed: null,
+  killSwitchEnv: "FEATURE_GENERATED_NARRATIVE",
+  enabled: false,
+  source: "default",
+  loadedAt: LOADED_AT,
+  forcedOff: false,
+  lastChange: null,
+};
+
+function listing(features: FeatureRow[] = [DRAIN, PRERENDER, NARRATIVE]): FeatureListing {
+  return { features, pollIntervalMs: 5000 };
+}
+
+function serve(body: FeatureListing): void {
+  server.use(http.get("/api/admin/features", () => HttpResponse.json(body)));
+}
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <AdminFeaturesPage />
+    </MemoryRouter>,
+  );
+}
+
+describe("AdminFeaturesPage", () => {
+  it("says in words that no switch here gates a check", async () => {
+    serve(listing());
+    renderPage();
+
+    await screen.findByText("Event drain");
+    // The sentence is the artifact. An operator who believes the walls are
+    // switchable behaves as though they are negotiable.
+    expect(screen.getByText(/whether a capability/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/never changes what it refuses/i, { exact: false }),
+    ).toBeInTheDocument();
+  });
+
+  it("groups by risk, with sends in its own section", async () => {
+    serve(listing());
+    renderPage();
+
+    const sends = await screen.findByTestId("group-sends");
+    expect(within(sends).getByText("Event drain")).toBeInTheDocument();
+    // The one key that can cause a message to leave the building is not filed
+    // next to a key that writes a file.
+    expect(within(sends).queryByText("Prerendered pages")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("group-publishes")).getByText("Prerendered pages")).toBeInTheDocument();
+    expect(within(screen.getByTestId("group-low")).getByText("Generated finding narrative")).toBeInTheDocument();
+  });
+
+  it("names the deciding source on every row", async () => {
+    serve(listing());
+    renderPage();
+
+    await screen.findByText("Event drain");
+    expect(screen.getByTestId("source-event_drain")).toHaveTextContent(/default, which is off/i);
+    expect(screen.getByTestId("source-prerender")).toHaveTextContent(/operator decision recorded here/i);
+  });
+
+  it("explains a legacy variable rather than reporting the value alone", async () => {
+    // The row that looks broken: on, and no operator decided it. Without the
+    // sentence naming the variable, the console reads as having lied.
+    serve(listing([{ ...DRAIN, enabled: true, source: "legacy-env" }]));
+    renderPage();
+
+    const source = await screen.findByTestId("source-event_drain");
+    expect(source).toHaveTextContent(/pre-registry environment variable/i);
+    expect(screen.getByText("EVENT_DRAIN_ENABLED")).toBeInTheDocument();
+  });
+
+  it("disables the control on a kill-switched row and names the variable in place", async () => {
+    serve(listing([{ ...DRAIN, forcedOff: true, source: "kill-switch" }]));
+    renderPage();
+
+    const toggle = await screen.findByTestId("toggle-event_drain");
+    expect(toggle).toBeDisabled();
+
+    // In place, not in a tooltip: a disabled button whose reason is one hover
+    // away is a disabled button with no reason.
+    const flag = screen.getByTestId("forced-off-event_drain");
+    expect(flag).toHaveTextContent("FEATURE_EVENT_DRAIN");
+    expect(flag).toHaveTextContent(/cannot turn it on/i);
+    expect(flag).toHaveTextContent(/one-directional/i);
+  });
+
+  it("requires a reason before the write can be sent", async () => {
+    serve(listing());
+    renderPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("toggle-generated_narrative"));
+    const confirm = screen.getByTestId("confirm-generated_narrative");
+    // Visibly required before the click, rather than a 400 afterwards.
+    expect(confirm).toBeDisabled();
+
+    await user.type(
+      screen.getByLabelText(/why is generated_narrative being turned on/i),
+      "Drafting into the review queue to evaluate it.",
+    );
+    expect(confirm).toBeEnabled();
+  });
+
+  it("demands the key typed out before a sends feature goes on", async () => {
+    serve(listing());
+    renderPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("toggle-event_drain"));
+    await user.type(
+      screen.getByLabelText(/why is event_drain being turned on/i),
+      "Authorised after the staging run.",
+    );
+
+    // A reason alone is not enough for the one key that can send.
+    const confirm = screen.getByTestId("confirm-event_drain");
+    expect(confirm).toBeDisabled();
+
+    await user.type(screen.getByLabelText(/type event_drain to confirm/i), "event_drain");
+    expect(confirm).toBeEnabled();
+  });
+
+  it("sends the inverted value with the typed reason", async () => {
+    const sent = vi.fn();
+    serve(listing());
+    server.use(
+      http.put("/api/admin/features/prerender", async ({ request }) => {
+        sent(await request.json());
+        // Typed, so this mock cannot drift from what `PUT /api/admin/features/:key`
+        // actually answers with.
+        const written: FeatureWriteResult = {
+          key: "prerender",
+          enabled: false,
+          source: "registry",
+          loadedAt: LOADED_AT,
+          forcedOff: false,
+          lastChange: null,
+        };
+        return HttpResponse.json(written);
+      }),
+    );
+    renderPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("toggle-prerender"));
+    await user.type(
+      screen.getByLabelText(/why is prerender being turned off/i),
+      "Writing pages nobody serves yet.",
+    );
+    await user.click(screen.getByTestId("confirm-prerender"));
+
+    // Inverted from the row's current value, never read off a checkbox that
+    // could have drifted from what the screen is showing.
+    await waitFor(() =>
+      expect(sent).toHaveBeenCalledWith({
+        enabled: false,
+        reason: "Writing pages nobody serves yet.",
+      }),
+    );
+  });
+
+  it("shows the API's own refusal verbatim", async () => {
+    serve(listing());
+    server.use(
+      http.put("/api/admin/features/generated_narrative", () =>
+        HttpResponse.json({ error: "generated_narrative is already disabled", statusCode: 409 }, { status: 409 }),
+      ),
+    );
+    renderPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("toggle-generated_narrative"));
+    await user.type(screen.getByLabelText(/why is generated_narrative/i), "Trying it.");
+    await user.click(screen.getByTestId("confirm-generated_narrative"));
+
+    // A paraphrase would be a second thing to debug.
+    expect(await screen.findByText("generated_narrative is already disabled")).toBeInTheDocument();
+  });
+
+  it("prints the latency as a number, and neither as instant nor as a restart", async () => {
+    serve(listing());
+    renderPage();
+
+    const latency = await screen.findByTestId("latency");
+    // 5s poll + one 10s consumer cycle. Composed from the served interval, so it
+    // tracks the deploy config rather than a number copied into the frontend.
+    expect(latency).toHaveTextContent("15 seconds");
+    expect(latency).toHaveTextContent(/not instant/i);
+    expect(latency).toHaveTextContent(/no longer needs a restart/i);
+    expect(latency.textContent ?? "").not.toMatch(/takes effect on restart/i);
+  });
+
+  it("recomputes the latency from the served poll interval", async () => {
+    serve({ ...listing(), pollIntervalMs: 30000 });
+    renderPage();
+
+    expect(await screen.findByTestId("latency")).toHaveTextContent("40 seconds");
+  });
+
+  it("shows when this process last read the switch table", async () => {
+    serve(listing());
+    renderPage();
+
+    const loaded = await screen.findByTestId("loaded-at");
+    expect(loaded).toHaveTextContent(/confirmed the switch says on/i);
+  });
+
+  it("says so when the serving process has never read the table", async () => {
+    // Every row is then resolving through the environment and the default, which
+    // is a different claim from "these are the switches".
+    serve(listing([{ ...DRAIN, loadedAt: null }]));
+    renderPage();
+
+    expect(await screen.findByTestId("loaded-at")).toHaveTextContent(/never read it/i);
+  });
+
+  it("surfaces the rebuild step on the row that needs it", async () => {
+    serve(listing());
+    renderPage();
+
+    // On the row, not in a document. A prerequisite that lives only in
+    // docs/STATUS.md is one that gets skipped.
+    const flag = await screen.findByTestId("requires-prerender");
+    expect(flag).toHaveTextContent("npm run prerender:rebuild");
+  });
+
+  it("reports the last change with its actor and reason", async () => {
+    serve(listing());
+    renderPage();
+
+    const change = await screen.findByTestId("last-change-prerender");
+    expect(change).toHaveTextContent("invented.operator@example.invalid");
+    expect(change).toHaveTextContent("Serving static copies for readers without JavaScript.");
+  });
+
+  it("distinguishes a key nobody has decided from a decision to be off", async () => {
+    serve(listing());
+    renderPage();
+
+    const change = await screen.findByTestId("last-change-event_drain");
+    expect(change).toHaveTextContent(/no operator has decided this key/i);
+  });
+
+  it("renders an error rather than an empty list when the request fails", async () => {
+    server.use(http.get("/api/admin/features", () => HttpResponse.error()));
+    renderPage();
+
+    // "There are no features" is the strongest available claim on the weakest
+    // available evidence, on the screen whose whole purpose is saying what runs.
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/i);
+    expect(screen.queryByTestId("group-sends")).not.toBeInTheDocument();
+    // `Absence` says it in the shared words: a failure of ours, explicitly not a
+    // statement that there are none.
+    expect(screen.getByText(/not a statement that there are none/i)).toBeInTheDocument();
+  });
+
+  it("renders a feature whose risk grade this build does not know", async () => {
+    // A switch missing from this screen is a switch nobody knows exists.
+    serve(listing([{ ...NARRATIVE, risk: "cataclysmic" }]));
+    renderPage();
+
+    const group = await screen.findByTestId("group-unknown");
+    expect(within(group).getByText("Generated finding narrative")).toBeInTheDocument();
+    expect(group).toHaveTextContent(/no words for/i);
+  });
+});
