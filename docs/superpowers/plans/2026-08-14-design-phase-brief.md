@@ -1,6 +1,24 @@
 # Design-phase brief — what still needs a spec
 
-> **Status, updated 2026-08-14: the design phase ran and these specs are written.** Each section
+> **Status, updated 2026-08-15: most of this is now built and deployed.** The table below marks
+> what shipped. Read `docs/STATUS.md` § 2026-08-15 for what it cost and what it found — five
+> defects are recorded there with their mechanism rather than their symptom, because each is a
+> class rather than an instance.
+>
+> | § | Spec | State |
+> |---|---|---|
+> | 1 | event spine | **built**, dispatcher constructed, drain running dark behind `EVENT_DRAIN_ENABLED` |
+> | 2 | published claim | **built** — render pin, tombstones, both screens |
+> | 3 | LLM governor | claims review screen **built**; the governor pass itself is **not** |
+> | 4 | corpus throughput | **built** — extract queue stage, `vote_events`, failure taxonomy. Roster still unsourced |
+> | 5 | transcripts | **built** for Bozeman. Gallatin is a records request, not a client |
+> | 6 | delivery | RSS, query feed, Discord routing, record receipt **built**. Email **blocked** on DNS |
+> | 7 | server rendering | `/bot`, OCD export, rate limiting **built**. Prerender/SSR **not** |
+> | 8 | vocabulary + UI | **built** — routes renamed with 301s, enforced by a test |
+> | 9 | geography / map | **not started**. Needs a PostGIS image change |
+> | 10 | notification + dispute loop | **in progress** |
+>
+> **Status, 2026-08-14: the design phase ran and these specs are written.** Each section
 > below now names the spec that answers it. A ninth was added mid-phase at the operator's request:
 > the city development map. This file remains the index and the constraint list; the specs are the
 > design of record.
