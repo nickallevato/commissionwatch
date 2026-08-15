@@ -164,6 +164,34 @@ services:
       # construction rather than emitting a page that points at the wrong host.
       - PRERENDER_ENABLED=${PRERENDER_ENABLED:-}
       - PRERENDER_OUTPUT_DIR=/var/lib/commissionwatch/prerender
+
+      # Feature registry (0.4.0). Features are toggled from /admin/features and
+      # every toggle records the operator and their stated reason. The legacy
+      # variables above still work: with no row in `features`, resolution is
+      # byte-identical to 0.3.0, which is why they are not removed here.
+      #
+      # FEATURE_* is a KILL SWITCH and is one-directional. Set to
+      # false/0/no/off it forces that feature off whatever the database says,
+      # and the console renders the control disabled naming this variable. Set
+      # to `true` it enables nothing and logs that it has no on position —
+      # forcing a feature on from the environment is the untraceable enable the
+      # registry exists to remove.
+      #
+      # It outranks the database deliberately. The case that most demands
+      # turning a feature off is the one where the feature is hammering
+      # Postgres, and a switch needing a healthy Postgres to say "stop" does
+      # not work when it matters. This needs no query and survives a restart.
+      #
+      # Passed through UNSET by default, and unset is NOT a kill switch — it
+      # declines to override. The empty default matters for the same reason it
+      # does above: compose substitutes an absent variable to the empty string.
+      - FEATURE_EVENT_DRAIN=${FEATURE_EVENT_DRAIN:-}
+      - FEATURE_PRERENDER=${FEATURE_PRERENDER:-}
+      - FEATURE_MCP_SERVER=${FEATURE_MCP_SERVER:-}
+      - FEATURE_CLAIM_PUBLICATION=${FEATURE_CLAIM_PUBLICATION:-}
+      - FEATURE_GENERATED_NARRATIVE=${FEATURE_GENERATED_NARRATIVE:-}
+      - FEATURE_DATED_EXPORT_ARCHIVE=${FEATURE_DATED_EXPORT_ARCHIVE:-}
+      - FEATURE_POLL_INTERVAL_MS=${FEATURE_POLL_INTERVAL_MS:-}
     volumes:
       # Read-write here — this is the writer. Same volume the web container
       # mounts read-only.

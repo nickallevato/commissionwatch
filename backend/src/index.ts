@@ -44,7 +44,7 @@ operatorAuthService()
  *
  * The drain is what feeds it: `events` rows are written only for objects that
  * are already public, so a consumer reading events needs no publication check of
- * its own. `EVENT_DRAIN_ENABLED` is unset, so this ships **dark** — it starts,
+ * its own. The `event_drain` feature is off, so this ships **dark** — it starts,
  * logs that it is disabled, and sends nothing. That is deliberate: the loop runs
  * in production over an empty `channel_routes` table before any channel is
  * routed, which is the cheapest possible way to find out it works.
@@ -84,7 +84,8 @@ const eventDrain = new EventDrain(db, { dispatcher });
 // The prerender consumer writes a static, self-contained copy of every public
 // page for readers that do not run JavaScript. It reads the same `events` table
 // the drain does but never writes `dispatched_at` — that column is the drain's,
-// and a second writer would steal events from it. Off unless PRERENDER_ENABLED.
+// and a second writer would steal events from it. Off unless the `prerender`
+// feature is on, which the console can now do without a redeploy.
 const prerender = new PrerenderConsumer(db);
 
 const server = app.listen(PORT, () => {
@@ -98,12 +99,15 @@ const server = app.listen(PORT, () => {
   // records it already has beats a site that will not start.
   startIngestion(db, ingestion).catch((err) => console.error("Ingestion start failed", err));
 
-  // No-op unless EVENT_DRAIN_ENABLED is set; the drain decides that itself
-  // rather than making every caller remember to ask.
+  // Both loops arm their timer unconditionally and re-read their flag per cycle,
+  // so an operator turning one on from the console gets it within one interval
+  // rather than on the next deploy. Each cycle is a no-op while its feature is
+  // off — nothing claimed, nothing written, no cursor advanced — and the drain
+  // decides that itself rather than making every caller remember to ask.
   eventDrain.start();
 
-  // No-op unless PRERENDER_ENABLED is set, and it throws rather than emitting
-  // localhost canonicals if PUBLIC_BASE_URL is missing.
+  // As above, and it throws rather than emitting localhost canonicals if
+  // PUBLIC_BASE_URL is missing.
   prerender.start();
 
   // Without this row a dispute event resolves to nothing and the ledger stays
@@ -111,7 +115,7 @@ const server = app.listen(PORT, () => {
   // It must be `audience: 'ops'` and `owner_kind: 'direct'`: migration 088's
   // trigger refuses a `dispute.*` route on a public channel, and either
   // attribute alone leaves the event unroutable or routable to a webhook.
-  // Nothing sends regardless until EVENT_DRAIN_ENABLED is set.
+  // Nothing sends regardless until the `event_drain` feature is on.
   ensureDisputeReplyChannel(db).catch((err: unknown) =>
     console.error("Dispute reply channel setup failed", err),
   );

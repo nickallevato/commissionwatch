@@ -193,11 +193,13 @@ export class PrerenderConsumer {
   readonly baseUrl: string;
   readonly batchSize: number;
   readonly intervalMs: number;
-  readonly enabled: boolean;
 
   private readonly logger: PrerenderLogger;
+  private readonly enabledOverride: boolean | null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  /** What the last cycle saw. Null until a cycle has looked. */
+  private observed: boolean | null = null;
 
   constructor(
     private readonly db: Knex,
@@ -207,8 +209,43 @@ export class PrerenderConsumer {
     this.baseUrl = options.baseUrl ?? prerenderBaseUrl();
     this.batchSize = options.batchSize ?? DEFAULT_PRERENDER_BATCH_SIZE;
     this.intervalMs = options.intervalMs ?? DEFAULT_PRERENDER_INTERVAL_MS;
-    this.enabled = options.enabled ?? prerenderEnabled();
+    this.enabledOverride = options.enabled ?? null;
     this.logger = options.logger ?? consoleLogger;
+  }
+
+  /**
+   * Read per cycle, not latched at construction — the reason `EventDrain.enabled`
+   * gives. `options.enabled` still wins, which is how this suite pins the
+   * consumer on without an environment variable.
+   *
+   * `rebuild()` deliberately does not consult it, matching
+   * `src/scripts/prerender-rebuild.ts`: the flag gates the *loop*, and the rebuild
+   * is the operator's own hand on the tiller.
+   */
+  get enabled(): boolean {
+    return this.enabledOverride ?? prerenderEnabled();
+  }
+
+  /** The current value, having logged any change in it. Transitions, not state. */
+  private observeEnabled(): boolean {
+    const enabled = this.enabled;
+    if (this.observed === enabled) return enabled;
+    const first = this.observed === null;
+    this.observed = enabled;
+
+    if (!enabled) {
+      this.logger.warn(
+        first
+          ? "prerender: disabled (the prerender feature is off); no static pages will be written"
+          : "prerender: disabled by the prerender feature; no further pages will be written",
+      );
+    } else if (!first) {
+      this.logger.warn(
+        "prerender: enabled by the prerender feature; run `npm run prerender:rebuild` for anything " +
+          "published before now, which the cursor has already passed",
+      );
+    }
+    return enabled;
   }
 
   /* ----------------------------------------------------------------------
@@ -394,6 +431,14 @@ export class PrerenderConsumer {
 
   async tick(): Promise<PrerenderTickResult> {
     const cursor = await this.readCursor();
+
+    // Per cycle, and after the cursor read so the returned cursor still says
+    // where this consumer stands. Before the event query and before any write:
+    // the cursor does not advance while the feature is off, so turning it on
+    // resumes from the last page written rather than skipping everything that
+    // was published in between.
+    if (!this.observeEnabled()) return { scanned: 0, written: 0, removed: 0, cursor };
+
     const query = this.db("events")
       .whereIn("subject_kind", RENDERABLE_KINDS)
       .orderBy([{ column: "updated_at", order: "asc" }, { column: "id", order: "asc" }])
@@ -458,13 +503,13 @@ export class PrerenderConsumer {
     return this.renderAll(targets);
   }
 
+  /**
+   * Arms the poll whether or not the feature is on, so a toggle needs no restart.
+   * `tick` decides per cycle; a disabled consumer costs one cached flag read and
+   * one small cursor read every `intervalMs`.
+   */
   start(): void {
-    if (!this.enabled) {
-      this.logger.warn(
-        "prerender: disabled (PRERENDER_ENABLED is not set); no static pages will be written",
-      );
-      return;
-    }
+    this.observeEnabled();
     if (this.timer !== null) return;
 
     const timer = setInterval(() => {

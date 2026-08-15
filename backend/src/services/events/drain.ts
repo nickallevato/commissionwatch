@@ -252,12 +252,14 @@ const consoleLogger: DrainLogger = {
 export class EventDrain {
   readonly batchSize: number;
   readonly intervalMs: number;
-  readonly enabled: boolean;
 
   private readonly dispatcher: EventDispatcherLike;
   private readonly logger: DrainLogger;
+  private readonly enabledOverride: boolean | null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  /** What the last cycle saw. Null until a cycle has looked. */
+  private observed: boolean | null = null;
 
   constructor(
     private readonly db: Knex,
@@ -266,8 +268,52 @@ export class EventDrain {
     this.dispatcher = options.dispatcher;
     this.batchSize = options.batchSize ?? DEFAULT_DRAIN_BATCH_SIZE;
     this.intervalMs = options.intervalMs ?? DEFAULT_DRAIN_INTERVAL_MS;
-    this.enabled = options.enabled ?? eventDrainEnabled();
+    this.enabledOverride = options.enabled ?? null;
     this.logger = options.logger ?? consoleLogger;
+  }
+
+  /**
+   * Read per cycle, not latched at construction.
+   *
+   * It used to be a field assigned in the constructor, which meant a console
+   * toggle reached this loop only on the next restart — so the switch that exists
+   * to be thrown at 11pm was a redeploy again, on the one path in this product
+   * that can send mail. `resolveFeature` reads the registry's in-process cache, so
+   * this costs a map lookup and no query.
+   *
+   * `options.enabled` still wins. That is how the existing suites pin behaviour
+   * without touching the environment, and a test that must not send has to be
+   * able to say so in a way no row can override.
+   */
+  get enabled(): boolean {
+    return this.enabledOverride ?? eventDrainEnabled();
+  }
+
+  /**
+   * The current value, having logged any **change** in it.
+   *
+   * The state is not logged, only transitions. A line every five seconds saying
+   * nothing is happening is how the line that matters gets scrolled past, and the
+   * two lines that matter here are "this started sending" and "this stopped".
+   */
+  private observeEnabled(): boolean {
+    const enabled = this.enabled;
+    if (this.observed === enabled) return enabled;
+    const first = this.observed === null;
+    this.observed = enabled;
+
+    if (!enabled) {
+      this.logger.warn(
+        first
+          ? "EventDrain: disabled (the event_drain feature is off); nothing will send"
+          : "EventDrain: disabled by the event_drain feature; nothing further will send",
+      );
+    } else if (!first) {
+      // Only on a transition. An enabled drain at startup says nothing, exactly
+      // as before, because that is the state the log is already full of.
+      this.logger.warn("EventDrain: enabled by the event_drain feature; sends are now live");
+    }
+    return enabled;
   }
 
   /**
@@ -326,6 +372,13 @@ export class EventDrain {
    * silently dropped either — it is retried, and the reason is logged.
    */
   async tick(): Promise<DrainTickResult> {
+    // The gate is here, not only in the interval callback, so there is no way to
+    // run a cycle that sends while the feature is off — not from the timer, not
+    // from a script, not from a future caller. Checked before the transaction
+    // opens: nothing is claimed, so `dispatched_at` stays null and the backlog is
+    // still there to dispatch when an operator turns it on.
+    if (!this.observeEnabled()) return { claimed: 0, dispatched: 0, failed: 0 };
+
     return this.db.transaction(async (trx) => {
       const claimed = await this.claimBatch(trx, this.batchSize);
       const sent: string[] = [];
@@ -350,12 +403,20 @@ export class EventDrain {
     });
   }
 
-  /** Arms the poll. A disabled drain arms nothing and says so once. */
+  /**
+   * Arms the poll, whether or not the feature is on right now.
+   *
+   * It used to return early when disabled, which is why a toggle needed a
+   * restart: with no timer there was nothing left to notice the change. The timer
+   * now always runs and `tick` decides per cycle, so a disabled drain costs one
+   * cached flag read every `intervalMs` and no query — and an operator turning it
+   * on gets a dispatch within one interval instead of within one deploy.
+   *
+   * The disabled state is still announced once, here, so a boot log reads as it
+   * always did.
+   */
   start(): void {
-    if (!this.enabled) {
-      this.logger.warn("EventDrain: disabled (EVENT_DRAIN_ENABLED is not set); nothing will send");
-      return;
-    }
+    this.observeEnabled();
     if (this.timer !== null) return;
 
     const timer = setInterval(() => {
