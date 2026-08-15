@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { DataManifest, DataManifestDataset } from "@/types";
+import type {
+  DataArchiveIndex,
+  DataManifest,
+  DataManifestDataset,
+} from "@/types";
 
 /**
  * `/data` (and its original address `/data-license`) — the dataset, the terms
@@ -294,12 +298,91 @@ function DatasetRow({ dataset }: { dataset: DataManifestDataset }) {
 }
 
 /* ---------------------------------------------------------------------------
+   The dated archive — what the page may claim about it
+   ------------------------------------------------------------------------- */
+
+/**
+ * What this site can say about asking it what it said in March.
+ *
+ * The paragraph under "How often it changes" used to assert flatly that there
+ * is no dated archive. That was true, and stopped being true the moment an
+ * operator flips `dated_export_archive` in the admin console — putting a false
+ * statement on the one public page whose subject is what this project does and
+ * does not offer. So the copy is read off the capability instead of off
+ * somebody's memory to edit it.
+ *
+ * The signal is `GET /api/data/archive` itself: with the flag off that route
+ * answers **404**, which is the same "this site has no dated archive" the
+ * paragraph states, and with it on it returns the boundary the reader needs.
+ * Nothing new is exposed — no registry, no manifest, no other key's state, not
+ * even the existence of a feature flag. An unauthenticated caller learns only
+ * what they would learn by requesting the public endpoint directly.
+ *
+ * `unknown` is not folded into `off`. A network failure is not evidence that
+ * the archive is absent, and the page states neither claim until it knows.
+ */
+type ArchiveState =
+  | { readonly status: "unknown" }
+  | { readonly status: "off" }
+  | { readonly status: "on"; readonly answerableFrom: string | null };
+
+function ArchiveCadence({ state }: { state: ArchiveState }) {
+  if (state.status === "unknown") return null;
+
+  if (state.status === "off") {
+    return (
+      <Prose>
+        There is no nightly snapshot and no dated archive — that is honest about
+        what exists rather than a promise, and it means there is currently no
+        way to ask this site what it said in March.
+      </Prose>
+    );
+  }
+
+  return (
+    <>
+      <Prose>
+        Dated snapshots are kept, so you can ask what this site published on a
+        given day.{" "}
+        <a className="cite" href="/api/data/archive">
+          /api/data/archive
+        </a>{" "}
+        lists every snapshot and the dates it can answer for. An archived export
+        is re-read through today&rsquo;s publication rule rather than served as
+        a stored copy, so a record withdrawn since is absent from it and counted
+        as withheld.
+      </Prose>
+      <Prose>
+        {state.answerableFrom === null ? (
+          <>
+            No snapshot has been taken yet, so there is nothing to ask for
+            before now. What this site published on any earlier date was never
+            recorded and is not reconstructed.
+          </>
+        ) : (
+          <>
+            The archive answers from{" "}
+            <span className="figure">
+              {new Date(state.answerableFrom).toLocaleDateString()}
+            </span>{" "}
+            onward — the first snapshot. Publication state is a single mutable
+            column, so what was public before that cannot be reconstructed from
+            the record, and the archive does not guess.
+          </>
+        )}
+      </Prose>
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------------------
    Page
    ------------------------------------------------------------------------- */
 
 export function DataLicensePage() {
   const [manifest, setManifest] = useState<DataManifest | null>(null);
   const [manifestFailed, setManifestFailed] = useState(false);
+  const [archive, setArchive] = useState<ArchiveState>({ status: "unknown" });
 
   const load = useCallback(async (): Promise<DataManifest | null> => {
     try {
@@ -308,6 +391,25 @@ export function DataLicensePage() {
       return (await res.json()) as DataManifest;
     } catch {
       return null;
+    }
+  }, []);
+
+  /**
+   * Resolves the archive state from the public endpoint's own answer.
+   *
+   * 404 is the definite "off" — the route is declared and answers 404 by
+   * design while the feature is off. Any other failure is `unknown`, because a
+   * proxy error is not evidence about the archive.
+   */
+  const loadArchive = useCallback(async (): Promise<ArchiveState> => {
+    try {
+      const res = await fetch("/api/data/archive");
+      if (res.status === 404) return { status: "off" };
+      if (!res.ok) return { status: "unknown" };
+      const index = (await res.json()) as DataArchiveIndex;
+      return { status: "on", answerableFrom: index.answerable_from };
+    } catch {
+      return { status: "unknown" };
     }
   }, []);
 
@@ -323,6 +425,17 @@ export function DataLicensePage() {
       ignore = true;
     };
   }, [load]);
+
+  useEffect(() => {
+    let ignore = false;
+    void (async () => {
+      const state = await loadArchive();
+      if (!ignore) setArchive(state);
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [loadArchive]);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -560,10 +673,8 @@ export function DataLicensePage() {
             The export is generated from the live record when you request it, so
             it is exactly as fresh as two things: the last time a source was
             swept, and the last time an operator published what the sweep found.
-            There is no nightly snapshot and no dated archive — that is honest
-            about what exists rather than a promise, and it means there is
-            currently no way to ask this site what it said in March.
           </Prose>
+          <ArchiveCadence state={archive} />
           <Prose>
             Each source has its own schedule and its own health.{" "}
             <Link

@@ -50,6 +50,22 @@ function serveManifest(datasets: DataManifestDataset[]) {
   );
 }
 
+/**
+ * The archive index as the backend serves it with `dated_export_archive` on.
+ * Off, the route 404s — that is the default handler, and the page reads the
+ * 404 rather than being told separately that a feature is off.
+ */
+function serveArchive(answerableFrom: string | null) {
+  server.use(
+    http.get("/api/data/archive", () =>
+      HttpResponse.json({
+        answerable_from: answerableFrom,
+        path: "/api/data/archive/{date}/{dataset}.{json|csv}",
+      }),
+    ),
+  );
+}
+
 const MEETINGS: DataManifestDataset = {
   name: "meetings",
   description: "Published meetings.",
@@ -200,16 +216,73 @@ describe("DataLicensePage", () => {
     );
   });
 
-  it("is honest that there is no dated archive yet", async () => {
+  /* ------------------------------------------------- the dated archive copy */
+
+  it("is honest that there is no dated archive while the archive is off", async () => {
     serveManifest([MEETINGS]);
+    // The default handler 404s /api/data/archive, which is what the backend
+    // does while `dated_export_archive` is off.
+    const { container } = renderWithProviders(<DataLicensePage />);
+    await waitFor(() =>
+      expect(container.textContent).toMatch(
+        /no nightly snapshot and no dated archive/,
+      ),
+    );
+    expect(container.textContent).not.toMatch(/Dated snapshots are kept/);
+  });
+
+  it("stops claiming there is no archive once the archive answers", async () => {
+    serveManifest([MEETINGS]);
+    serveArchive("2026-03-12T00:00:00.000Z");
+    const { container } = renderWithProviders(<DataLicensePage />);
+
+    await waitFor(() =>
+      expect(container.textContent).toMatch(/Dated snapshots are kept/),
+    );
+    // The whole point: the paragraph cannot contradict the feature, and no
+    // operator has to remember to come and edit it.
+    expect(container.textContent).not.toMatch(
+      /no nightly snapshot and no dated archive/,
+    );
+    // And it points somewhere useful — the earliest date it can answer for.
+    expect(container.textContent).toMatch(
+      new RegExp(new Date("2026-03-12T00:00:00.000Z").toLocaleDateString()),
+    );
+    expect(
+      container.querySelector('a[href="/api/data/archive"]'),
+    ).not.toBeNull();
+  });
+
+  it("promises nothing about dates before the first snapshot", async () => {
+    serveManifest([MEETINGS]);
+    serveArchive(null);
+    const { container } = renderWithProviders(<DataLicensePage />);
+
+    await waitFor(() =>
+      expect(container.textContent).toMatch(/Dated snapshots are kept/),
+    );
+    expect(container.textContent).toMatch(/No snapshot has been taken yet/);
+  });
+
+  it("makes neither claim when the archive endpoint cannot be reached", async () => {
+    serveManifest([MEETINGS]);
+    server.use(
+      http.get(
+        "/api/data/archive",
+        () => new HttpResponse(null, { status: 502 }),
+      ),
+    );
     const { container } = renderWithProviders(<DataLicensePage />);
     await waitFor(() =>
       expect(screen.getByText("meetings")).toBeInTheDocument(),
     );
-    // The launch-readiness spec describes nightly snapshots under /data/archive.
-    // They do not exist, and a page promising them would be this project
-    // publishing an unenforced claim about itself.
-    expect(container.textContent).toMatch(/no nightly snapshot and no dated archive/);
+    // A bad gateway is not evidence that the archive is absent, and a page that
+    // reads a proxy fault as a fact about the record is the bug this task
+    // exists to remove — in the other direction.
+    expect(container.textContent).not.toMatch(
+      /no nightly snapshot and no dated archive/,
+    );
+    expect(container.textContent).not.toMatch(/Dated snapshots are kept/);
   });
 
   it("carries Dataset JSON-LD that advertises only files the API serves", async () => {

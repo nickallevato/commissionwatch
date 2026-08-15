@@ -434,6 +434,14 @@ export const handlers = [
    * from the colophon, and each suite supplies its own fixtures.
    */
   http.get("/api/calendar", () => list([])),
+
+  /**
+   * The dated archive, off — which is the default and, on the live site, the
+   * current truth. Off means 404 rather than an empty index: the route is not
+   * mounted for a reader while `dated_export_archive` is off. `/data` reads
+   * that 404 as "no dated archive" and says so.
+   */
+  http.get("/api/data/archive", () => new HttpResponse(null, { status: 404 })),
   http.get("/api/data", () =>
     HttpResponse.json({
       generated_at: "2026-08-10T00:00:00.000Z",

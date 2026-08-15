@@ -1195,6 +1195,19 @@ export interface DataManifest {
   datasets: DataManifestDataset[];
 }
 
+/**
+ * `GET /api/data/archive` — the dated archive's index.
+ *
+ * Only the fields `/data` reads are declared. The endpoint 404s while
+ * `dated_export_archive` is off, so its *reachability* is the capability
+ * signal and `answerable_from` is the earliest date it can honestly answer
+ * for — null when the feature is on but no snapshot has been taken yet.
+ */
+export interface DataArchiveIndex {
+  answerable_from: string | null;
+  path: string;
+}
+
 // ---------------------------------------------------------------------------
 // The public calendar — `GET /api/calendar`
 // ---------------------------------------------------------------------------
