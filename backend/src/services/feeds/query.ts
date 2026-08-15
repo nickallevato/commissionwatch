@@ -1,6 +1,16 @@
 import type { Knex } from "knex";
 import { search, type SearchKind, type SearchResult } from "../search";
 import { EVENT_SEVERITIES, type EventSeverity } from "../events/emit";
+import {
+  PlaceQueryError,
+  parseNear,
+  parseRadius,
+  placesNear,
+  wherePlaceLinkPublic,
+  type Coordinate,
+  type PlaceNearResult,
+} from "../places";
+import { meetingContexts, type MeetingContext } from "./entries";
 import { searchUrn, type FeedCitation, type FeedEntry } from "./atom";
 
 /**
@@ -34,6 +44,27 @@ import { searchUrn, type FeedCitation, type FeedEntry } from "./atom";
  * empty column is not a match, and attributing a finding to a jurisdiction we
  * did not check would be the confident wrong answer this endpoint is supposed
  * to refuse.
+ *
+ * ## `near` — and where it did *not* compose
+ *
+ * `?near=45.6796,-111.0386&radius=500` is the same idea over geography: the URL
+ * is the subscription, no account, nothing stored about the subscriber, and the
+ * thing the subscriber would most rather not hand over — their address — stays
+ * in their own feed reader.
+ *
+ * It does **not** compose with the query path, and the honest thing is to say
+ * so rather than force it. `collectQueryEntries` is a thin wrapper over
+ * `services/search.ts`, which is full-text over six `search_vector` columns;
+ * "within 500 metres" is not a term and there is no text to give it. The
+ * corpora differ too: a query feed entry is a *record*, a near feed entry is a
+ * *link between a record and a coordinate*, and the link is what carries the
+ * citation and the precision a reader needs to judge the pin. So `near` is a
+ * third branch, and `q` with `near` is a 400 rather than a guess at what an
+ * intersection would mean.
+ *
+ * What is **not** duplicated is the wall. `wherePlaceLinkPublic` from
+ * `services/places.ts` is the only predicate here, exactly as `search()` is the
+ * only one on the query path.
  */
 
 /**
@@ -83,6 +114,8 @@ export interface RawFeedQuery {
   jurisdiction_id?: unknown;
   type?: unknown;
   severity?: unknown;
+  near?: unknown;
+  radius?: unknown;
 }
 
 export interface ParsedFeedQuery {
@@ -93,6 +126,10 @@ export interface ParsedFeedQuery {
   event_type: string | null;
   search_kind: SearchKind | null;
   min_severity: EventSeverity | null;
+  /** `?near=lat,lon` — the third feed. Mutually exclusive with `q`. */
+  near: Coordinate | null;
+  /** Metres. Only meaningful with `near`; defaulted to 500 when it is given. */
+  radius: number | null;
 }
 
 function single(value: unknown, name: string): string | null {
@@ -164,6 +201,39 @@ export function parseFeedQuery(raw: RawFeedQuery): ParsedFeedQuery {
     }
   }
 
+  const rawNear = single(raw.near, "near");
+  const rawRadius = single(raw.radius, "radius");
+  let near: Coordinate | null = null;
+  let radius: number | null = null;
+  if (rawNear !== null) {
+    if (q !== null) {
+      // Stated rather than silently resolved. See the "near" section of the file
+      // header: the two feeds are two corpora and there is no honest way to
+      // intersect them here.
+      throw new FeedQueryError("near and q are separate feeds. Give one or the other.");
+    }
+    if (type !== null) {
+      // `type` on a `q`-less feed is an `events.event_type`, and the near feed
+      // reads `place_links`, not `events`. Accepting it would apply nothing and
+      // return a plausible page the reader believes was filtered.
+      throw new FeedQueryError("type does not apply to the near feed.");
+    }
+    if (single(raw.severity, "severity") !== null) {
+      throw new FeedQueryError("severity does not apply to the near feed.");
+    }
+    try {
+      near = parseNear(rawNear);
+      radius = parseRadius(rawRadius ?? undefined);
+    } catch (err) {
+      // One error type crosses the boundary, so the route has one catch. The
+      // message is the parser's and never echoes the coordinate back.
+      if (err instanceof PlaceQueryError) throw new FeedQueryError(err.message);
+      throw err;
+    }
+  } else if (rawRadius !== null) {
+    throw new FeedQueryError("radius means nothing without near.");
+  }
+
   const severity = single(raw.severity, "severity");
   let minSeverity: EventSeverity | null = null;
   if (severity !== null) {
@@ -180,6 +250,8 @@ export function parseFeedQuery(raw: RawFeedQuery): ParsedFeedQuery {
     event_type: eventType,
     search_kind: searchKind,
     min_severity: minSeverity,
+    near,
+    radius,
   };
 }
 
@@ -358,4 +430,207 @@ export async function collectQueryEntries(
   });
 
   return results.map((result) => resultEntry(homeUrl, result, options.renderedAt));
+}
+
+/* ---------------------------------------------------------------------------
+   The near feed
+   --------------------------------------------------------------------------- */
+
+export interface NearFeedOptions {
+  lat: number;
+  lon: number;
+  /** Already bounded by `parseRadius`; `MAX_RADIUS_METRES` is the ceiling. */
+  metres: number;
+  jurisdiction_id: string | null;
+  limit: number;
+}
+
+interface NearLinkRow {
+  id: string;
+  place_id: string;
+  subject_kind: string;
+  subject_id: string;
+  relation: string;
+  artifact_sha256: string | null;
+  quote: string | null;
+  updated_at: Date;
+  source_url: string | null;
+}
+
+/** What a reader is told they are looking at. Frozen labels, not prose. */
+const SUBJECT_LABEL: Readonly<Record<string, string>> = Object.freeze({
+  agenda_item: "Agenda item",
+  meeting: "Meeting",
+  document: "Document",
+  finding: "Finding",
+});
+
+/**
+ * Distance, rounded to the nearest 10 metres.
+ *
+ * A pin whose source is a block-level geocode does not know where it is to the
+ * metre, and printing "437 m" next to it claims a resolution the record does
+ * not support — the same failure migration 094 built `precision` to prevent,
+ * committed in the summary text instead of on the map.
+ */
+function metresText(distance: number): string {
+  return `${Math.round(distance / 10) * 10} m`;
+}
+
+/**
+ * The meeting each link's subject belongs to, by link id.
+ *
+ * One query per kind, never one per row. A `finding` may legitimately have no
+ * meeting — `anomaly_flags.meeting_id` has been nullable since migration 027 —
+ * so its absence from this map is a fact about the flag, not a failed lookup.
+ */
+async function subjectMeetings(db: Knex, rows: NearLinkRow[]): Promise<Map<string, string>> {
+  const byLink = new Map<string, string>();
+  const idsOf = (kind: string): string[] => [
+    ...new Set(rows.filter((row) => row.subject_kind === kind).map((row) => row.subject_id)),
+  ];
+
+  const lookups: Array<{ kind: string; table: string; column: string }> = [
+    { kind: "agenda_item", table: "agenda_items", column: "meeting_id" },
+    { kind: "document", table: "meeting_documents", column: "meeting_id" },
+    { kind: "finding", table: "anomaly_flags", column: "meeting_id" },
+  ];
+
+  const meetingBySubject = new Map<string, string>();
+  for (const lookup of lookups) {
+    const ids = idsOf(lookup.kind);
+    if (ids.length === 0) continue;
+    const found = await db(lookup.table)
+      .whereIn("id", ids)
+      .select<Array<Record<string, unknown>>>("id", `${lookup.column} as meeting_id`);
+    for (const row of found) {
+      const meetingId = row.meeting_id;
+      if (typeof meetingId !== "string") continue;
+      meetingBySubject.set(`${lookup.kind}:${String(row.id)}`, meetingId);
+    }
+  }
+
+  for (const row of rows) {
+    const meetingId =
+      row.subject_kind === "meeting"
+        ? row.subject_id
+        : meetingBySubject.get(`${row.subject_kind}:${row.subject_id}`);
+    if (meetingId !== undefined) byLink.set(row.id, meetingId);
+  }
+  return byLink;
+}
+
+function meetingLabel(context: MeetingContext | undefined): string {
+  return context === undefined
+    ? "the published record"
+    : `${context.commission_name}, ${context.meeting_date}`;
+}
+
+/**
+ * Public place links within a radius, newest first.
+ *
+ * Two walls and no third phrasing of either. `placesNear` already refuses a
+ * place that has no public link, and `wherePlaceLinkPublic` is applied again
+ * here on the links themselves — not belt-and-braces, but because the first
+ * question is "may this coordinate be shown at all" and the second is "which of
+ * its links may be shown", and a place with one public and one held link must
+ * answer them differently.
+ *
+ * An entry whose subject cannot be resolved to a meeting is still emitted when
+ * it is a finding, which has no meeting to resolve; every other kind is dropped
+ * rather than rendered pointing at a page that does not exist. Same rule as
+ * `collectEventEntries`.
+ */
+export async function collectNearEntries(
+  db: Knex,
+  baseUrl: string,
+  options: NearFeedOptions,
+): Promise<FeedEntry[]> {
+  const homeUrl = baseUrl.replace(/\/+$/, "");
+
+  const places = await placesNear(db, {
+    lat: options.lat,
+    lon: options.lon,
+    metres: options.metres,
+    jurisdictionId: options.jurisdiction_id ?? undefined,
+    limit: options.limit,
+  });
+  if (places.length === 0) return [];
+
+  const byPlace = new Map<string, PlaceNearResult>(places.map((place) => [place.id, place]));
+
+  const linkQuery = db("place_links as pl")
+    // On the content address, not an FK — `place_links.artifact_sha256` stores a
+    // sha for the reason migration 072 does: a reissued document is different
+    // bytes and the citation must keep pointing at what it was read from.
+    .leftJoin("artifacts as a", "a.sha256", "pl.artifact_sha256")
+    .whereIn("pl.place_id", [...byPlace.keys()])
+    .orderBy([{ column: "pl.updated_at", order: "desc" }, { column: "pl.id", order: "desc" }])
+    .limit(options.limit)
+    .select<NearLinkRow[]>(
+      "pl.id",
+      "pl.place_id",
+      "pl.subject_kind",
+      "pl.subject_id",
+      "pl.relation",
+      "pl.artifact_sha256",
+      "pl.quote",
+      "pl.updated_at",
+      "a.source_url as source_url",
+    );
+
+  const rows = await wherePlaceLinkPublic(db, linkQuery, "pl");
+  if (rows.length === 0) return [];
+
+  const meetingByLink = await subjectMeetings(db, rows);
+  const meetings = await meetingContexts(db, [...new Set(meetingByLink.values())]);
+
+  const entries: FeedEntry[] = [];
+  for (const row of rows) {
+    const place = byPlace.get(row.place_id);
+    if (place === undefined) continue;
+
+    const meetingId = meetingByLink.get(row.id);
+    const context = meetingId === undefined ? undefined : meetings.get(meetingId);
+    // A finding is the only kind that may legitimately have no meeting; for
+    // anything else an unresolved subject means the row was deleted out from
+    // under the link, and an entry with a title and no record behind it is the
+    // one thing this feed must not emit. `/findings` is the list page — the
+    // frontend has no `/findings/:id`, checked in `App.tsx` by `entries.ts`.
+    if (row.subject_kind !== "finding" && context === undefined) continue;
+
+    const url = meetingId === undefined ? `${homeUrl}/findings` : `${homeUrl}/meetings/${meetingId}`;
+
+    // The quote is the claim; everything around it is scaffolding. A non-inferred
+    // link is guaranteed to carry one by `place_links_citation_check`, and an
+    // inferred link never reaches here.
+    const quote = row.quote === null ? "" : `“${row.quote}”`;
+    const provenance =
+      `Recorded at ${place.label}, about ${metresText(place.distance_metres)} away. ` +
+      `Location precision: ${place.precision}.`;
+
+    const citation: FeedCitation = {
+      label:
+        row.source_url === null
+          ? `The record this location was read from — ${meetingLabel(context)}`
+          : `The document this location was read from — ${meetingLabel(context)}`,
+      url: row.source_url ?? url,
+      sha256: row.artifact_sha256,
+    };
+
+    entries.push({
+      urn: searchUrn("place_link", row.id),
+      title: `${SUBJECT_LABEL[row.subject_kind] ?? "Record"} near ${place.label} — ${meetingLabel(context)}`,
+      summary: quote.length === 0 ? provenance : `${quote}\n\n${provenance}`,
+      url,
+      // The link's own timestamp, not the render time. Unlike a search result a
+      // place link has a real one, so a reader's client can sort and de-duplicate
+      // the way it does on the announcement feed.
+      updated: row.updated_at,
+      retraction: false,
+      citation,
+    });
+  }
+
+  return entries;
 }

@@ -8,7 +8,9 @@ import {
   type FeedEntry,
 } from "../services/feeds/atom";
 import { collectEventEntries } from "../services/feeds/entries";
+import { DEFAULT_RADIUS_METRES } from "../services/places";
 import {
+  collectNearEntries,
   collectQueryEntries,
   parseFeedQuery,
   requireJurisdictionName,
@@ -34,6 +36,10 @@ import {
  * With no query string this is the announcement feed: one entry per public
  * event. With `?q=` it is a query feed, and **the query is the subscription** —
  * see `services/feeds/query.ts`, including the rule that nothing here logs it.
+ * With `?near=lat,lon&radius=m` it is the near feed: the same subscription
+ * property applied to geography, so an address never leaves the reader's own
+ * client. `q` and `near` are refused together by the parser rather than
+ * intersected — the two feeds read different corpora and `query.ts` says why.
  *
  * `PUBLIC_BASE_URL` has no localhost fallback, exactly as in `routes/sitemap.ts`.
  * A feed full of `http://localhost:3000` links is not a degraded feed, it is a
@@ -75,6 +81,14 @@ function baseUrlOr503(res: Response): string | null {
 function describe(parsed: ParsedFeedQuery): { title: string; subtitle: string } {
   const filters: string[] = [];
   if (parsed.q !== null) filters.push(`matching “${parsed.q}”`);
+  if (parsed.near !== null) {
+    // The coordinate is echoed for the same reason the query is: somebody with
+    // a feed for home and one for their kid's school has to tell them apart in
+    // a sidebar. It is in their own URL and nothing here writes it down.
+    filters.push(
+      `within ${parsed.radius ?? DEFAULT_RADIUS_METRES} metres of ${parsed.near.lat}, ${parsed.near.lon}`,
+    );
+  }
   if (parsed.jurisdiction_id !== null) filters.push("in one jurisdiction");
   if (parsed.event_type !== null) filters.push(`of type ${parsed.event_type}`);
   if (parsed.search_kind !== null) filters.push(`of type ${parsed.search_kind}`);
@@ -143,22 +157,33 @@ async function serve(req: Request, res: Response, format: FeedFormat): Promise<v
         ? null
         : await requireJurisdictionName(db, parsed.jurisdiction_id);
 
-    entries =
-      parsed.q === null
-        ? await collectEventEntries(db, baseUrl, {
-            jurisdiction_id: parsed.jurisdiction_id,
-            event_type: parsed.event_type,
-            min_severity: parsed.min_severity,
-            limit: MAX_FEED_ENTRIES,
-          })
-        : await collectQueryEntries(db, baseUrl, {
-            q: parsed.q,
-            jurisdiction_name: jurisdictionName,
-            search_kind: parsed.search_kind,
-            min_severity: parsed.min_severity,
-            limit: MAX_FEED_ENTRIES,
-            renderedAt,
-          });
+    // Three feeds, one route. `near` is checked first because the parser has
+    // already refused it alongside `q`, so the branches cannot overlap.
+    if (parsed.near !== null) {
+      entries = await collectNearEntries(db, baseUrl, {
+        lat: parsed.near.lat,
+        lon: parsed.near.lon,
+        metres: parsed.radius ?? DEFAULT_RADIUS_METRES,
+        jurisdiction_id: parsed.jurisdiction_id,
+        limit: MAX_FEED_ENTRIES,
+      });
+    } else if (parsed.q === null) {
+      entries = await collectEventEntries(db, baseUrl, {
+        jurisdiction_id: parsed.jurisdiction_id,
+        event_type: parsed.event_type,
+        min_severity: parsed.min_severity,
+        limit: MAX_FEED_ENTRIES,
+      });
+    } else {
+      entries = await collectQueryEntries(db, baseUrl, {
+        q: parsed.q,
+        jurisdiction_name: jurisdictionName,
+        search_kind: parsed.search_kind,
+        min_severity: parsed.min_severity,
+        limit: MAX_FEED_ENTRIES,
+        renderedAt,
+      });
+    }
   } catch (err) {
     // Still a 400 rather than a 500: the reader asked for something that does
     // not exist, which is their request being wrong, not this route.

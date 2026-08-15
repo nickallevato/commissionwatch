@@ -132,7 +132,12 @@ function feedEventsQuery(db: Knex, filters: EventFeedFilters): Knex.QueryBuilder
  * Hydration — one query per subject kind, never one per row
  * ------------------------------------------------------------------------- */
 
-interface MeetingContext {
+/**
+ * Exported for the near feed in `query.ts`, which needs the same four columns to
+ * label an entry. A second copy of this join would be a second answer to "what
+ * do we call this meeting", and the two would drift.
+ */
+export interface MeetingContext {
   meeting_id: string;
   meeting_date: string;
   commission_name: string;
@@ -145,7 +150,10 @@ interface SourceRef {
   sha256: string | null;
 }
 
-async function meetingContexts(db: Knex, ids: string[]): Promise<Map<string, MeetingContext>> {
+export async function meetingContexts(
+  db: Knex,
+  ids: string[],
+): Promise<Map<string, MeetingContext>> {
   if (ids.length === 0) return new Map();
   const rows = await db("meetings as m")
     .join("commissions as c", "c.id", "m.commission_id")

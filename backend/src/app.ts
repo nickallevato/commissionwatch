@@ -21,6 +21,7 @@ import correctionsRouter from "./routes/corrections";
 import dataRouter from "./routes/data";
 import metricsRouter from "./routes/metrics";
 import discordRouter from "./routes/discord";
+import placesRouter from "./routes/places";
 import sourceRouter from "./routes/source";
 import transcriptsRouter from "./routes/transcripts";
 import feedRouter from "./routes/feed";
@@ -139,6 +140,11 @@ app.use("/sitemap.xml", sitemapRouter);
 app.use("/api/metrics", metricsRouter);
 // The other end of every citation: a stored document at its content address.
 // Public, and walled to documents on a published meeting.
+// Stage 1 of the map: points and radius, on earthdistance rather than PostGIS,
+// which is unavailable in the deployed image. Read-only — places are written by
+// extraction and by operator action, and a public write endpoint here would be
+// the defect that once left POST /api/anomalies unauthenticated.
+app.use("/api/places", placesRouter);
 app.use("/api/source", sourceRouter);
 // Transcript coverage: how much of the archive has captions, how much the
 // custodian published nothing for, and how much we could not fetch. Those are
