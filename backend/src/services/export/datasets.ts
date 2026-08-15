@@ -1,5 +1,5 @@
 import type { Knex } from "knex";
-import { whereFindingPublic, whereMeetingPublished } from "../publication";
+import { whereClaimPublic, whereFindingPublic, whereMeetingPublished } from "../publication";
 
 /**
  * The bulk export — what leaves this project as open data, and what does not.
@@ -419,6 +419,82 @@ const findings: ExportDataset = {
     ),
 };
 
+/**
+ * The sentences naming a person, and the only ones an operator has approved.
+ *
+ * This dataset was missing while `/api/data` described itself as the manifest of
+ * every bulk export. It is the newest and most consequential thing this project
+ * publishes — a claim quotes what a document says a named person did — so its
+ * absence made the open-data promise quietly false about exactly the material a
+ * reader would most want to check for themselves.
+ *
+ * `whereClaimPublic` is the wall, and it is three predicates rather than one:
+ * approved, not retracted, and its meeting published. A retraction never deletes
+ * the row and never blanks `rendered_text` — the tombstone on the meeting page
+ * is read from that preserved text — so a wall keyed on status alone would
+ * republish every retraction in bulk, silently, in a file nobody re-reads.
+ *
+ * `rendered_text` and `render_sha256` are exported because they are the point:
+ * the operator approved *those exact bytes*, and a reader who hashes the
+ * sentence can confirm they are reading what was approved rather than what this
+ * build's template would render today.
+ *
+ * `approved_by` is **not** exported, for the reason the public corrections log
+ * gives: the change and its reason are public, the operator's identity stops at
+ * the console, and the accountable editor is named on the Methodology page. A
+ * uuid in a CSV adds no accountability the masthead does not already carry.
+ */
+const claims: ExportDataset = {
+  name: "claims",
+  keyColumn: "minute_claims.id",
+  description:
+    "Sentences extracted from minutes about what a named official did, each approved by an operator and pinned to the exact bytes they approved. A held, rejected or retracted claim never appears here.",
+  provenance:
+    "`source_artifact_sha256` is the stored document the quote was read from, and `quote_offset` is where in that document it starts.",
+  columns: [
+    "id",
+    "meeting_id",
+    "member_id",
+    "subject_name",
+    "action",
+    "matter",
+    "quote",
+    "quote_offset",
+    "rendered_text",
+    "render_sha256",
+    "render_version",
+    "model",
+    "prompt_version",
+    "approved_at",
+    "source_artifact_sha256",
+  ],
+  build: (db) =>
+    whereClaimPublic(
+      db,
+      db("minute_claims").select(
+        "minute_claims.id",
+        "minute_claims.meeting_id",
+        "minute_claims.member_id",
+        "minute_claims.subject_name",
+        "minute_claims.action",
+        "minute_claims.matter",
+        "minute_claims.quote",
+        "minute_claims.quote_offset",
+        "minute_claims.rendered_text",
+        "minute_claims.render_sha256",
+        "minute_claims.render_version",
+        // The model and the prompt version travel with the row because a
+        // reader is entitled to know a machine drafted the sentence before a
+        // person approved it. Omitting them would make the claim read as
+        // transcription.
+        "minute_claims.model",
+        "minute_claims.prompt_version",
+        "minute_claims.approved_at",
+        "minute_claims.artifact_sha256 as source_artifact_sha256",
+      ),
+    ),
+};
+
 const artifactReferences: ExportDataset = {
   name: "artifact_references",
   keyColumn: "document_versions.id",
@@ -524,6 +600,7 @@ export const EXPORT_DATASETS: readonly ExportDataset[] = Object.freeze([
   members,
   votes,
   findings,
+  claims,
   artifactReferences,
   artifacts,
 ]);

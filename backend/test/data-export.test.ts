@@ -483,6 +483,113 @@ describe("the manifest lists the exports that are not tables", () => {
 });
 
 /**
+ * The claims dataset, which did not exist while `/api/data` called itself the
+ * manifest of every bulk export.
+ *
+ * A claim is the most consequential row this project publishes — it quotes what
+ * a document says a named person did — so it gets the wall asserted in all four
+ * of its failure modes, not the usual two. Approved on a published meeting is
+ * the only combination that leaves.
+ */
+describe("the claims export follows the claim wall", () => {
+  const CLAIM_PREFIX = "data-export-claims";
+  const CLAIM_SHA = "c".repeat(64);
+  let publishedMeeting = "";
+  let withheldMeeting = "";
+  let approvedId = "";
+  let heldId = "";
+  let onWithheldId = "";
+  let retractedId = "";
+  let counter = 0;
+
+  async function claim(
+    meetingId: string,
+    status: "held" | "approved",
+    retracted = false,
+  ): Promise<string> {
+    counter += 1;
+    // `minute_claims_dedupe` is unique over the extracted tuple, so two claims
+    // on one meeting must genuinely differ.
+    const pin =
+      status === "approved"
+        ? {
+            rendered_text: `Commissioner Fixture ${counter} voted no on Ordinance 4242.`,
+            render_sha256: "d".repeat(64),
+            render_version: "claim-render@1",
+            approved_by: "00000000-0000-4000-8000-000000000009",
+            approved_at: new Date(),
+            ...(retracted
+              ? { retracted_at: new Date(), retracted_reason: "Withdrawn for this test." }
+              : {}),
+          }
+        : {};
+    const [row] = await db("minute_claims")
+      .insert({
+        meeting_id: meetingId,
+        artifact_sha256: CLAIM_SHA,
+        subject_name: `Commissioner Fixture ${counter}`,
+        action: "voted_no",
+        matter: "Ordinance 4242",
+        quote: "Commissioner Fixture voted no.",
+        quote_offset: counter,
+        model: "test-model",
+        prompt_version: "data-export-test-v1",
+        status,
+        ...pin,
+      })
+      .returning<Array<{ id: string }>>("id");
+    return row.id;
+  }
+
+  before(async () => {
+    const fixture = await createSource(CLAIM_PREFIX);
+    publishedMeeting = await createMeeting(fixture.commissionId, { publishedAt: new Date() });
+    withheldMeeting = await createMeeting(fixture.commissionId, {});
+
+    approvedId = await claim(publishedMeeting, "approved");
+    heldId = await claim(publishedMeeting, "held");
+    retractedId = await claim(publishedMeeting, "approved", true);
+    onWithheldId = await claim(withheldMeeting, "approved");
+  });
+
+  after(async () => {
+    await db("minute_claims").whereIn("meeting_id", [publishedMeeting, withheldMeeting]).del();
+    await cleanupByPrefix(CLAIM_PREFIX);
+  });
+
+  it("exports an approved claim on a published meeting, and only that one", async () => {
+    const { rows } = await fetchJson("claims");
+    const ids = rows.map((row) => String(row.id));
+
+    assert.ok(ids.includes(approvedId), "an approved, published claim should be exported");
+    assert.ok(!ids.includes(heldId), "a held claim left in the bulk export");
+    assert.ok(!ids.includes(onWithheldId), "a claim on a withheld meeting left in the export");
+    assert.ok(
+      !ids.includes(retractedId),
+      "a retracted claim left in the export — the row keeps its rendered text, so a " +
+        "wall keyed on status alone republishes every retraction in bulk",
+    );
+  });
+
+  it("carries the pinned bytes and the source, and never the approver", async () => {
+    const { rows } = await fetchJson("claims");
+    const row = rows.find((entry) => entry.id === approvedId);
+    assert.ok(row, "the approved claim should be present");
+
+    // The point of the dataset: a reader can hash the sentence and confirm it is
+    // what an operator approved, not what this build's template renders today.
+    assert.equal(typeof row.rendered_text, "string");
+    assert.match(String(row.render_sha256), /^[0-9a-f]{64}$/);
+    assert.equal(row.source_artifact_sha256, CLAIM_SHA);
+    // A machine drafted it before a person approved it, and that travels.
+    assert.equal(row.model, "test-model");
+
+    assert.equal(row.approved_by, undefined, "the operator's identity left in a CSV");
+    assert.equal(row.status, undefined, "an internal column leaked into the export");
+  });
+});
+
+/**
  * File scope, not inside a describe.
  *
  * node:test runs a describe's `after` the moment that block's tests finish, so
