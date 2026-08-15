@@ -7,7 +7,7 @@ import {
   pruneDisallowedClaims,
   type ExtractionOutcome,
 } from "./extractor";
-import { failRun, finishRun, startRun } from "./runs";
+import { failRun, finishRun, startRun, summariseFailures } from "./runs";
 
 /**
  * Extract one meeting's minutes, end to end.
@@ -106,12 +106,37 @@ export async function runExtraction(
       outcome: result.outcome,
       stored: result.stored,
     });
+    reportUnread(runId, result.outcome);
     return { ...result, run_id: runId };
   } catch (error) {
     // Recorded before rethrowing. The caller may be a background task with
     // nobody listening — that is exactly the case this row exists for.
     await failRun(deps.db, runId, error);
     throw error;
+  }
+}
+
+/**
+ * Say out loud how much of the document went unread.
+ *
+ * The row carries this either way; the line exists because the console is where
+ * an operator watches a live extraction, and "9 chunks, 0 claims" was for
+ * months the only thing they saw. A refusal gets its own sentence: it is the
+ * one outcome that no retry, no larger ceiling and no waiting will change.
+ */
+function reportUnread(runId: string, outcome: ExtractionOutcome): void {
+  const summary = summariseFailures(outcome.chunks, outcome.failedChunks);
+  if (summary.failed === 0) return;
+  const breakdown = Object.entries(summary.by_reason)
+    .map(([reason, count]) => `${reason}=${count}`)
+    .sort()
+    .join(" ");
+  console.log(
+    `Extraction ${runId}: ${summary.failed}/${summary.chunks} chunks unread ` +
+      `(${Math.round(summary.unread_fraction * 100)}%) — ${breakdown}`,
+  );
+  if (summary.refused) {
+    console.log(`Extraction ${runId}: the model refused part of this document; it was not read.`);
   }
 }
 

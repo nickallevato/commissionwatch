@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import db from "../src/config/database";
 import {
   assertFreeModel,
+  diagnoseEmptyCompletion,
   DEFAULT_MODEL,
+  EmptyCompletionError,
   OpenRouterClient,
   OpenRouterError,
   readMessageText,
@@ -26,14 +28,19 @@ import {
   PROMPT_VERSION,
   REPLY_SAMPLE_LENGTH,
   type ExtractionOutcome,
+  type FailedChunk,
 } from "../src/services/extraction/extractor";
 import {
+  asReason,
   classifyExtraction,
+  CHUNK_FAILURE_REASONS,
   failRun,
   finishRun,
   isExtracting,
   listRuns,
   startRun,
+  summariseFailures,
+  toFailedChunk,
 } from "../src/services/extraction/runs";
 import { cleanupByPrefix, createMeeting, createSource } from "./helpers/pressroom";
 
@@ -74,6 +81,15 @@ Commissioner Emma Bode voted no on Resolution 5512.
 Commissioner Jennifer Madgic voted yes on Resolution 5512.
 Mayor Terry Cunningham was absent for the vote on Resolution 5512.
 `.trim();
+
+/** A failed chunk whose diagnosis is not the thing under test. */
+const failedChunk = (index: number, error: string): FailedChunk => ({
+  index,
+  error,
+  reason: "request-failed",
+  finish_reason: null,
+  native_finish_reason: null,
+});
 
 after(async () => {
   await cleanupByPrefix(PREFIX);
@@ -616,7 +632,7 @@ describe("an extraction that outlives its request", () => {
   it("calls a run partial when SOME chunks failed, even though claims were stored", () => {
     // Never "succeeded". Part of the document was never read, and a reviewer
     // looking at the claims list cannot see that from the claims alone.
-    const partial = outcome({ failedChunks: [{ index: 2, error: "429" }] });
+    const partial = outcome({ failedChunks: [failedChunk(2, "429")] });
     assert.equal(classifyExtraction(partial), "partial");
   });
 
@@ -627,9 +643,9 @@ describe("an extraction that outlives its request", () => {
     const dead = outcome({
       chunks: 3,
       failedChunks: [
-        { index: 0, error: "404 unavailable for free" },
-        { index: 1, error: "404 unavailable for free" },
-        { index: 2, error: "404 unavailable for free" },
+        failedChunk(0, "404 unavailable for free"),
+        failedChunk(1, "404 unavailable for free"),
+        failedChunk(2, "404 unavailable for free"),
       ],
     });
     assert.equal(classifyExtraction(dead), "failed");
@@ -681,7 +697,7 @@ describe("an extraction that outlives its request", () => {
       outcome: outcome({
         model: "openrouter/free",
         served_models: ["cohere/north-mini-code:free", "poolside/laguna-xs-2.1:free"],
-        failedChunks: [{ index: 1, error: "429" }],
+        failedChunks: [failedChunk(1, "429")],
       }),
       stored: 0,
     });
@@ -1010,6 +1026,377 @@ describe("a reply cut off by the token ceiling", () => {
     assert.equal(outcome.failedChunks.length, outcome.chunks);
     assert.match(outcome.failedChunks[0].error, /Truncated reply/);
     assert.notEqual(classifyExtraction(outcome), "succeeded");
+  });
+});
+
+describe("a 200 that carries no answer, and what it was hiding", () => {
+  /**
+   * The branch this suite exists for. Until 2026-08-14 every one of these threw
+   * the single string "OpenRouter returned no message content", not retryable,
+   * with no diagnosis — and roughly a fifth of every document went unread
+   * through it. The payload was carrying the answer the whole time in fields
+   * the reader discarded.
+   *
+   * Every case here is a stubbed payload. Nothing in this file calls the API.
+   */
+  const completion = (choice: Record<string, unknown>): unknown => ({
+    id: "gen-1",
+    model: "test/model:free",
+    choices: [choice],
+  });
+
+  it("names truncation when the ceiling was exhausted before any text", () => {
+    const diagnosis = diagnoseEmptyCompletion(
+      completion({ finish_reason: "length", message: { role: "assistant", content: "" } }),
+    );
+    assert.equal(diagnosis.reason, "truncated");
+    assert.equal(diagnosis.finishReason, "length");
+    // The one member of the taxonomy where another attempt could work — a
+    // smaller chunk would fit. Splitting is NOT built; this records that it is
+    // the fix, it does not perform one.
+    assert.equal(diagnosis.retryable, true);
+    assert.match(diagnosis.message, /ceiling was exhausted/);
+  });
+
+  it("reads a provider's own native reason when the normalised one is absent", () => {
+    // Google says MAX_TOKENS, Anthropic says max_tokens, and OpenRouter's
+    // normalisation of finish_reason is not guaranteed for every provider.
+    const diagnosis = diagnoseEmptyCompletion(
+      completion({ native_finish_reason: "MAX_TOKENS", message: { content: null } }),
+    );
+    assert.equal(diagnosis.reason, "truncated");
+    assert.equal(diagnosis.nativeFinishReason, "MAX_TOKENS");
+  });
+
+  it("names a refusal, and refuses to call it retryable", () => {
+    // Entirely plausible for minutes that name people in a dispute, and it
+    // needs a completely different answer from truncation: no ceiling, no wait
+    // and no retry produces an extraction from a model that declined.
+    const diagnosis = diagnoseEmptyCompletion(
+      completion({ finish_reason: "content_filter", message: { content: "" } }),
+    );
+    assert.equal(diagnosis.reason, "refused");
+    assert.equal(diagnosis.retryable, false);
+    assert.match(diagnosis.message, /content filter, not a size limit/);
+  });
+
+  it("tells 'nothing answered' apart from 'something answered with nothing'", () => {
+    assert.equal(diagnoseEmptyCompletion({ choices: [] }).reason, "no-choices");
+    assert.equal(diagnoseEmptyCompletion({ model: "x" }).reason, "no-choices");
+    assert.equal(
+      diagnoseEmptyCompletion(completion({ finish_reason: "stop", message: { content: "" } })).reason,
+      "empty-content",
+    );
+  });
+
+  it("reads the error body out of an HTTP 200", () => {
+    // OpenRouter answers 200 with an error object for several upstream
+    // failures, and that is exactly the shape that reached the old branch —
+    // where the upstream's own explanation was thrown away unread.
+    const diagnosis = diagnoseEmptyCompletion({
+      error: { message: "Provider returned error", code: 429 },
+    });
+    assert.equal(diagnosis.reason, "upstream-error");
+    assert.equal(diagnosis.upstreamCode, 429);
+    assert.equal(diagnosis.upstreamError, "Provider returned error");
+    // The upstream says whether waiting helps.
+    assert.equal(diagnosis.retryable, true);
+  });
+
+  it("does not call a permanent upstream error retryable", () => {
+    // A 404 for a model that stopped being free is not transient, and llama-3.3
+    // did precisely this mid-project.
+    const diagnosis = diagnoseEmptyCompletion({
+      error: { message: "No endpoints found for meta-llama/llama-3.3-70b-instruct:free", code: "404" },
+    });
+    assert.equal(diagnosis.reason, "upstream-error");
+    assert.equal(diagnosis.upstreamCode, 404);
+    assert.equal(diagnosis.retryable, false);
+  });
+
+  it("prefers the error body over the missing choices it comes with", () => {
+    // A 200-with-error usually carries no choices at all. Reporting that as
+    // "no choices" would bury the sentence saying why.
+    const diagnosis = diagnoseEmptyCompletion({
+      choices: [],
+      error: { message: "Rate limit exceeded", code: 429 },
+    });
+    assert.equal(diagnosis.reason, "upstream-error");
+  });
+
+  it("names a model that spent its budget deliberating", () => {
+    // The measured failure that pinned this project to a non-reasoning model:
+    // the whole budget goes to the reasoning channel and `content` is empty,
+    // even though the request sets reasoning.enabled false.
+    const diagnosis = diagnoseEmptyCompletion(
+      completion({
+        finish_reason: "stop",
+        message: { content: "", reasoning: "Let me work through the minutes..." },
+      }),
+    );
+    assert.equal(diagnosis.reason, "reasoning-only");
+    assert.equal(diagnosis.retryable, false);
+  });
+
+  it("classifies a malformed payload instead of throwing a TypeError at it", () => {
+    // Every field may be absent. A reader that asserts the shape turns a bad
+    // response into a stack trace with no diagnosis in it at all.
+    for (const payload of [
+      "not an object",
+      null,
+      42,
+      [],
+      { choices: "no" },
+      { choices: [null] },
+      { choices: [42] },
+      { choices: [{}] },
+      { choices: [{ message: null }] },
+      { error: "a string, not an object" },
+    ]) {
+      const diagnosis = diagnoseEmptyCompletion(payload);
+      assert.ok(diagnosis.reason.length > 0, JSON.stringify(payload));
+      assert.ok(diagnosis.message.length > 0, JSON.stringify(payload));
+    }
+    assert.equal(diagnoseEmptyCompletion("not an object").reason, "malformed-payload");
+    assert.equal(diagnoseEmptyCompletion({ choices: [42] }).reason, "malformed-payload");
+    // An array IS an object to `typeof`, and it is not a completion.
+    assert.equal(diagnoseEmptyCompletion([]).reason, "malformed-payload");
+  });
+
+  it("throws the diagnosis out of the client, not a bare sentence", async () => {
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            model: "test/model:free",
+            choices: [{ finish_reason: "content_filter", message: { content: "" } }],
+          }),
+          { status: 200 },
+        )) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    await assert.rejects(
+      () => client.complete({ system: "s", user: "u" }),
+      (error: unknown) => {
+        assert.ok(error instanceof EmptyCompletionError);
+        assert.ok(error instanceof OpenRouterError, "still an OpenRouterError to older callers");
+        assert.equal(error.diagnosis.reason, "refused");
+        assert.equal(error.retryable, false);
+        assert.equal(error.status, 200);
+        return true;
+      },
+    );
+  });
+
+  it("treats a whitespace-only reply as no content, and says why", async () => {
+    // It used to pass through as a string and fail one layer down as "the reply
+    // contained no JSON array", losing the finish_reason that says whether it
+    // was cut off or refused. Same silence, further from the evidence.
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({ choices: [{ finish_reason: "length", message: { content: "   \n" } }] }),
+          { status: 200 },
+        )) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    await assert.rejects(
+      () => client.complete({ system: "s", user: "u" }),
+      (error: unknown) => {
+        assert.ok(error instanceof EmptyCompletionError);
+        assert.equal(error.diagnosis.reason, "truncated");
+        return true;
+      },
+    );
+  });
+
+  it("carries the diagnosis into failed_chunks structurally, not as prose", async () => {
+    // The whole point. `failed_chunks` has to be tallyable without parsing
+    // English out of an error string.
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "content_filter",
+                native_finish_reason: "SAFETY",
+                message: { content: "" },
+              },
+            ],
+          }),
+          { status: 200 },
+        )) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    assert.equal(outcome.failedChunks.length, outcome.chunks);
+    assert.equal(outcome.failedChunks[0].reason, "refused");
+    assert.equal(outcome.failedChunks[0].finish_reason, "content_filter");
+    assert.equal(outcome.failedChunks[0].native_finish_reason, "SAFETY");
+
+    const summary = summariseFailures(outcome.chunks, outcome.failedChunks);
+    assert.equal(summary.unread_fraction, 1);
+    assert.equal(summary.refused, true);
+    assert.equal(summary.by_reason.refused, outcome.chunks);
+    // Unchanged by the taxonomy: a document where every chunk went unread is
+    // `failed`, whatever the reason. Refusal is visible in the summary, not in
+    // a fifth status the CHECK constraint does not permit.
+    assert.equal(classifyExtraction(outcome), "failed");
+  });
+
+  it("still labels a chunk the call never reached as request-failed", async () => {
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: "test/model:free",
+      maxRetries: 0,
+      sleep: async () => {},
+      fetchImpl: (async () => new Response("rate limited", { status: 429 })) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    assert.equal(outcome.failedChunks[0].reason, "request-failed");
+    assert.equal(outcome.failedChunks[0].finish_reason, null);
+  });
+});
+
+describe("counting what went unread, from the row alone", () => {
+  it("knows every reason it can be asked to read back", () => {
+    // `asReason` narrows a jsonb string with a switch; this walks the typed
+    // table of reasons through it so the two lists cannot drift apart.
+    for (const reason of Object.keys(CHUNK_FAILURE_REASONS)) {
+      assert.equal(asReason(reason), reason, reason);
+    }
+    assert.equal(asReason("invented-by-a-future-version"), null);
+    assert.equal(asReason(7), null);
+  });
+
+  it("reads a row written before the taxonomy existed without inventing a reason", () => {
+    // Rows already in production carry `{ index, error }` and nothing else.
+    // They are `unclassified`, which is the truth about them — and is why
+    // widening this jsonb column needed no migration.
+    const legacy = toFailedChunk({ index: 3, error: "OpenRouter returned no message content" });
+    assert.ok(legacy !== null);
+    assert.equal(legacy?.reason, null);
+    assert.equal(legacy?.finish_reason, null);
+
+    const summary = summariseFailures(9, legacy === null ? [] : [legacy]);
+    assert.equal(summary.by_reason.unclassified, 1);
+    assert.equal(summary.refused, false);
+  });
+
+  it("drops an entry that is not a failed chunk at all", () => {
+    // The column is jsonb: what comes back is whatever was written, and
+    // asserting the shape rather than checking it is how a cast becomes a
+    // runtime bug typechecking cannot catch.
+    assert.equal(toFailedChunk(null), null);
+    assert.equal(toFailedChunk("429"), null);
+    assert.equal(toFailedChunk({ error: "no index" }), null);
+    assert.equal(toFailedChunk({ index: 1 }), null);
+  });
+
+  it("answers 'what fraction went unread, and why' without a log", () => {
+    const summary = summariseFailures(9, [
+      { index: 0, error: "e", reason: "truncated", finish_reason: "length", native_finish_reason: null },
+      { index: 1, error: "e", reason: "truncated", finish_reason: "length", native_finish_reason: null },
+      { index: 2, error: "e", reason: "refused", finish_reason: "content_filter", native_finish_reason: null },
+    ]);
+    assert.equal(summary.failed, 3);
+    assert.equal(summary.chunks, 9);
+    assert.equal(summary.unread_fraction, 0.333);
+    assert.deepEqual(summary.by_reason, { truncated: 2, refused: 1 });
+    assert.equal(summary.refused, true);
+  });
+
+  it("does not divide by a chunk count of zero", () => {
+    assert.equal(summariseFailures(0, []).unread_fraction, 0);
+  });
+
+  it("round-trips the diagnosis through the database and back out", async () => {
+    const { commissionId } = await createSource(`${PREFIX}-diagnosis`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-06-08" });
+
+    const runId = await startRun(db, meetingId);
+    await finishRun(db, runId, {
+      artifactSha256: "b".repeat(64),
+      outcome: {
+        model: "test/model:free",
+        served_models: ["test/model:free"],
+        prompt_version: PROMPT_VERSION,
+        chunks: 4,
+        proposed: 0,
+        result: { verified: [], rejected: [] },
+        verified: [],
+        failedChunks: [
+          {
+            index: 1,
+            error: "The model refused this chunk (finish_reason 'content_filter').",
+            reason: "refused",
+            finish_reason: "content_filter",
+            native_finish_reason: "SAFETY",
+          },
+          {
+            index: 2,
+            error: "The model emitted no text and stopped on finish_reason 'length'.",
+            reason: "truncated",
+            finish_reason: "length",
+            native_finish_reason: null,
+          },
+        ],
+      },
+      stored: 0,
+    });
+
+    const [run] = await listRuns(db, meetingId);
+    assert.equal(run.failed_chunks.length, 2);
+    assert.equal(run.failed_chunks[0].reason, "refused");
+    assert.equal(run.failed_chunks[0].native_finish_reason, "SAFETY");
+    assert.equal(run.failed_chunks[1].reason, "truncated");
+    assert.equal(run.failed_chunks[1].native_finish_reason, null);
+    // Two of four chunks unread, and the row says which fault each was.
+    assert.equal(run.failure_summary.unread_fraction, 0.5);
+    assert.deepEqual(run.failure_summary.by_reason, { refused: 1, truncated: 1 });
+    // "This document could not be read by the model" is now a statable fact.
+    assert.equal(run.failure_summary.refused, true);
+    // Some chunks failed, not all: still partial, exactly as before.
+    assert.equal(run.status, "partial");
+  });
+
+  it("summarises a run that never failed a chunk as nothing unread", async () => {
+    const { commissionId } = await createSource(`${PREFIX}-clean`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-06-09" });
+
+    const runId = await startRun(db, meetingId);
+    await finishRun(db, runId, {
+      artifactSha256: "c".repeat(64),
+      outcome: {
+        model: "test/model:free",
+        served_models: ["test/model:free"],
+        prompt_version: PROMPT_VERSION,
+        chunks: 3,
+        proposed: 0,
+        result: { verified: [], rejected: [] },
+        verified: [],
+        failedChunks: [],
+      },
+      stored: 0,
+    });
+
+    const [run] = await listRuns(db, meetingId);
+    assert.equal(run.status, "succeeded");
+    assert.equal(run.failure_summary.unread_fraction, 0);
+    assert.deepEqual(run.failure_summary.by_reason, {});
+    assert.equal(run.failure_summary.refused, false);
   });
 });
 

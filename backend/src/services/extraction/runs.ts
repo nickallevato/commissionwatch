@@ -1,5 +1,5 @@
 import type { Knex } from "knex";
-import type { ExtractionOutcome } from "./extractor";
+import type { ChunkFailureReason, ExtractionOutcome, FailedChunk } from "./extractor";
 
 /**
  * Reading and writing `extraction_runs`.
@@ -13,6 +13,32 @@ import type { ExtractionOutcome } from "./extractor";
 
 export type ExtractionRunStatus = "running" | "succeeded" | "partial" | "failed";
 
+/**
+ * How much of the document went unread, and why — from the row alone.
+ *
+ * Derived on read rather than stored, so it is right for rows written before
+ * the taxonomy existed as well as after it. The question an operator actually
+ * has is "what fraction of this document did we not read", and answering it
+ * used to require opening a log and counting error strings by eye.
+ */
+export interface ExtractionFailureSummary {
+  chunks: number;
+  failed: number;
+  /** failed / chunks, to three decimals. 0 when the run had no chunks. */
+  unread_fraction: number;
+  /** A tally, not prose. `unclassified` is a row written before the taxonomy. */
+  by_reason: Partial<Record<ChunkFailureReason | "unclassified", number>>;
+  /**
+   * At least one chunk was refused by the model's content filter.
+   *
+   * Surfaced on its own because it is a different statement from "some of this
+   * failed": "this document could not be read by the model" is a fact the
+   * status page can state, and it is not fixed by waiting, retrying, or a
+   * larger token ceiling.
+   */
+  refused: boolean;
+}
+
 export interface ExtractionRun {
   id: string;
   meeting_id: string;
@@ -25,11 +51,73 @@ export interface ExtractionRun {
   verified: number;
   stored: number;
   rejected: Array<{ reason: string; detail: string }>;
-  failed_chunks: Array<{ index: number; error: string }>;
+  failed_chunks: FailedChunk[];
   status: ExtractionRunStatus;
   error: string | null;
   started_at: string;
   finished_at: string | null;
+  /** Computed from `chunks` and `failed_chunks`. Never stored. */
+  failure_summary: ExtractionFailureSummary;
+}
+
+/**
+ * Every failure reason, as data.
+ *
+ * Keyed by the union, so adding a member to `ChunkFailureReason` and forgetting
+ * it here fails to compile. `asReason` below has to list them a second time to
+ * narrow a `jsonb` string without a cast; the test walks these keys through it,
+ * which is what keeps the two lists from drifting.
+ */
+export const CHUNK_FAILURE_REASONS: Record<ChunkFailureReason, true> = {
+  "upstream-error": true,
+  truncated: true,
+  refused: true,
+  "reasoning-only": true,
+  "no-choices": true,
+  "malformed-payload": true,
+  "empty-content": true,
+  "request-failed": true,
+  "unreadable-reply": true,
+  "truncated-reply": true,
+};
+
+/**
+ * A stored status.
+ *
+ * The column has a CHECK constraint listing exactly these four, so anything
+ * else means the row was written by something that is not this application —
+ * and `failed` is the honest reading of a row we cannot interpret. This
+ * replaced a bare cast, which asserted the constraint held rather than checking.
+ */
+function toStatus(value: unknown): ExtractionRunStatus {
+  switch (value) {
+    case "running":
+    case "succeeded":
+    case "partial":
+    case "failed":
+      return value;
+    default:
+      return "failed";
+  }
+}
+
+/** A stored reason string, or null for anything this version does not know. */
+export function asReason(value: unknown): ChunkFailureReason | null {
+  switch (value) {
+    case "upstream-error":
+    case "truncated":
+    case "refused":
+    case "reasoning-only":
+    case "no-choices":
+    case "malformed-payload":
+    case "empty-content":
+    case "request-failed":
+    case "unreadable-reply":
+    case "truncated-reply":
+      return value;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -40,6 +128,14 @@ export interface ExtractionRun {
  * the claims list has no way to see that from the claims alone. If EVERY chunk
  * failed there is no evidence the document was read at all, so that is
  * `failed`, not `partial`.
+ *
+ * The diagnosis taxonomy did not change this rule, deliberately. A refusal is a
+ * chunk that went unread exactly like a truncation or a 429 does, and the four
+ * statuses are constrained by a CHECK in migration 073 and rendered by an
+ * operator console — a fifth value would be a schema and a UI change carrying
+ * information the row already holds. What distinguishes a refusal is
+ * `failure_summary.refused` and the `by_reason` tally, which is where "this
+ * document could not be read by the model" is stated.
  */
 export function classifyExtraction(outcome: ExtractionOutcome): ExtractionRunStatus {
   const failed = outcome.failedChunks.length;
@@ -95,22 +191,82 @@ export async function failRun(db: Knex, runId: string, error: unknown): Promise<
     .update({ status: "failed", error: message, finished_at: db.fn.now() });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asText(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+/**
+ * One stored failure, validated rather than asserted.
+ *
+ * `failed_chunks` is `jsonb`: what comes back is whatever some earlier version
+ * of this code wrote, and rows written before the diagnosis existed carry only
+ * `{ index, error }`. Those read back with nulls in the new fields and are
+ * tallied as `unclassified` — which is the truth about them, and is why
+ * widening this column needed no migration.
+ */
+export function toFailedChunk(value: unknown): FailedChunk | null {
+  if (!isRecord(value)) return null;
+  const index = typeof value.index === "number" && Number.isFinite(value.index) ? value.index : null;
+  const error = typeof value.error === "string" ? value.error : null;
+  if (index === null || error === null) return null;
+  return {
+    index,
+    error,
+    reason: asReason(value.reason),
+    finish_reason: asText(value.finish_reason),
+    native_finish_reason: asText(value.native_finish_reason),
+  };
+}
+
+function toRejected(value: unknown): { reason: string; detail: string } | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.reason !== "string") return null;
+  return { reason: value.reason, detail: typeof value.detail === "string" ? value.detail : "" };
+}
+
+/** The unread fraction and its breakdown, from the row's own columns. */
+export function summariseFailures(chunks: number, failed: FailedChunk[]): ExtractionFailureSummary {
+  const by_reason: ExtractionFailureSummary["by_reason"] = {};
+  for (const chunk of failed) {
+    const key = chunk.reason ?? "unclassified";
+    by_reason[key] = (by_reason[key] ?? 0) + 1;
+  }
+  return {
+    chunks,
+    failed: failed.length,
+    unread_fraction: chunks > 0 ? Math.round((failed.length / chunks) * 1000) / 1000 : 0,
+    by_reason,
+    refused: failed.some((chunk) => chunk.reason === "refused"),
+  };
+}
+
 function toRun(row: Record<string, unknown>): ExtractionRun {
-  const asArray = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+  const asArray = <T>(value: unknown, read: (entry: unknown) => T | null): T[] =>
+    Array.isArray(value)
+      ? value.map(read).filter((entry): entry is T => entry !== null)
+      : [];
+  const chunks = Number(row.chunks ?? 0);
+  const failed_chunks = asArray(row.failed_chunks, toFailedChunk);
   return {
     id: String(row.id),
     meeting_id: String(row.meeting_id),
     artifact_sha256: typeof row.artifact_sha256 === "string" ? row.artifact_sha256 : null,
     model: typeof row.model === "string" ? row.model : null,
-    served_models: asArray<string>(row.served_models),
+    served_models: asArray(row.served_models, (entry) =>
+      typeof entry === "string" ? entry : null,
+    ),
     prompt_version: typeof row.prompt_version === "string" ? row.prompt_version : null,
-    chunks: Number(row.chunks ?? 0),
+    chunks,
     proposed: Number(row.proposed ?? 0),
     verified: Number(row.verified ?? 0),
     stored: Number(row.stored ?? 0),
-    rejected: asArray(row.rejected),
-    failed_chunks: asArray(row.failed_chunks),
-    status: String(row.status) as ExtractionRunStatus,
+    rejected: asArray(row.rejected, toRejected),
+    failed_chunks,
+    status: toStatus(row.status),
     error: typeof row.error === "string" ? row.error : null,
     started_at: row.started_at instanceof Date ? row.started_at.toISOString() : String(row.started_at),
     finished_at:
@@ -119,6 +275,7 @@ function toRun(row: Record<string, unknown>): ExtractionRun {
         : typeof row.finished_at === "string"
           ? row.finished_at
           : null,
+    failure_summary: summariseFailures(chunks, failed_chunks),
   };
 }
 

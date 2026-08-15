@@ -1,5 +1,11 @@
 import type { Knex } from "knex";
-import { OpenRouterClient, OpenRouterError, type CompletionResult } from "./openrouter";
+import {
+  EmptyCompletionError,
+  OpenRouterClient,
+  OpenRouterError,
+  type CompletionResult,
+  type EmptyCompletionReason,
+} from "./openrouter";
 import {
   CLAIM_ACTIONS,
   namesAnOfficial,
@@ -69,6 +75,40 @@ export interface ExtractionInput {
 /** A verified claim plus the model that actually produced it. */
 export type AttributedClaim = VerifiedClaim & { model: string };
 
+/**
+ * Every way a chunk can go unread, in one closed set.
+ *
+ * The empty-completion members come from the model's own reply and are
+ * classified in `openrouter.ts`; the three below are ours:
+ *
+ *   request-failed    the call never returned a reply — throttled, unreachable,
+ *                     no key, a model that stopped being free.
+ *   unreadable-reply  a reply arrived and contained no readable claim array.
+ *   truncated-reply   a reply arrived, complete claims were salvaged from it,
+ *                     and the tail of the chunk was still never read.
+ *
+ * Closed because the point of the exercise is a tally. "A fifth of every
+ * document goes unread" was only ever knowable by reading logs, and prose
+ * error strings cannot be counted.
+ */
+export type ChunkFailureReason =
+  | EmptyCompletionReason
+  | "request-failed"
+  | "unreadable-reply"
+  | "truncated-reply";
+
+export interface FailedChunk {
+  index: number;
+  /** Verbatim, as before. A summarised error is an error nobody can act on. */
+  error: string;
+  /** Null only for rows written before this taxonomy existed. */
+  reason: ChunkFailureReason | null;
+  /** `choices[0].finish_reason`, when the failure came with one. */
+  finish_reason: string | null;
+  /** `choices[0].native_finish_reason` — provider-specific, often more precise. */
+  native_finish_reason: string | null;
+}
+
 export interface ExtractionOutcome {
   /** The model that was REQUESTED. May be a router id, which serves others. */
   model: string;
@@ -82,7 +122,7 @@ export interface ExtractionOutcome {
   /** The survivors, each carrying its own model. What gets persisted. */
   verified: AttributedClaim[];
   /** Chunks whose call failed. Reported, never treated as "no claims here". */
-  failedChunks: Array<{ index: number; error: string }>;
+  failedChunks: FailedChunk[];
 }
 
 const DEFAULT_CHUNK_SIZE = 6000;
@@ -248,7 +288,7 @@ export async function extractClaims(
   input: ExtractionInput,
 ): Promise<ExtractionOutcome> {
   const chunks = chunkText(input.documentText, input.chunkSize);
-  const failedChunks: Array<{ index: number; error: string }> = [];
+  const failedChunks: FailedChunk[] = [];
   const verified: AttributedClaim[] = [];
   const rejected: VerificationResult["rejected"] = [];
   const servedModels = new Set<string>();
@@ -264,9 +304,27 @@ export async function extractClaims(
     } catch (error) {
       // A rate-limited chunk is not an empty chunk. Recording the difference is
       // what stops a throttled run from reading as "this meeting had no votes".
+      //
+      // An empty completion carries its own diagnosis, and it is kept
+      // structurally rather than embedded in the message: "the model refused
+      // this document" and "the ceiling was too small" both used to arrive here
+      // as the single string "OpenRouter returned no message content".
+      if (error instanceof EmptyCompletionError) {
+        failedChunks.push({
+          index,
+          error: error.message,
+          reason: error.diagnosis.reason,
+          finish_reason: error.diagnosis.finishReason,
+          native_finish_reason: error.diagnosis.nativeFinishReason,
+        });
+        continue;
+      }
       failedChunks.push({
         index,
         error: error instanceof OpenRouterError ? error.message : String(error),
+        reason: "request-failed",
+        finish_reason: null,
+        native_finish_reason: null,
       });
       continue;
     }
@@ -281,6 +339,9 @@ export async function extractClaims(
       failedChunks.push({
         index,
         error: `Unreadable reply from ${reply.servedModel}: ${read.reason}. First ${REPLY_SAMPLE_LENGTH} characters: ${read.sample}`,
+        reason: "unreadable-reply",
+        finish_reason: null,
+        native_finish_reason: null,
       });
       continue;
     }
@@ -294,6 +355,9 @@ export async function extractClaims(
         error:
           `Truncated reply from ${reply.servedModel}: recovered ${read.claims.length} complete ` +
           "claim(s) before the cut, but the rest of this chunk was not read. Raise the token ceiling.",
+        reason: "truncated-reply",
+        finish_reason: null,
+        native_finish_reason: null,
       });
     }
     const claims = read.claims;

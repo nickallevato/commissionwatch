@@ -27,6 +27,76 @@ export class OpenRouterError extends Error {
   }
 }
 
+/**
+ * Why a 200 response carried no usable assistant text.
+ *
+ * Added because roughly a fifth of every document was going unread through a
+ * single branch that threw "OpenRouter returned no message content" — a string
+ * that says nothing, is not retryable, and lands in `extraction_runs.failed_chunks`
+ * where nobody can tally it. The completions payload carries the answer in
+ * fields the old code discarded, and these are the answers it can carry.
+ *
+ * A closed union rather than free-form text so the counts can be added up
+ * without parsing prose. "What fraction of this document went unread, and why"
+ * has to be answerable from the run row.
+ *
+ *   upstream-error     HTTP 200 with a top-level `error` object. OpenRouter
+ *                      does this for several upstream failures, and it is
+ *                      exactly the shape that reached the old branch.
+ *   truncated          finish_reason "length" with no text: the ceiling was
+ *                      exhausted before the model wrote anything.
+ *   refused            finish_reason "content_filter". For minutes naming
+ *                      people in a dispute this is entirely plausible, and it
+ *                      needs a completely different answer from truncation.
+ *   reasoning-only     the model wrote to `message.reasoning` and left
+ *                      `content` empty, despite reasoning being disabled in
+ *                      the request. Same visible symptom, different cause.
+ *   no-choices         `choices` absent, not an array, or empty. Nothing
+ *                      answered at all, as opposed to something answering
+ *                      with nothing.
+ *   malformed-payload  the body is not the documented shape. Classified
+ *                      rather than thrown as a TypeError.
+ *   empty-content      a choice, finishing normally, with no text in it.
+ */
+export type EmptyCompletionReason =
+  | "upstream-error"
+  | "truncated"
+  | "refused"
+  | "reasoning-only"
+  | "no-choices"
+  | "malformed-payload"
+  | "empty-content";
+
+export interface EmptyCompletionDiagnosis {
+  reason: EmptyCompletionReason;
+  /** `choices[0].finish_reason` as sent, or null if absent or not a string. */
+  finishReason: string | null;
+  /** `choices[0].native_finish_reason` — provider-specific, often more precise. */
+  nativeFinishReason: string | null;
+  /** The top-level error's message and code, when the body carried one. */
+  upstreamError: string | null;
+  upstreamCode: number | null;
+  retryable: boolean;
+  /** One line naming what was actually seen. Becomes the thrown message. */
+  message: string;
+}
+
+/**
+ * An empty completion, carrying its diagnosis.
+ *
+ * A subclass so the extractor can widen `failed_chunks` structurally instead of
+ * regex-ing the message text back apart.
+ */
+export class EmptyCompletionError extends OpenRouterError {
+  constructor(
+    readonly diagnosis: EmptyCompletionDiagnosis,
+    status: number | null,
+  ) {
+    super(diagnosis.message, status, diagnosis.retryable);
+    this.name = "EmptyCompletionError";
+  }
+}
+
 /** The suffix OpenRouter puts on its no-cost models. */
 export const FREE_SUFFIX = ":free";
 
@@ -275,8 +345,12 @@ export class OpenRouterClient {
 
       const payload: unknown = await response.json();
       const text = readMessageText(payload);
-      if (text === null) {
-        throw new OpenRouterError("OpenRouter returned no message content", response.status, false);
+      // Whitespace-only counts as no content. It used to pass through as a
+      // string, fail in `readClaims` as "the reply contained no JSON array",
+      // and lose the finish_reason that says whether it was cut off or refused
+      // — the same silence one layer further down.
+      if (text === null || text.trim() === "") {
+        throw new EmptyCompletionError(diagnoseEmptyCompletion(payload), response.status);
       }
       return { text, servedModel: readServedModel(payload) ?? this.model };
     }
@@ -301,6 +375,161 @@ export function readServedModel(payload: unknown): string | null {
   if (typeof model !== "string") return null;
   const trimmed = model.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+/** A non-empty trimmed string, or null. Every field of the payload may be absent. */
+function readString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/** An HTTP-ish code out of an upstream error body, which sends it as either type. */
+function readCode(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
+ * The finish reasons providers actually send for a cut-off reply.
+ *
+ * OpenAI's own value is `length`; Google sends `MAX_TOKENS`, Anthropic
+ * `max_tokens`, and OpenRouter passes those through in
+ * `native_finish_reason` while normalising `finish_reason`. Matched on both
+ * because the normalisation is not guaranteed for every provider.
+ */
+function meansTruncated(finish: string | null, native: string | null): boolean {
+  const values = [finish, native].filter((v): v is string => v !== null).map((v) => v.toLowerCase());
+  return values.some((v) => v === "length" || v.includes("max_token") || v.includes("truncat"));
+}
+
+/** Ditto for a refusal: `content_filter` normalised, `SAFETY`/`BLOCKLIST` native. */
+function meansRefused(finish: string | null, native: string | null): boolean {
+  const values = [finish, native].filter((v): v is string => v !== null).map((v) => v.toLowerCase());
+  return values.some(
+    (v) => v.includes("content_filter") || v.includes("safety") || v.includes("blocklist"),
+  );
+}
+
+/**
+ * Name what went wrong, from fields the old code threw away.
+ *
+ * Order matters. The top-level `error` is read first because a 200-with-error
+ * body usually carries no `choices` at all, and reporting that as "no choices"
+ * would hide the upstream message that says why.
+ *
+ * Retryability is decided here rather than left blanket-false, because at least
+ * one member of the taxonomy is genuinely worth another attempt and one is
+ * genuinely not. **Nothing in this file acts on the flag yet** — no caller reads
+ * `OpenRouterError.retryable` today — so this classifies without changing what
+ * happens. Splitting a truncated chunk into smaller ones is the obvious fix for
+ * `truncated` and it is NOT built; the flag records that a retry could work, it
+ * does not perform one.
+ */
+export function diagnoseEmptyCompletion(payload: unknown): EmptyCompletionDiagnosis {
+  const build = (
+    reason: EmptyCompletionReason,
+    message: string,
+    retryable: boolean,
+    fields: Partial<EmptyCompletionDiagnosis> = {},
+  ): EmptyCompletionDiagnosis => ({
+    reason,
+    finishReason: null,
+    nativeFinishReason: null,
+    upstreamError: null,
+    upstreamCode: null,
+    ...fields,
+    message,
+    retryable,
+  });
+
+  if (isRecord(payload) && isRecord(payload.error)) {
+    const upstreamError = readString(payload.error.message) ?? "no message given";
+    const upstreamCode = readCode(payload.error.code);
+    // The upstream says whether waiting helps: 429 and 5xx do, a 402 or a 404
+    // for a model that stopped being free never will.
+    const retryable = upstreamCode !== null && (upstreamCode === 429 || upstreamCode >= 500);
+    return build(
+      "upstream-error",
+      `OpenRouter answered HTTP 200 with an error body (code ${upstreamCode ?? "absent"}): ${upstreamError}`,
+      retryable,
+      { upstreamError, upstreamCode },
+    );
+  }
+
+  if (!isRecord(payload)) {
+    return build(
+      "malformed-payload",
+      "OpenRouter returned a body that is not a JSON object, so no completion could be read from it.",
+      false,
+    );
+  }
+
+  const choices = payload.choices;
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return build(
+      "no-choices",
+      "OpenRouter returned no choices at all — nothing answered, as distinct from something " +
+        "answering with nothing.",
+      false,
+    );
+  }
+
+  const first: unknown = choices[0];
+  if (!isRecord(first)) {
+    return build(
+      "malformed-payload",
+      "OpenRouter returned a choice that is not an object, so no completion could be read from it.",
+      false,
+    );
+  }
+
+  const finishReason = readString(first.finish_reason);
+  const nativeFinishReason = readString(first.native_finish_reason);
+  const fields = { finishReason, nativeFinishReason };
+  const seen = `finish_reason '${finishReason ?? "absent"}', native_finish_reason '${nativeFinishReason ?? "absent"}'`;
+
+  if (meansTruncated(finishReason, nativeFinishReason)) {
+    return build(
+      "truncated",
+      `The model emitted no text and stopped on ${seen}: the reply ceiling was exhausted before ` +
+        "any content was written. This chunk was not read. Chunk splitting is not built.",
+      true,
+      fields,
+    );
+  }
+
+  if (meansRefused(finishReason, nativeFinishReason)) {
+    return build(
+      "refused",
+      `The model refused this chunk (${seen}). This is a content filter, not a size limit — ` +
+        "a retry or a larger ceiling will not produce an answer.",
+      false,
+      fields,
+    );
+  }
+
+  const message = isRecord(first.message) ? first.message : null;
+  if (message !== null && readString(message.reasoning) !== null) {
+    return build(
+      "reasoning-only",
+      `The model wrote only to the reasoning channel and left content empty (${seen}), although ` +
+        "the request disables reasoning. Its whole budget went on deliberation.",
+      false,
+      fields,
+    );
+  }
+
+  return build(
+    "empty-content",
+    `The model finished normally on ${seen} having emitted no content.`,
+    false,
+    fields,
+  );
 }
 
 /** The assistant text, or null if the payload is not the shape we expect. */
