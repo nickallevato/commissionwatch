@@ -64,6 +64,83 @@ export interface RosterCoverage {
   provenance: "unsourced";
 }
 
+/**
+ * How the bodies are distributed across coverage states — with no body named.
+ *
+ * The summed figures on `/api/metrics` cannot answer "is this project's roster
+ * trustworthy?": one fully accounted body and one wholly unaccounted body add
+ * up to totals that read as partial coverage in both. The obvious fix — a
+ * per-body roll, "Gallatin County: 0 of 3" — is the wrong one for a *public*
+ * endpoint, and it was written that way first and caught by
+ * `metrics.test.ts`'s leak assertion. `/api/metrics` is public and takes no id,
+ * and the publication wall answers 404 rather than 403 precisely so a stranger
+ * cannot enumerate what has been ingested and withheld. A body name in a
+ * breakdown undoes that in one field: "0 of 3 seats" for a named county tells a
+ * reader we hold records for that county before any operator has published one.
+ *
+ * So the public shape is the distribution. It answers the question a reader is
+ * actually asking — how much of this site's roster can be relied on — and names
+ * nobody. The per-body roll is an operator's view, where naming the body is the
+ * entire point because the operator is the person who has to go and source it;
+ * `rosterCoverage` returns it in full, unmatched names included, for exactly
+ * that use.
+ *
+ * The buckets are mutually exclusive and are keyed on `unmatched` rather than on
+ * comparing the two seat counts: "every officeholder the record names has a
+ * roster row" is the claim worth making, and two counts can agree by
+ * coincidence.
+ */
+export interface RosterProvenance {
+  /** Bodies considered. */
+  jurisdictions: number;
+  /** Bodies where every officeholder the record names has a roster row. */
+  accounted: number;
+  /** Bodies whose roster accounts for some of the names, not all. */
+  partial: number;
+  /** Bodies whose roster accounts for none of them. */
+  none: number;
+  /**
+   * Bodies where nothing we have read names an officeholder at all.
+   *
+   * Its own bucket, not folded into `accounted`. A body with nothing to match
+   * against matches everything, and counting that as full coverage is the same
+   * confident zero this project exists to catch — there is no evidence either
+   * way, and the honest report says so.
+   */
+  unmeasured: number;
+  /**
+   * Bodies whose roster rows can prove where they came from. Zero today, for
+   * every body: `members` carries no `source_url`, no `fetched_at` and no
+   * `artifact_sha256`, so no row can prove anything. Published rather than
+   * omitted, because a zero somebody can see is a commitment.
+   */
+  traceable: number;
+}
+
+export function rosterProvenance(coverage: RosterCoverage[]): RosterProvenance {
+  const provenance: RosterProvenance = {
+    jurisdictions: coverage.length,
+    accounted: 0,
+    partial: 0,
+    none: 0,
+    unmeasured: 0,
+    traceable: 0,
+  };
+
+  for (const row of coverage) {
+    if (row.provenance !== "unsourced") provenance.traceable += 1;
+    if (row.seats_implied === 0) provenance.unmeasured += 1;
+    else if (row.unmatched.length === 0) provenance.accounted += 1;
+    // Keyed on the names accounted for, not on whether any roster row exists: a
+    // body with five rows that match none of the five names the minutes print
+    // accounts for nothing, and calling that partial coverage would flatter it.
+    else if (row.unmatched.length === row.seats_implied) provenance.none += 1;
+    else provenance.partial += 1;
+  }
+
+  return provenance;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

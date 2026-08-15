@@ -252,6 +252,18 @@ found it.
 
 ### Still not done, and known
 
+- **The roster is unsourced, and `/metrics` now says how unevenly.** `rosterProvenance` publishes a
+  *distribution* over bodies — accounted, partial, none, unmeasured, traceable — because the totals
+  could not answer the question anyone actually has: one fully accounted body and one wholly
+  unaccounted body sum to figures that read as half-done in both. It publishes **no body or
+  jurisdiction name**, and the test asserts the payload contains no name from any row of
+  `jurisdictions`, not merely the fixture's. The first version served the per-body roll and leaked
+  those names on a public, id-less endpoint — an aggregate names nobody, but a per-body list tells a
+  stranger which counties we hold withheld records for, which is the enumeration the 404-not-403
+  design exists to prevent. The per-body roll belongs behind `requireOperator` in the console, where
+  naming a body is the point; that route is not built.
+  `traceable` is `0` for every body and will stay `0` until the provenance columns land — the shape
+  of the number is what is publishable today, not the number.
 - **The roster is unsourced.** `members` carries no `source_url`, `fetched_at` or `artifact_sha256`,
   so a row naming a real commissioner is indistinguishable from one somebody typed. `/metrics`
   publishes `roster_sourced: false` and the page says so in the reader's words. This gates the claim
@@ -289,8 +301,20 @@ found it.
 
   Still open: extraction is **not** scheduled automatically, because a fifth of chunks truncate.
   `npm run extraction:backfill -- --dry-run` is the operator path, and
-  `npm run extraction:distribution` re-measures. The `/status` page does not yet show the backlog
-  depth; `extractionBacklog` is the query it should call.
+  `npm run extraction:distribution` re-measures.
+
+  **The `/status` page now states all of this to a reader**, in a section called "How much of it has
+  been read": how much is eligible and read, how much is waiting, the queue's own counts, and then
+  either the measured share with its reason tallies in plain words, or — when nothing has attempted
+  a document — a panel saying so. *Unmeasured is not zero, and the distinction is carried in the
+  type rather than in the copy*: `PublicExtractionReading` is a discriminated union whose unmeasured
+  branch has **no `unread_fraction` field at all**, so no component can reach for the flattering zero
+  by accident. `measured` requires `runs > 0 && chunks > 0`, because a run that died before chunking
+  supplies no denominator. Verified to bite: relaxing it to `runs >= 0` fails two backend tests, and
+  rendering `0.0%` in the unmeasured panel fails two frontend tests.
+
+  `listUnextractedMeetings` is deliberately **not** on the public path — it returns meeting ids and
+  shas, and an unread backlog is mostly unpublished meetings.
 - **The map is empty until an operator reviews links.** The extractor and the geocoder run, the
   review path and its console exist, and nothing has been approved — so `/api/places/near` correctly
   answers 200 with nothing in it. That is the wall working, not a fault, and the reader map now says

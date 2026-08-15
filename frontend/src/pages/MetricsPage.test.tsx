@@ -165,6 +165,56 @@ describe("MetricsPage", () => {
     expect(screen.getByText(/This one is ours\./)).toBeInTheDocument();
   });
 
+  /**
+   * The totals cannot say whether coverage is *even*. One body accounted for
+   * entirely and one not at all sum to figures that read as half done in both,
+   * which is the shape that kept the gap invisible.
+   *
+   * And the breakdown must name no body: this endpoint is public and takes no
+   * id, so a body name beside a seat count tells a stranger we hold records for
+   * it before an operator has published one. The first version of this shipped
+   * the per-body roll and `metrics.test.ts` caught it.
+   */
+  it("shows the spread across bodies, and names none of them", async () => {
+    server.use(
+      http.get("/api/metrics", () =>
+        HttpResponse.json({
+          ...metrics,
+          roster: {
+            jurisdictions: 4,
+            accounted: 1,
+            partial: 1,
+            none: 1,
+            unmeasured: 1,
+            traceable: 0,
+          },
+        }),
+      ),
+    );
+    renderWithProviders(<MetricsPage />);
+
+    const accounted = await screen.findByText(/fully accounted/i);
+    expect(accounted.closest("div")?.textContent).toContain("4");
+    expect(screen.getByText(/not accounted at all/i)).toBeInTheDocument();
+    // Its own state. A body with nothing to check against is not a covered one.
+    expect(screen.getByText(/nothing read yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/Not the same as covered/)).toBeInTheDocument();
+    // The zero that matters: no roster entry anywhere can prove its source.
+    const traceable = screen.getByText(/traceable to a document/i);
+    expect(traceable.closest("div")?.textContent).toContain("0");
+  });
+
+  it("shows no roster spread when the API sent none", async () => {
+    // Absent means not reported. Rendering zeroes would say every body's roster
+    // is unaccounted for, which is a claim rather than a missing field.
+    // The shared fixture carries no `roster`, which is exactly the case here.
+    server.use(http.get("/api/metrics", () => HttpResponse.json(metrics)));
+    renderWithProviders(<MetricsPage />);
+
+    expect(await screen.findByText(/officials we cannot match/i)).toBeInTheDocument();
+    expect(screen.queryByText(/how evenly the rosters cover/i)).not.toBeInTheDocument();
+  });
+
   it("does not report transcript coverage it could not load", async () => {
     server.use(
       http.get("/api/transcripts/coverage", () => new HttpResponse(null, { status: 500 })),

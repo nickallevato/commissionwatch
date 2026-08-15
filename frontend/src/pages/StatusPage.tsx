@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CellLabel } from "@/components/ui/CellLabel";
-import type { PublicStatus, PublicStatusSource } from "@/types";
+import type {
+  ExtractionFailureReason,
+  PublicExtraction,
+  PublicStatus,
+  PublicStatusSource,
+} from "@/types";
 
 /**
  * `/status` — what this site has and has not collected, in public.
@@ -31,6 +36,13 @@ import type { PublicStatus, PublicStatusSource } from "@/types";
  *    exception is summarised here and stated in full on the Methodology page,
  *    and the project rule is that the exception is valid only while it is
  *    disclosed. Weakening either page ends the exception.
+ * 5. **Unmeasured is not zero.** Collecting a document and reading it are
+ *    different steps that fail differently, so the backlog is on this page —
+ *    and until something has actually attempted to read a chunk, the page says
+ *    the failure rate is unknown. A share computed over nothing is 0, and
+ *    printing that 0 would be the most flattering claim available made on no
+ *    evidence at all. That is the exact failure this project reports in other
+ *    people's publications.
  *
  * Front-of-house, so the ground is `paper` and the chrome is the ordinary site
  * chrome. `PressroomUI` carries the console's, and this is not the console.
@@ -216,6 +228,33 @@ export function StatusPage() {
         )}
       </section>
 
+      <section className="mt-12" aria-labelledby="reading">
+        <h2 id="reading" className="font-display text-xl font-semibold text-ink">
+          How much of it has been read
+        </h2>
+        <p className="mt-3 max-w-prose text-sm leading-relaxed text-ink-soft">
+          Collecting a document and reading it are separate steps that fail
+          separately. Above is what has been fetched; this is how much of it a
+          model has been through, quoting the record back with a citation for
+          every sentence. Reading is started by hand rather than on a schedule,
+          because a measured share of it still comes back cut off &mdash; so a
+          backlog here is work waiting, not work lost.
+        </p>
+
+        {loading ? (
+          <p className="mt-3 label-sm" role="status">
+            Loading the reading backlog&hellip;
+          </p>
+        ) : status === null || status.extraction === undefined ? (
+          <p className="mt-4 max-w-prose border-l-2 border-accent bg-paper px-4 py-3 text-sm leading-relaxed text-ink-soft">
+            The reading backlog could not be read, so this page is not reporting
+            one. That is not the same as there being nothing to read.
+          </p>
+        ) : (
+          <ExtractionPanel extraction={status.extraction} />
+        )}
+      </section>
+
       {/* ------------------------------------------------- collection conduct */}
       <section className="mt-12 max-w-prose" aria-labelledby="conduct">
         <h2 id="conduct" className="font-display text-xl font-semibold text-ink">
@@ -283,6 +322,157 @@ export function StatusPage() {
         </p>
       </section>
     </div>
+  );
+}
+
+/**
+ * Every recorded way a passage can go unread, in the reader's words.
+ *
+ * A `Record` over the closed union rather than a lookup with a fallback: if the
+ * backend adds a reason, this stops compiling, which is the only reliable way a
+ * new category gets a sentence instead of quietly rendering as its own
+ * identifier.
+ */
+const READING_FAILURE: Record<ExtractionFailureReason, string> = {
+  "upstream-error": "the model service returned an error",
+  truncated: "the reply hit its length limit before anything was written",
+  refused: "the model's content filter refused the passage",
+  "reasoning-only": "the model returned its own working and no answer",
+  "no-choices": "the service answered with nothing at all",
+  "malformed-payload": "the reply was not in the documented shape",
+  "empty-content": "the reply finished normally and was empty",
+  "request-failed": "the request never came back",
+  "unreadable-reply": "the reply held nothing that could be read",
+  "truncated-reply": "the reply was cut off part-way through",
+  unclassified: "the reason was not recorded",
+};
+
+/** A share as a whole percentage, from a fraction the API computed. */
+function percent(fraction: number): string {
+  return `${(fraction * 100).toFixed(1)}%`;
+}
+
+/**
+ * The backlog, and the failure rate — or the honest absence of one.
+ *
+ * Rule 5. The `measured: false` branch says *unknown*, in words, and prints no
+ * percentage: the API cannot send one, and this component must not compute one
+ * either.
+ */
+function ExtractionPanel({ extraction }: { extraction: PublicExtraction }) {
+  const { reading } = extraction;
+  const nothingStored = extraction.eligible === 0;
+
+  return (
+    <>
+      <dl className="mt-4 grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+        <div className="border-t border-rule pt-3">
+          <dt className="label-sm">Records read</dt>
+          <dd className="mt-1">
+            <span className="figure text-2xl tabular" data-testid="extraction-read">
+              {extraction.read}
+            </span>
+            <span className="text-sm text-muted">
+              {" of "}
+              <span className="figure tabular">{extraction.eligible}</span>
+            </span>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              Sets of minutes held here, and how many something has been through.
+            </p>
+          </dd>
+        </div>
+
+        <div className="border-t border-rule pt-3">
+          <dt className="label-sm">Waiting to be read</dt>
+          <dd className="mt-1">
+            <span
+              data-testid="extraction-unread"
+              className={`figure text-2xl tabular ${
+                extraction.unread > 0 ? "text-accent" : "text-ink"
+              }`}
+            >
+              {extraction.unread}
+            </span>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              {nothingStored
+                ? "Nothing is stored to read yet."
+                : "Stored, cited and searchable already. Nothing has read them for claims."}
+            </p>
+          </dd>
+        </div>
+
+        <div className="border-t border-rule pt-3">
+          <dt className="label-sm">Reading jobs</dt>
+          <dd className="mt-1">
+            <span className="figure text-2xl tabular" data-testid="extraction-queued">
+              {extraction.queued}
+            </span>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              queued or running &middot;{" "}
+              <span className="figure tabular">{extraction.blocked}</span> held back
+              &middot; <span className="figure tabular">{extraction.failed}</span> gave
+              up
+            </p>
+          </dd>
+        </div>
+      </dl>
+
+      <h3 className="mt-8 font-sans text-base font-semibold text-ink">
+        How much of a document gets read
+      </h3>
+
+      {reading.measured ? (
+        <>
+          <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
+            Across{" "}
+            <span className="figure tabular">{reading.runs}</span> attempts over{" "}
+            <span className="figure tabular">{reading.meetings}</span> records,{" "}
+            <strong className="font-semibold text-ink">
+              <span className="figure tabular" data-testid="chunks-unread">
+                {reading.chunks_unread}
+              </span>{" "}
+              of <span className="figure tabular">{reading.chunks}</span> passages
+              went unread ({percent(reading.unread_fraction)})
+            </strong>
+            .{" "}
+            {reading.claims_recovered > 0 ? (
+              <>
+                <span className="figure tabular">{reading.claims_recovered}</span>{" "}
+                cited statements were still salvaged from the part that arrived
+                before the cut, which is why an unread passage is not the same as
+                an unread document.
+              </>
+            ) : (
+              "Nothing was salvaged from them."
+            )}
+          </p>
+          {reading.reasons.length > 0 && (
+            <ul className="mt-3 max-w-prose space-y-1 text-sm text-ink-soft">
+              {reading.reasons.map((tally) => (
+                <li key={tally.reason}>
+                  <span className="figure tabular">{tally.chunks}</span>{" "}
+                  {tally.chunks === 1 ? "passage" : "passages"} &mdash;{" "}
+                  {READING_FAILURE[tally.reason]}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      ) : (
+        <p
+          data-testid="reading-unmeasured"
+          className="mt-2 max-w-prose border-l-2 border-accent bg-paper px-4 py-3 text-sm leading-relaxed text-ink-soft"
+        >
+          <strong className="font-semibold text-ink">Not measured.</strong>{" "}
+          {reading.runs === 0
+            ? "Nothing has attempted to read a document yet, so there is no failure rate to report."
+            : `${reading.runs} attempts are on record and none of them got as far as a passage, so there is still no failure rate to report.`}{" "}
+          That is unknown, not a clean sheet: a share worked out over nothing at
+          all comes to zero, and printing that zero would be this site claiming
+          the best possible result on no evidence.
+        </p>
+      )}
+    </>
   );
 }
 

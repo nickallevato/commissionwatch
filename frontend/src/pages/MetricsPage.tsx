@@ -215,6 +215,63 @@ export function MetricsPage() {
               </dl>
             )}
 
+            {/* The spread across bodies, because the totals above cannot say
+              whether coverage is even: one body fully accounted for and one
+              accounted for not at all sum to figures that read as partial
+              coverage in both.
+
+              No body is named, and that is a wall decision rather than a design
+              one. This endpoint is public and takes no id, and the publication
+              wall answers 404 rather than 403 so a stranger cannot enumerate
+              what has been collected and withheld — "0 of 3 seats" beside a
+              county's name would say we hold records for that county before an
+              operator had published one. The per-body roll is the operator's
+              view; it is theirs because they are the ones who have to go and
+              source the roster. */}
+            {metrics.roster ? (
+              <>
+                <h3 className="mt-8 font-sans text-base font-semibold text-ink">
+                  How evenly the rosters cover
+                </h3>
+                <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-soft">
+                  Across the{" "}
+                  <span className="figure">{metrics.roster.jurisdictions}</span> bodies
+                  we watch. An average would hide the shape of this: one body we
+                  can account for entirely and one we cannot account for at all
+                  read, added together, as though both were half done.
+                </p>
+                <dl className="mt-4 grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+                  <Figure
+                    label="Fully accounted"
+                    value={metrics.roster.accounted}
+                    of={metrics.roster.jurisdictions}
+                    note="Every officeholder named in what we have read has an entry here."
+                  />
+                  <Figure
+                    label="Partly accounted"
+                    value={metrics.roster.partial}
+                    note="Some of the people named have an entry; the rest are statements we will reject."
+                  />
+                  <Figure
+                    label="Not accounted at all"
+                    value={metrics.roster.none}
+                    note="Nobody the record names can be matched, so nothing quoting them can be published."
+                  />
+                  <Figure
+                    label="Nothing read yet"
+                    value={metrics.roster.unmeasured}
+                    note="Nothing we have read from this body names an officeholder, so there is nothing to check against. Not the same as covered."
+                  />
+                  <Figure
+                    label="Traceable to a document"
+                    value={metrics.roster.traceable}
+                    of={metrics.roster.jurisdictions}
+                    note="Bodies whose roster entries can prove where they came from. None, today."
+                  />
+                </dl>
+              </>
+            ) : null}
+
             {metrics.quality.roster_sourced ? null : (
               <p className="mt-4 max-w-prose border-l-2 border-accent pl-4 text-sm leading-relaxed text-ink-soft">
                 <strong>Our roster of officials is not yet sourced.</strong> We

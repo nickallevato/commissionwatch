@@ -253,11 +253,39 @@ export interface QualityMetrics {
   places_public: number;
 }
 
+/**
+ * How the bodies are distributed across roster-coverage states.
+ *
+ * Counts of bodies, with no body and no person named — see
+ * `backend/src/services/roster-coverage.ts`. Two names are deliberately absent:
+ * an unaccounted officeholder is a named individual with no operator between
+ * them and the reader, and a *body* name on this public, id-less endpoint would
+ * tell a stranger we hold records for it before anything has been published.
+ */
+export interface RosterProvenance {
+  jurisdictions: number;
+  /** Bodies where every officeholder the record names has a roster entry. */
+  accounted: number;
+  partial: number;
+  /** Bodies whose roster accounts for none of the names printed. */
+  none: number;
+  /** Bodies where nothing read names an officeholder, so there is nothing to judge. */
+  unmeasured: number;
+  /** Bodies whose roster entries can prove where they came from. Zero today. */
+  traceable: number;
+}
+
 export interface Metrics {
   corpus: CorpusMetrics;
   quality: QualityMetrics;
   review: ReviewMetrics;
   latency: LatencyMetrics;
+  /**
+   * The spread across bodies, because the summed seat figures above cannot say
+   * whether coverage is even. Optional for the same reason as
+   * {@link PublicStatus.extraction}: absent means not reported, never zero.
+   */
+  roster?: RosterProvenance;
   generated_at: string;
 }
 
@@ -752,11 +780,80 @@ export interface PublicStatusSource {
   latest_run: PublicStatusRun | null;
 }
 
+/**
+ * Every way a chunk of a document can go unread — see
+ * `backend/src/services/extraction/extractor.ts`. A closed set, because the
+ * whole point of recording it is that the reasons can be counted; a prose error
+ * string cannot be.
+ */
+export type ExtractionFailureReason =
+  | "upstream-error"
+  | "truncated"
+  | "refused"
+  | "reasoning-only"
+  | "no-choices"
+  | "malformed-payload"
+  | "empty-content"
+  | "request-failed"
+  | "unreadable-reply"
+  | "truncated-reply"
+  /** A row written before the taxonomy existed, or a reason this version does not know. */
+  | "unclassified";
+
+export interface ExtractionReasonTally {
+  reason: ExtractionFailureReason;
+  chunks: number;
+  /** Claims salvaged from those chunks anyway. Only truncation can be non-zero. */
+  recovered: number;
+}
+
+/**
+ * How well the collected minutes were read — or that nobody knows yet.
+ *
+ * The discriminant is the point. An unread fraction computed over zero chunks
+ * is `0`, and a page that renders that as "0% went unread" is making the most
+ * flattering claim available on no evidence at all. **Unmeasured is not zero**,
+ * so the measured figures do not exist on the unmeasured branch and no
+ * component can reach for them by accident.
+ */
+export type ExtractionReading =
+  | { measured: false; runs: number }
+  | {
+      measured: true;
+      runs: number;
+      meetings: number;
+      chunks: number;
+      chunks_unread: number;
+      unread_fraction: number;
+      claims_recovered: number;
+      reasons: ExtractionReasonTally[];
+    };
+
+/** The backlog: collected minutes, and how many of them have been read. Counts only. */
+export interface PublicExtraction {
+  eligible: number;
+  read: number;
+  unread: number;
+  queued: number;
+  blocked: number;
+  failed: number;
+  reading: ExtractionReading;
+}
+
 export interface PublicStatus {
   generated_at: string;
   last_successful_sweep_at: string | null;
   total: number;
   sources: PublicStatusSource[];
+  /**
+   * Optional on the client, required on the wire.
+   *
+   * The API always sends it. A response without it is a response from something
+   * older or something broken, and the page says it could not read the backlog
+   * rather than rendering the absence as an empty one — which is the same
+   * substitution as "0% unread" for "nobody has looked".
+   */
+  extraction?: PublicExtraction;
 }
 
 // ---------------------------------------------------------------------------

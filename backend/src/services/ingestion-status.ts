@@ -1,5 +1,10 @@
 import type { Knex } from "knex";
 import {
+  extractionBacklog,
+  extractionDistribution,
+  type DistributionReason,
+} from "./extraction/distribution";
+import {
   failuresIn,
   listSources,
   recordsIn,
@@ -80,6 +85,129 @@ export interface PublicStatusSource {
   latest_run: PublicStatusRun | null;
 }
 
+/**
+ * One reason chunks went unread, as a figure.
+ *
+ * The reason is a value from this project's own closed taxonomy — see
+ * `extraction/extractor.ts` — never the verbatim error string beside it in
+ * `failed_chunks`. That string is written by whatever threw and carries the same
+ * hazard as `ingestion_runs.error`: it can quote a document belonging to a
+ * meeting no operator has published. Counts are ours to publish; content is not.
+ */
+export interface PublicExtractionReason {
+  reason: DistributionReason;
+  chunks: number;
+  /** Claims salvaged from those chunks anyway. Only truncation can be non-zero. */
+  recovered: number;
+}
+
+/**
+ * How well the minutes that *have* been read were read — or that nobody knows.
+ *
+ * The two branches are the whole point of this type. `extraction_runs` was empty
+ * until 2026-08-15, and an unread fraction computed over zero chunks is 0 —
+ * which renders as "0% of chunks went unread", the most flattering sentence
+ * available resting on no evidence at all. **Unmeasured is not zero**, and a
+ * shape that cannot tell the two apart will eventually be read as though it
+ * could, so the distinction is carried in the type rather than left to the
+ * reader of a `0`.
+ */
+export type PublicExtractionReading =
+  | {
+      measured: false;
+      /** Finished runs on record. Normally 0 here; see `buildPublicExtraction`. */
+      runs: number;
+    }
+  | {
+      measured: true;
+      runs: number;
+      /** Distinct meetings those runs covered. */
+      meetings: number;
+      chunks: number;
+      chunks_unread: number;
+      /** `chunks_unread / chunks`, to three decimals. */
+      unread_fraction: number;
+      /** Claims salvaged out of unread chunks. */
+      claims_recovered: number;
+      /** Descending by chunk count, so the dominant failure reads first. */
+      reasons: PublicExtractionReason[];
+    };
+
+/**
+ * The extraction backlog, in public.
+ *
+ * `docs/superpowers/specs/2026-08-14-extraction-throughput-design.md` §5 asks
+ * the status page to state the depth, and the reason is the same one the rest of
+ * this page is built on: a corpus that has been collected and not read looks
+ * exactly like a corpus with nothing in it. Only the backlog numbers tell them
+ * apart.
+ *
+ * Counts only. `listUnextractedMeetings` returns meeting ids and content
+ * addresses and is deliberately **not** called from here: which meetings have
+ * been collected and withheld is precisely what the publication wall exists to
+ * keep unenumerable, and an unread backlog is mostly unpublished meetings.
+ */
+export interface PublicExtraction {
+  /** Meetings whose minutes are stored, so reading them is possible at all. */
+  eligible: number;
+  /** Of those, meetings a run has read something out of. */
+  read: number;
+  /** Of those, meetings nothing has read. The backlog depth. */
+  unread: number;
+  /** Reading jobs waiting or in flight. */
+  queued: number;
+  /** Reading jobs the worker refused to retry. */
+  blocked: number;
+  /** Reading jobs that exhausted their attempts. */
+  failed: number;
+  reading: PublicExtractionReading;
+}
+
+/**
+ * Backlog and distribution, narrowed for a reader.
+ *
+ * Pure, so the "unmeasured is not zero" rule can be proved against a
+ * hand-built distribution rather than against whatever the test database
+ * happens to hold — which is the one thing a fixture cannot reliably arrange,
+ * since another suite's rows are indistinguishable from ours here.
+ *
+ * `measured` requires a chunk to have been attempted, not merely a run to have
+ * finished: a run that failed before it chunked anything contributes no
+ * denominator, and dividing by it would be the same confident zero one layer
+ * up. `runs` is carried on both branches so a reader can see that runs happened
+ * and still produced nothing to measure.
+ */
+export function toPublicExtraction(
+  backlog: Awaited<ReturnType<typeof extractionBacklog>>,
+  distribution: Awaited<ReturnType<typeof extractionDistribution>>,
+): PublicExtraction {
+  const measurable = distribution.runs > 0 && distribution.chunks > 0;
+  return {
+    eligible: backlog.eligible,
+    read: backlog.read,
+    unread: backlog.unread,
+    queued: backlog.queued,
+    blocked: backlog.blocked,
+    failed: backlog.failed,
+    reading: measurable
+      ? {
+          measured: true,
+          runs: distribution.runs,
+          meetings: distribution.meetings,
+          chunks: distribution.chunks,
+          chunks_unread: distribution.unread,
+          unread_fraction: distribution.unread_fraction,
+          claims_recovered: distribution.recovered,
+          reasons: distribution.by_reason.map((tally) => ({
+            reason: tally.reason,
+            chunks: tally.chunks,
+            recovered: tally.recovered,
+          })),
+        }
+      : { measured: false, runs: distribution.runs },
+  };
+}
+
 export interface PublicStatus {
   /** When these figures were read. Every one of them is a query, not a constant. */
   generated_at: string;
@@ -92,6 +220,15 @@ export interface PublicStatus {
    */
   last_successful_sweep_at: string | null;
   sources: PublicStatusSource[];
+  /**
+   * How much of what has been collected has actually been read.
+   *
+   * Sourced from `extraction_runs` and the `extract` queue rather than from the
+   * sweep rows above, because collecting a document and reading it are separate
+   * stages that fail separately — a page reporting only the first would call a
+   * pipeline healthy while a fifth of every document went unread.
+   */
+  extraction: PublicExtraction;
 }
 
 /**
@@ -135,7 +272,12 @@ export function toPublicSource(source: PressroomSource): PublicStatusSource {
  * commitment, an absence you cannot is a quiet failure.
  */
 export async function buildPublicStatus(db: Knex, now: Date = new Date()): Promise<PublicStatus> {
-  const sources = (await listSources(db, now)).map(toPublicSource);
+  const [rawSources, backlog, distribution] = await Promise.all([
+    listSources(db, now),
+    extractionBacklog(db),
+    extractionDistribution(db),
+  ]);
+  const sources = rawSources.map(toPublicSource);
 
   // The newest `ingestion_sources.last_success_at`, derived from the rows this
   // page has already rendered rather than fetched by a second query. A second
@@ -160,5 +302,6 @@ export async function buildPublicStatus(db: Knex, now: Date = new Date()): Promi
     generated_at: now.toISOString(),
     last_successful_sweep_at: lastSuccessfulSweepAt,
     sources,
+    extraction: toPublicExtraction(backlog, distribution),
   };
 }

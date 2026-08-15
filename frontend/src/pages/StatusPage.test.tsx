@@ -4,7 +4,7 @@ import { screen } from "@testing-library/react";
 import { StatusPage } from "./StatusPage";
 import { renderWithProviders } from "@/lib/test-utils";
 import { server } from "@/mocks/server";
-import type { PublicStatus, PublicStatusSource } from "@/types";
+import type { PublicExtraction, PublicStatus, PublicStatusSource } from "@/types";
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
@@ -51,12 +51,30 @@ function source(over: Partial<PublicStatusSource> = {}): PublicStatusSource {
   };
 }
 
+/**
+ * The state production was in until `extraction_runs` had a single row: minutes
+ * stored, nothing read, and — the part that matters — no failure rate at all.
+ */
+function extraction(over: Partial<PublicExtraction> = {}): PublicExtraction {
+  return {
+    eligible: 9,
+    read: 0,
+    unread: 9,
+    queued: 0,
+    blocked: 0,
+    failed: 0,
+    reading: { measured: false, runs: 0 },
+    ...over,
+  };
+}
+
 function serve(status: Partial<PublicStatus>): void {
   const body: PublicStatus = {
     generated_at: "2026-08-10T09:00:00.000Z",
     last_successful_sweep_at: null,
     total: status.sources?.length ?? 0,
     sources: [],
+    extraction: extraction(),
     ...status,
   };
   server.use(http.get("/api/ingestion/sources", () => HttpResponse.json(body)));
@@ -209,6 +227,99 @@ describe("StatusPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The collection status could not be loaded",
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // The reading backlog. Unmeasured is not zero.
+  // -------------------------------------------------------------------------
+
+  it("states the backlog depth, not only what was collected", async () => {
+    serve({ sources: [], extraction: extraction({ eligible: 12, read: 3, unread: 9, queued: 2 }) });
+    renderWithProviders(<StatusPage />);
+
+    expect(await screen.findByTestId("extraction-read")).toHaveTextContent("3");
+    expect(screen.getByTestId("extraction-unread")).toHaveTextContent("9");
+    expect(screen.getByTestId("extraction-queued")).toHaveTextContent("2");
+  });
+
+  /**
+   * The one this section exists for. An unread share worked out over zero
+   * passages is 0, and "0.0% went unread" is the most flattering sentence
+   * available said on no evidence — the exact failure this project reports in
+   * other people's publications. The page must say *unknown*, in words, and
+   * print no percentage at all.
+   */
+  it("calls an unrun extractor unmeasured rather than reporting a clean sheet", async () => {
+    serve({ sources: [], extraction: extraction({ reading: { measured: false, runs: 0 } }) });
+    renderWithProviders(<StatusPage />);
+
+    const panel = await screen.findByTestId("reading-unmeasured");
+    expect(panel).toHaveTextContent("Not measured.");
+    expect(panel).toHaveTextContent(/nothing has attempted to read a document yet/i);
+    expect(panel).toHaveTextContent(/unknown, not a clean sheet/i);
+    // No share, in any rendering of zero.
+    expect(document.body.textContent).not.toMatch(/0(\.0)?%/);
+  });
+
+  it("still reports attempts that never reached a passage", async () => {
+    serve({ sources: [], extraction: extraction({ reading: { measured: false, runs: 4 } }) });
+    renderWithProviders(<StatusPage />);
+
+    const panel = await screen.findByTestId("reading-unmeasured");
+    expect(panel).toHaveTextContent("4 attempts are on record");
+    expect(document.body.textContent).not.toMatch(/0(\.0)?%/);
+  });
+
+  it("prints the measured share and what the failures were", async () => {
+    // The real 2026-08-15 measurement.
+    serve({
+      sources: [],
+      extraction: extraction({
+        eligible: 10,
+        read: 10,
+        unread: 0,
+        reading: {
+          measured: true,
+          runs: 20,
+          meetings: 10,
+          chunks: 24,
+          chunks_unread: 5,
+          unread_fraction: 0.208,
+          claims_recovered: 88,
+          reasons: [{ reason: "truncated-reply", chunks: 5, recovered: 88 }],
+        },
+      }),
+    });
+    renderWithProviders(<StatusPage />);
+
+    expect(await screen.findByTestId("chunks-unread")).toHaveTextContent("5");
+    expect(document.body.textContent).toContain("20.8%");
+    expect(screen.getByText(/the reply was cut off part-way through/)).toBeInTheDocument();
+    // The salvage is the difference between "a fifth went unread" and "a fifth
+    // was cut short after yielding most of what it had".
+    expect(document.body.textContent).toMatch(/88/);
+    expect(screen.queryByTestId("reading-unmeasured")).not.toBeInTheDocument();
+  });
+
+  it("says the backlog could not be read rather than showing an empty one", async () => {
+    // A response with no `extraction` at all — an older API, or a broken one.
+    server.use(
+      http.get("/api/ingestion/sources", () =>
+        HttpResponse.json({
+          generated_at: "2026-08-10T09:00:00.000Z",
+          last_successful_sweep_at: null,
+          total: 0,
+          sources: [],
+        }),
+      ),
+    );
+    renderWithProviders(<StatusPage />);
+
+    expect(
+      await screen.findByText(/The reading backlog could not be read/),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("extraction-read")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("reading-unmeasured")).not.toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
