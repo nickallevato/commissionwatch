@@ -130,7 +130,20 @@ export function BotPage() {
       </header>
 
       <Section id="surfaces" title="Machine-readable surfaces">
-        <ul className="mt-2">
+        <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
+          These are the bulk and structured reads — everything you would want if
+          you are taking the record rather than looking one thing up. There is
+          also a per-record JSON API (meetings, officials, votes, findings,
+          matters, search, the calendar, the corrections log), and every mount of
+          it is listed on the{" "}
+          <Link to="/data" className="underline underline-offset-2">
+            open data page
+          </Link>
+          . It is not repeated here because taking the bulk export costs us both
+          less than crawling it — but it exists, and a list that left you
+          inferring that is the failure this page was written to fix.
+        </p>
+        <ul className="mt-4">
           {MACHINE_SURFACES.map((surface) => (
             <Row key={surface.path} surface={surface} />
           ))}

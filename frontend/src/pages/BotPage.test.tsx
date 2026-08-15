@@ -55,6 +55,21 @@ describe("BotPage", () => {
    * Collapsing it is the usual mistake: one "MIT" would claim a licence over the
    * county's agendas, one "CC BY" would relicense the code.
    */
+  /**
+   * The page lists bulk and structured reads only. That is a reasonable
+   * curation — a crawler wants the export, not twenty-seven REST paths — but
+   * only if it says so. A curated list that reads as exhaustive tells a client
+   * the per-record API does not exist, which is the same failure as omitting an
+   * endpoint outright, and this page's own history is of going stale within
+   * hours.
+   */
+  it("says the per-record API exists and points at where it is listed", () => {
+    renderPage();
+    expect(screen.getByText(/per-record JSON API/i)).toBeInTheDocument();
+    const links = screen.getAllByRole("link", { name: /open data page/i });
+    expect(links[0]).toHaveAttribute("href", "/data");
+  });
+
   it("separates the dataset, the code, and the records underneath", () => {
     renderPage();
     expect(screen.getByText("The compiled dataset")).toBeInTheDocument();
