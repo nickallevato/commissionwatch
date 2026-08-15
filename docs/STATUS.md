@@ -43,7 +43,11 @@ delivery — had never been constructed by a running server. `minute_claims` had
 migration 072 and nothing wrote them. `rosterCoverage` had no caller. Every one of those is now
 wired, and each wiring surfaced a defect that reading the code had not.
 
-**Deployed and verified in production at `febae02`.**
+**Deployed and verified in production through `9111f00`** (`curl /api/version`, which is the only
+check worth trusting — CI going green and the site running the commit are different facts). Later
+commits the same day are pushed and deploying; several intermediate deploy jobs show `cancelled`,
+which is the workflow's concurrency group superseding a run rather than a failure. Production skips
+straight to the newest commit.
 
 ### What is now true that was not
 
@@ -71,6 +75,41 @@ unsubscribe from). `vote_events`, so *"the motion failed 2–3"* is a stored fac
 linked claims must sum to the counts. Extraction as a real queue stage. `/api/metrics` and `/metrics`,
 this project measured by its own standard. `/api/data/ocd.json`. The record receipt. `/bot`. The
 privacy page. Matters. Discord routing with audience separation. Email suppression.
+
+### A place link can now be reviewed, so the map can have anything on it
+
+`place_links` shipped with a `status` column and nothing that could change it. Every geocoded link
+sat `held` forever, which means the map was empty **by construction** and would have stayed empty
+however well the geocoder worked.
+
+- `backend/src/services/review/place-links.ts` and `routes/admin/place-links.ts` — queue, one link,
+  approve, reject. Both decisions require a reason and both append a `record_corrections` row in the
+  same transaction as the update.
+- **Migration 097** widens `record_corrections_target_table_check` to admit `place_links`. Migration
+  087 last set that list and 094 never revisited it, so without this every decision would have died
+  on a CHECK.
+- `place_links` has no reviewer columns and did not get any. Migration 094 gave it `status` and
+  timestamps only, and the operator's identity already lives where it belongs — in the
+  `record_corrections` row, with `operator_id` and a snapshotted email.
+- **No event is emitted.** There is no `place_link` subject kind in `EVENT_SUBJECT_KINDS` or in
+  migration 083's CHECK, and announcing one under an existing kind would describe a subject the
+  payload is not about. The meeting publish path is what announces a link's subject.
+- `frontend/src/pages/AdminPlaceLinksPage.tsx` is the console screen. **The coordinate is rounded to
+  its precision grade** — `block` prints four decimals, not the six on the wire; `jurisdiction`
+  prints two and says it carries no position on the ground. There is no map on the review screen: a
+  pin is the same overclaim drawn larger. The plain-words meaning of each grade comes from the API,
+  not a second copy on the client.
+- An `inferred` link can be **rejected but not approved**. Refusing to publish a lead is not the same
+  as refusing to dismiss one, and `rejected` is the only way to show an operator a lead already
+  thrown out.
+- A withheld subject does **not** block approval; it is reported and the wall keeps the pin off the
+  map. Refusing would mean a link could only be reviewed after its meeting was published, which
+  inverts the order an operator actually works in.
+
+`/api/metrics` gained `places_total` and `places_public`, and the reader map now distinguishes four
+states rather than two: nothing located anywhere, located but not yet reviewed, nothing near this
+point, and — when the counts did not load — that it could not check. The last one is the one that
+was wrong: the previous copy asserted nothing was found whether or not it had looked.
 
 ### Prerendering is wired into deploy, and it is OFF until an operator turns it on
 
@@ -172,6 +211,36 @@ stated reason** plus two provably-safe shapes — because any regex loose enough
 ones covers the dangerous one too, which is exactly how this went unnoticed four times. Verified to
 bite by injecting one.
 
+**A test that scans for a word could not see where the word was.** `vocabulary.test.tsx` read JSX
+text nodes — the prose between one tag and the next — and passed while `MeetingDetailPage` rendered
+"One anomaly on this record" as an `<h2>`, because that sentence sat inside a ternary in an
+expression container. Five more offenders were outside the same window: an attendance stat reading
+"Voting members present", "Unidentified member" in the vote breakdown, and four internal links
+pointing at `/anomalies` and `/members`, each spending a 301 to learn an address we already know.
+The response was two more assertions, not six edits: one that reads prose held in string and
+template literals (excluding anything with a `/`, which drops every path and identifier), and one
+that refuses an internal `to=` naming any key of `RENAMED_PATHS`. Both failed on their first run,
+which is the only evidence worth having that a scan scans anything. `MethodologyPage.test.tsx`'s
+hand-maintained `ROUTED_PATHS` had drifted to list only the old addresses — the failure mode a list
+maintained by hand exists to have.
+
+**"The request failed" and "the record has none" are one substitution apart.** Two operator screens
+made it: on a failed fetch, `AdminClaimsPage` reported "the record shows no claims awaiting review"
+and `AdminChannelsPage` showed its error alert *and* "No channels yet." underneath. The strongest
+claim available resting on the weakest evidence available, on the screens whose entire purpose is
+that somebody looks. Auditing the class across every surface found exactly those two and no others:
+every react-query page branches on `isError` first, and `MattersPage` and `PublicRecordsPage` do it
+by hand correctly. **The defect is not a misuse of `<Absence>` — it is a state machine with a
+missing state**, in the two screens that track loading and data but not failure. Both fixes fail
+their tests when reverted.
+
+**Three copies of one constant, because `add_header` does not merge.** Declaring `Vary: User-Agent`
+in `location /` for the prerender split would have silently stripped the CSP and every other
+security header from every page of the site, so the server-level set is now written out three times.
+`frontend/src/nginx-headers.test.ts` asserts the copies still agree. It does not assert the policy
+is right — a text scan cannot know that — it asserts there is one policy, which is the property the
+repetition actually threatens.
+
 **Restart safety was not free.** Nothing ever returned a claimed `ingestion_jobs` row to the queue,
 so moving extraction onto the queue would have relocated the permanent-limbo bug rather than
 removing it. `recoverStalled` had to be built.
@@ -194,6 +263,10 @@ found it.
   reason (`truncated` / `refused` / `upstream-error` / `reasoning-only` / …). One SQL query answers
   which dominates, and that answer decides whether the next work is chunk splitting, a prompt
   change, or abandoning the free tier. Guessing wrong there costs a day.
+- **The map is empty until an operator reviews links.** The extractor and the geocoder run, the
+  review path and its console exist, and nothing has been approved — so `/api/places/near` correctly
+  answers 200 with nothing in it. That is the wall working, not a fault, and the reader map now says
+  which kind of empty it is. The operator task is to work the `/admin/place-links` queue.
 - **Email cannot ship.** SPF/DKIM/DMARC are unconfigured and `ALERT_FROM_EMAIL` still defaults to
   `alerts@commissionwatch.org`, which is not the deployed domain and will fail alignment.
 - **The Methodology page must disclose transcripts before the first transcript sweep.** The vendor
