@@ -48,12 +48,24 @@ import { takeSnapshot } from "./archive";
  * rather than of a clock the deploy has to hit.
  */
 
-export type SnapshotRunOutcome =
-  | "taken"
-  | "skipped_disabled"
-  | "skipped_same_day"
-  | "skipped_locked"
-  | "failed";
+/**
+ * Every outcome `export_snapshot_runs.outcome` is allowed to hold, in the order
+ * the CHECK constraint lists them.
+ *
+ * Exported as a value because the row cap in `listSnapshotRuns` is derived from
+ * its length: the unique index over `(run_day, outcome)` means one UTC day can
+ * produce at most this many rows, so `days × outcomes` is the arithmetic ceiling
+ * of the window rather than a number somebody guessed.
+ */
+export const SNAPSHOT_RUN_OUTCOMES = [
+  "taken",
+  "skipped_disabled",
+  "skipped_same_day",
+  "skipped_locked",
+  "failed",
+] as const;
+
+export type SnapshotRunOutcome = (typeof SNAPSHOT_RUN_OUTCOMES)[number];
 
 export interface SnapshotRun {
   /** `YYYY-MM-DD`, UTC, as the archive addresses a day. */
@@ -145,16 +157,10 @@ function asDate(value: unknown, field: string): Date {
 
 function asOutcome(value: unknown): SnapshotRunOutcome {
   // The table's CHECK is the authority; this narrows the row without asserting.
-  switch (value) {
-    case "taken":
-    case "skipped_disabled":
-    case "skipped_same_day":
-    case "skipped_locked":
-    case "failed":
-      return value;
-    default:
-      throw new TypeError(`export_snapshot_runs.outcome: unknown outcome ${String(value)}`);
+  for (const outcome of SNAPSHOT_RUN_OUTCOMES) {
+    if (value === outcome) return outcome;
   }
+  throw new TypeError(`export_snapshot_runs.outcome: unknown outcome ${String(value)}`);
 }
 
 export function parseSnapshotRun(raw: unknown): SnapshotRun {
@@ -210,20 +216,67 @@ export async function recordSnapshotRun(
 }
 
 /**
+ * The default window: the 30 UTC days ending with today, inclusive.
+ *
+ * Thirty **days**, and the distinction is the bug this replaced. The window used
+ * to be a `.limit(30)` on rows, and a single day can produce a row per outcome —
+ * five of them, bounded by the unique index over `(run_day, outcome)` — so
+ * thirty rows covered somewhere between six days and thirty, with no way for the
+ * caller or the console to tell which. A ledger that exists to prove a loop was
+ * alive on the days it skipped must be addressed in the unit the archive itself
+ * is addressed in, which is the UTC day.
+ */
+export const DEFAULT_SNAPSHOT_RUN_WINDOW_DAYS = 30;
+
+export interface SnapshotRunWindow {
+  /** How many UTC days back to read, counting today as the first. */
+  days?: number;
+  /** Injected for tests; defaults to `new Date()`. */
+  now?: Date;
+}
+
+/**
+ * The oldest `run_day` a window of `days` includes, as `YYYY-MM-DD`.
+ *
+ * Counting today as day one, so 30 days is today and the 29 before it. Computed
+ * in UTC here rather than left to Postgres's `CURRENT_DATE`, for the same reason
+ * `run_day` is rendered with `to_char` below: the database session's timezone is
+ * not this project's definition of a day, and the archive addresses days in UTC.
+ */
+export function snapshotRunWindowStart(days: number, now: Date): string {
+  const span = Math.max(1, Math.floor(days));
+  return utcDay(new Date(now.getTime() - (span - 1) * 24 * 60 * 60 * 1000));
+}
+
+/**
  * The ledger, newest day first. What the operator console reads.
+ *
+ * Bounded by **date**, not by row count — see `DEFAULT_SNAPSHOT_RUN_WINDOW_DAYS`.
+ * The `.limit()` that remains is a backstop, not the window: it is the arithmetic
+ * ceiling of the window itself (`days × SNAPSHOT_RUN_OUTCOMES.length`), which the
+ * unique index over `(run_day, outcome)` guarantees cannot be exceeded. So it can
+ * never silently shorten the window a caller asked for, and a table that somehow
+ * grew past that guarantee still cannot return unbounded rows.
  *
  * `run_day` is rendered by Postgres rather than parsed from a `date` column,
  * because node-pg turns a bare `date` into a JS `Date` at **local** midnight —
  * which for any host west of UTC is the previous day, on the one value the
  * archive uses as an address.
  */
-export async function listSnapshotRuns(db: Knex, limit = 30): Promise<SnapshotRun[]> {
+export async function listSnapshotRuns(
+  db: Knex,
+  window: SnapshotRunWindow = {},
+): Promise<SnapshotRun[]> {
+  const days = Math.max(1, Math.floor(window.days ?? DEFAULT_SNAPSHOT_RUN_WINDOW_DAYS));
+  const since = snapshotRunWindowStart(days, window.now ?? new Date());
+
   const rows: unknown = await db("export_snapshot_runs")
+    .where("run_day", ">=", since)
     .orderBy([
       { column: "run_day", order: "desc" },
       { column: "last_at", order: "desc" },
     ])
-    .limit(limit)
+    .limit(days * SNAPSHOT_RUN_OUTCOMES.length)
     .select(
       db.raw("to_char(run_day, 'YYYY-MM-DD') as run_day"),
       "outcome",

@@ -119,8 +119,14 @@ const CYCLE_INTERVAL_MS: Readonly<Record<string, number>> = {
  * unrecoverable: publication state is one mutable column, so a day nobody
  * snapshotted can never be reconstructed. That asymmetry is the reason this
  * ledger exists at all.
+ *
+ * **Thirty UTC days, counting today** — a window on `run_day`, not a row count.
+ * It used to be thirty *rows*, and because one day can produce a row per outcome
+ * the served window was somewhere between six days and thirty while the name and
+ * this comment both promised thirty. The console had to say "most recent" rather
+ * than name the window, because the window was not knowable. It is now.
  */
-const SNAPSHOT_RUN_DAYS = 30;
+const SNAPSHOT_RUN_WINDOW_DAYS = 30;
 
 interface SnapshotRunView {
   day: string;
@@ -271,7 +277,7 @@ router.get("/", async (_req: Request, res, next) => {
       cycleIntervalMs: CYCLE_INTERVAL_MS,
       // Read after the flags, so a console load shows the switch and what the
       // loop behind it has actually been doing in one answer.
-      snapshotRuns: (await listSnapshotRuns(db, SNAPSHOT_RUN_DAYS)).map(snapshotRunView),
+      snapshotRuns: (await listSnapshotRuns(db, { days: SNAPSHOT_RUN_WINDOW_DAYS })).map(snapshotRunView),
     });
   } catch (err) {
     next(err);

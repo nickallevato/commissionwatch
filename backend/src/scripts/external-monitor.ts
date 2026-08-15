@@ -54,7 +54,12 @@ export const REQUEST_TIMEOUT_MS = 10_000;
 export const RETRY_DELAY_MS = 5_000;
 
 /**
- * How many times a release-drift mismatch is re-read before it is believed.
+ * How many times a mismatch is re-read before it is believed.
+ *
+ * Used by both checks that can be caught mid-swap: the release-drift check and
+ * the version-skew check. One mechanism, one pair of environment variables, one
+ * set of guarantees — a second settle written separately would be a second set
+ * of rules about when an absence may become a claim.
  *
  * **The race this closes.** `deploy.yml` runs the drift check with
  * `MONITOR_MAX_DRIFT_MINUTES: "0"`, so any mismatch is an immediate FAIL and the
@@ -80,9 +85,11 @@ export const RETRY_DELAY_MS = 5_000;
  * `deploy.yml` that precedes it.
  *
  * **Why it stays cheap.** Nothing is re-read on a match, so the ordinary
- * periodic run costs exactly what it did before. The cost is paid only when the
- * live sha already disagrees with the expected head — which is a deploy in
- * flight, or a real drift, and both are worth thirty seconds.
+ * periodic run costs exactly what it did before. The cost is paid only when a
+ * check already disagrees — which is a deploy in flight, or a real fault, and
+ * both are worth thirty seconds. A run that is mid-swap can pay it twice, once
+ * per check, and a minute spent not turning a good deploy red is a minute well
+ * spent.
  */
 export const DEFAULT_SETTLE_ATTEMPTS = 3;
 
@@ -131,6 +138,15 @@ export interface CheckOutcome {
   state: CheckState;
   detail: string;
 }
+
+/** How long a check is allowed to keep looking before it believes a mismatch. */
+export interface SettlePolicy {
+  attempts: number;
+  delayMs: number;
+}
+
+/** The settle configuration, or the reason it could not be read. */
+export type SettlePolicyResult = { ok: true; policy: SettlePolicy } | { ok: false; reason: string };
 
 /* ── Small typed helpers ────────────────────────────────────────────── */
 
@@ -236,6 +252,11 @@ function readSha(probe: ProbeResult, label: string): { ok: true; sha: string } |
  * They roll independently, so a stack running yesterday's API behind today's UI
  * is healthy by every other measure and invisible from the outside. That is the
  * exact shape of the 2026-08-09 outage: a half-finished rollout.
+ *
+ * This judges **one reading**. Because the images roll independently, one reading
+ * is also what a probe landing mid-swap gets, so `main()` calls
+ * `resolveVersionSkew` — which is this, given a bounded chance to settle before a
+ * mismatch is believed.
  */
 export function evaluateVersion(api: ProbeResult, web: ProbeResult): CheckOutcome {
   const apiSha = readSha(api, "/api/version");
@@ -347,11 +368,8 @@ export function readReleaseExpectation(env: Record<string, string | undefined>):
   const maxDriftMinutes = readNonNegative(env.MONITOR_MAX_DRIFT_MINUTES, "MONITOR_MAX_DRIFT_MINUTES", DEFAULT_MAX_DRIFT_MINUTES);
   if (!maxDriftMinutes.ok) return { ok: false, reason: maxDriftMinutes.reason };
 
-  const settleAttempts = readNonNegative(env.MONITOR_SETTLE_ATTEMPTS, "MONITOR_SETTLE_ATTEMPTS", DEFAULT_SETTLE_ATTEMPTS);
-  if (!settleAttempts.ok) return { ok: false, reason: settleAttempts.reason };
-
-  const settleDelayMs = readNonNegative(env.MONITOR_SETTLE_DELAY_MS, "MONITOR_SETTLE_DELAY_MS", DEFAULT_SETTLE_DELAY_MS);
-  if (!settleDelayMs.ok) return { ok: false, reason: settleDelayMs.reason };
+  const settle = readSettlePolicy(env);
+  if (!settle.ok) return { ok: false, reason: settle.reason };
 
   const rawCommittedAt = (env.MONITOR_EXPECTED_SHA_TIME ?? "").trim();
   return {
@@ -359,9 +377,31 @@ export function readReleaseExpectation(env: Record<string, string | undefined>):
     sha: rawSha,
     committedAt: rawCommittedAt === "" ? null : rawCommittedAt,
     maxDriftMinutes: maxDriftMinutes.value,
-    settleAttempts: Math.floor(settleAttempts.value),
-    settleDelayMs: settleDelayMs.value,
+    settleAttempts: settle.policy.attempts,
+    settleDelayMs: settle.policy.delayMs,
   };
+}
+
+/**
+ * The settle configuration, read once and shared by every check that settles.
+ *
+ * Separate from `readReleaseExpectation` because the version-skew check settles
+ * too and has no expected head to be blocked on: how long to keep looking is a
+ * property of the deploy, not of the drift check. Read here so both checks
+ * cannot disagree about it.
+ *
+ * Garbage is a reason, never a silent fall back to the default — a threshold
+ * nobody set being reported as one somebody did is the same defect wherever it
+ * appears.
+ */
+export function readSettlePolicy(env: Record<string, string | undefined>): SettlePolicyResult {
+  const attempts = readNonNegative(env.MONITOR_SETTLE_ATTEMPTS, "MONITOR_SETTLE_ATTEMPTS", DEFAULT_SETTLE_ATTEMPTS);
+  if (!attempts.ok) return { ok: false, reason: attempts.reason };
+
+  const delayMs = readNonNegative(env.MONITOR_SETTLE_DELAY_MS, "MONITOR_SETTLE_DELAY_MS", DEFAULT_SETTLE_DELAY_MS);
+  if (!delayMs.ok) return { ok: false, reason: delayMs.reason };
+
+  return { ok: true, policy: { attempts: Math.floor(attempts.value), delayMs: delayMs.value } };
 }
 
 /**
@@ -553,43 +593,164 @@ export async function resolveReleaseDrift(
   if (outcome.state === "pass") return outcome;
   if (!expectation.ok) return outcome;
   if (!readSha(first, "/api/version").ok) return outcome;
-  if (expectation.settleAttempts < 1) return outcome;
 
-  const spacing = `${Math.round(expectation.settleDelayMs / 100) / 10}s apart`;
-  let latest = outcome;
+  return settle(outcome, {
+    policy: { attempts: expectation.settleAttempts, delayMs: expectation.settleDelayMs },
+    label: "/api/version",
+    readable: (probed) => readSha(probed, "/api/version").ok,
+    judge: (probed) => evaluateReleaseDrift(expectation, probed, now),
+    reread,
+    wait,
+    settledBecause:
+      "the first read was still serving an older sha, which is a deploy finishing rather than a " +
+      "release that did not land",
+    unchanged: "the live sha did not change",
+  });
+}
 
-  for (let attempt = 1; attempt <= expectation.settleAttempts; attempt += 1) {
-    await wait(expectation.settleDelayMs);
-    const probed = await reread();
+/** What one settling check needs, beyond the policy. */
+interface SettleTerms<T> {
+  policy: SettlePolicy;
+  /** The endpoint(s) being re-read, named as the message will name them. */
+  label: string;
+  /** Whether a reading can be judged at all. An unreadable one is never judged. */
+  readable: (reading: T) => boolean;
+  judge: (reading: T) => CheckOutcome;
+  reread: () => Promise<T>;
+  wait: (ms: number) => Promise<void>;
+  /** Why a mismatch that later agreed was a deploy in flight, in the words the reader gets. */
+  settledBecause: string;
+  /** What did not change, when every re-read said the same thing. */
+  unchanged: string;
+}
 
-    if (!readSha(probed, "/api/version").ok) {
+/**
+ * The bounded re-read itself, shared by every check that can be caught mid-swap.
+ *
+ * The caller decides *whether* to settle — it owns the question of which first
+ * readings are even eligible — and this owns *how*, so the three guarantees in
+ * `resolveReleaseDrift`'s comment hold identically wherever it is used:
+ *
+ * - a verdict only improves by observing a different, matching reading;
+ * - an unreadable re-read never overturns an observation that succeeded;
+ * - the account of the re-reads is appended to the message either way, so a
+ *   settled deploy is legible as different from a first-read match.
+ */
+async function settle<T>(first: CheckOutcome, terms: SettleTerms<T>): Promise<CheckOutcome> {
+  if (terms.policy.attempts < 1) return first;
+
+  const spacing = `${Math.round(terms.policy.delayMs / 100) / 10}s apart`;
+  let latest = first;
+
+  for (let attempt = 1; attempt <= terms.policy.attempts; attempt += 1) {
+    await terms.wait(terms.policy.delayMs);
+    const probed = await terms.reread();
+
+    if (!terms.readable(probed)) {
       return withSettleNote(
         latest,
-        `Re-read /api/version ${attempt} time(s) ${spacing} to let a deploy settle; ` +
+        `Re-read ${terms.label} ${attempt} time(s) ${spacing} to let a deploy settle; ` +
           `read ${attempt} came back unreadable, so the mismatch above is the last thing actually seen`,
       );
     }
 
-    latest = evaluateReleaseDrift(expectation, probed, now);
+    latest = terms.judge(probed);
     if (latest.state === "pass") {
       return withSettleNote(
         latest,
-        `settled after ${attempt} re-read(s) of /api/version ${spacing} — the first read was still ` +
-          `serving an older sha, which is a deploy finishing rather than a release that did not land`,
+        `settled after ${attempt} re-read(s) of ${terms.label} ${spacing} — ${terms.settledBecause}`,
       );
     }
   }
 
   return withSettleNote(
     latest,
-    `Re-read /api/version ${expectation.settleAttempts} time(s) ${spacing} to let a deploy settle, ` +
-      `and the live sha did not change`,
+    `Re-read ${terms.label} ${terms.policy.attempts} time(s) ${spacing} to let a deploy settle, ` +
+      `and ${terms.unchanged}`,
   );
 }
 
 /** Append the settle account to an outcome, leaving its state alone. */
 function withSettleNote(outcome: CheckOutcome, note: string): CheckOutcome {
   return { ...outcome, detail: `${outcome.detail}. ${note}` };
+}
+
+/* ── Probe 2, settled ───────────────────────────────────────────────── */
+
+/** One reading of both version endpoints, taken as a pair. */
+export interface VersionReading {
+  api: ProbeResult;
+  web: ProbeResult;
+}
+
+/** Both documents must be readable before a disagreement between them means anything. */
+function versionReadable(reading: VersionReading): boolean {
+  return readSha(reading.api, "/api/version").ok && readSha(reading.web, "/version.json").ok;
+}
+
+/**
+ * The version-skew judgement, given the same bounded chance to settle.
+ *
+ * **The race this closes**, and it is the drift check's race exactly: the two
+ * images roll independently, so a probe landing mid-swap can catch one rolled
+ * and the other not. `evaluateVersion` judged that from a single first read and
+ * reported "a half-finished rollout" — a convincing, specific, wrong claim about
+ * a deploy that was merely in progress. `deploy.yml` runs this monitor, so that
+ * is a red pipeline on a good deploy, and the health poll ahead of it exits on
+ * the first 200 and so cannot rule the case out.
+ *
+ * What it deliberately does **not** do, in the same three refusals the drift
+ * settle makes:
+ *
+ * - **A persistent skew still fails.** The verdict can only improve by reading
+ *   two documents that agree; a stack that keeps serving mismatched images is
+ *   read three more times and still fails, with the count in the message.
+ * - **An unreadable endpoint is never re-read into a skew, or out of one.** A
+ *   version document that could not be read is already this check's own failure
+ *   and is not a skew, so it is returned as it stands. If a *later* read comes
+ *   back unreadable, the skew already observed stands and the message says the
+ *   re-read failed.
+ * - **A first-read agreement costs nothing.** No re-read, no delay, and no
+ *   retry wording in the message, so the ordinary periodic run is unchanged and
+ *   a settled deploy cannot be mistaken for one that was right first time.
+ *
+ * A settle policy that could not be read leaves the verdict alone and says so.
+ * The mismatch was genuinely observed — unlike the drift check's `blocked`,
+ * where a missing expected head means nothing was ever compared — so downgrading
+ * it would be a typo in an environment variable silencing a real half-rolled
+ * stack.
+ */
+export async function resolveVersionSkew(
+  settlePolicy: SettlePolicyResult,
+  first: VersionReading,
+  reread: () => Promise<VersionReading>,
+  wait: (ms: number) => Promise<void> = sleep,
+): Promise<CheckOutcome> {
+  const outcome = evaluateVersion(first.api, first.web);
+
+  if (outcome.state === "pass") return outcome;
+  if (!versionReadable(first)) return outcome;
+
+  if (!settlePolicy.ok) {
+    return withSettleNote(
+      outcome,
+      `The re-read that would tell a deploy in flight from a half-finished rollout did not run: ` +
+        `${settlePolicy.reason}. The skew above was read, so this stays a failure`,
+    );
+  }
+
+  return settle(outcome, {
+    policy: settlePolicy.policy,
+    label: "/api/version and /version.json",
+    readable: versionReadable,
+    judge: (reading) => evaluateVersion(reading.api, reading.web),
+    reread,
+    wait,
+    settledBecause:
+      "the two images had not both rolled yet, which is a deploy in flight rather than a " +
+      "half-finished rollout",
+    unchanged: "the two images still disagree",
+  });
 }
 
 /* ── Probe 4: ingestion staleness ───────────────────────────────────── */
@@ -903,9 +1064,19 @@ export async function main(): Promise<number> {
   const webVersion = await probe(`${baseUrl}/version.json`);
   const sources = await probe(`${baseUrl}/api/ingestion/sources`);
 
-  // The drift check may re-read `/api/version` a few times before it believes a
-  // mismatch — see `resolveReleaseDrift`. It re-probes rather than reusing
-  // `apiVersion`, because the whole point is to look again.
+  // Both of these may re-read before they believe a mismatch — see
+  // `DEFAULT_SETTLE_ATTEMPTS`. They re-probe rather than reusing the readings
+  // above, because the whole point is to look again. Nothing is re-read when the
+  // first reading already agrees, so an ordinary run costs four requests.
+  const version = await resolveVersionSkew(
+    readSettlePolicy(process.env),
+    { api: apiVersion, web: webVersion },
+    async () => ({
+      api: await probe(`${baseUrl}/api/version`),
+      web: await probe(`${baseUrl}/version.json`),
+    }),
+  );
+
   const drift = await resolveReleaseDrift(
     readReleaseExpectation(process.env),
     apiVersion,
@@ -915,7 +1086,7 @@ export async function main(): Promise<number> {
 
   const outcomes: CheckOutcome[] = [
     evaluateHealth(health),
-    evaluateVersion(apiVersion, webVersion),
+    version,
     drift,
     ...evaluateSources(sources, now),
   ];

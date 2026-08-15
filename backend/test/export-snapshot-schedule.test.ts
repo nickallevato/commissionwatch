@@ -8,10 +8,13 @@ import { listSnapshots } from "../src/services/export/archive";
 import { SOURCE_LOCK_NAMESPACE } from "../src/services/ingestion/scheduler";
 import {
   DEFAULT_SNAPSHOT_INTERVAL_MS,
+  DEFAULT_SNAPSHOT_RUN_WINDOW_DAYS,
   ExportSnapshotScheduler,
   SNAPSHOT_LOCK_KEY,
+  SNAPSHOT_RUN_OUTCOMES,
   listSnapshotRuns,
   recordSnapshotRun,
+  snapshotRunWindowStart,
   utcDay,
 } from "../src/services/export/snapshot-scheduler";
 import { FeatureRegistry, setFeatureRegistry } from "../src/services/features/registry";
@@ -312,7 +315,9 @@ describe("with dated_export_archive on", () => {
     assert.equal((await scheduler.tick()).outcome, "taken");
     assert.equal(await snapshotCount(), 2);
 
-    const runs = await listSnapshotRuns(db);
+    // The window is a range of days, so a suite using a fixed fixture date has
+    // to say which day it is reading from — see `listSnapshotRuns`.
+    const runs = await listSnapshotRuns(db, { now: new Date("2026-04-09T12:00:00.000Z") });
     assert.deepEqual(
       runs.map((run) => run.run_day).sort(),
       ["2026-04-08", "2026-04-09"],
@@ -380,7 +385,7 @@ describe("the snapshot scheduler re-reads its flag per cycle", () => {
     assert.equal((await tomorrow.tick()).outcome, "skipped_disabled");
     assert.equal(await snapshotCount(), 1, "a snapshot was taken after the flag went off");
 
-    const runs = await listSnapshotRuns(db);
+    const runs = await listSnapshotRuns(db, { now: new Date("2026-04-09T12:00:00.000Z") });
     const skipped = runs.find((run) => run.run_day === "2026-04-09");
     assert.ok(skipped, "the day the loop skipped is not in the ledger");
     assert.equal(skipped.outcome, "skipped_disabled");
@@ -477,7 +482,7 @@ describe("a cycle that cannot do its work", () => {
     });
     await recordSnapshotRun(db, { day, outcome: "failed", detail: "Error: and again" });
 
-    const runs = await listSnapshotRuns(db);
+    const runs = await listSnapshotRuns(db, { now: new Date(`${day}T12:00:00.000Z`) });
     const failed = runs.find((run) => run.run_day === day);
     assert.ok(failed);
     assert.equal(failed.outcome, "failed");
@@ -516,5 +521,94 @@ describe("a cycle that cannot do its work", () => {
     } finally {
       await unreachable.destroy();
     }
+  });
+});
+
+/* --------------------------------------------------------------------------
+   G3e. The ledger window is a range of days, not a count of rows
+   -------------------------------------------------------------------------- */
+
+/**
+ * The window the console is told it is looking at.
+ *
+ * `listSnapshotRuns` used to take a `limit` and apply it to **rows**, while the
+ * route's constant and its doc comment both promised "the last 30 days". One UTC
+ * day can produce a row per outcome — the unique index over `(run_day, outcome)`
+ * bounds it at five — so thirty rows covered anywhere between six days and
+ * thirty, and nothing could say which. The console had to hedge with "most
+ * recent" because the stronger sentence was not true.
+ *
+ * These hold the fixed version from both sides: a day-dense ledger no longer
+ * truncates the window, and a day outside the window is still excluded.
+ */
+describe("the snapshot ledger window", () => {
+  /** A fixed clock, so the fixture days do not move under the assertions. */
+  const ANCHOR = new Date("2026-06-30T12:00:00.000Z");
+
+  /** The UTC day `back` days before the anchor. */
+  function dayBack(back: number): string {
+    return utcDay(new Date(ANCHOR.getTime() - back * 24 * 60 * 60 * 1000));
+  }
+
+  /**
+   * Every outcome a row can carry without naming a snapshot.
+   *
+   * Derived from the exported list rather than written out, so a sixth outcome
+   * makes these denser rather than making them stale. `taken` is excluded
+   * because `export_snapshot_runs_taken_names_snapshot` requires it to name a
+   * real snapshot, and this is a test about days, not about snapshots.
+   */
+  const FILLERS = SNAPSHOT_RUN_OUTCOMES.filter((outcome) => outcome !== "taken");
+
+  it("serves every day in the window even when each day produced a row per outcome", async () => {
+    // Ten days, every outcome on each: forty rows. Under the old `.limit(30)`
+    // this returned seven and a half days while calling itself thirty.
+    for (let back = 0; back < 10; back += 1) {
+      for (const outcome of FILLERS) {
+        await recordSnapshotRun(db, { day: dayBack(back), outcome, detail: "window fixture" });
+      }
+    }
+
+    const runs = await listSnapshotRuns(db, { now: ANCHOR });
+
+    assert.equal(runs.length, 10 * FILLERS.length, "the row cap truncated the window");
+    const days = new Set(runs.map((run) => run.run_day));
+    assert.equal(days.size, 10);
+    assert.ok(days.has(dayBack(9)), `the tenth day back is missing: ${[...days].join(", ")}`);
+    // Newest day first, as the console renders it.
+    assert.equal(runs[0].run_day, dayBack(0));
+  });
+
+  it("includes the oldest day inside the window and excludes the day before it", async () => {
+    // Today counts as the first of the thirty, so day 29 is in and day 30 is out.
+    await recordSnapshotRun(db, { day: dayBack(29), outcome: "skipped_disabled", detail: "in" });
+    await recordSnapshotRun(db, { day: dayBack(30), outcome: "skipped_disabled", detail: "out" });
+
+    const runs = await listSnapshotRuns(db, { now: ANCHOR });
+
+    assert.deepEqual(
+      runs.map((run) => run.run_day),
+      [dayBack(29)],
+      "the window is not the 30 UTC days ending today",
+    );
+  });
+
+  it("honours a narrower window in days", async () => {
+    await recordSnapshotRun(db, { day: dayBack(0), outcome: "failed", detail: "today" });
+    await recordSnapshotRun(db, { day: dayBack(1), outcome: "failed", detail: "yesterday" });
+
+    const runs = await listSnapshotRuns(db, { days: 1, now: ANCHOR });
+
+    assert.deepEqual(runs.map((run) => run.run_day), [dayBack(0)]);
+  });
+
+  it("computes the window boundary in UTC, whatever the host clock is called", () => {
+    // The archive addresses days in UTC, and `run_day` is a UTC date. A boundary
+    // derived from a local midnight would be a day out for any host west of UTC,
+    // on the one value that cannot be re-derived later.
+    assert.equal(snapshotRunWindowStart(30, new Date("2026-06-30T00:30:00.000Z")), "2026-06-01");
+    assert.equal(snapshotRunWindowStart(30, new Date("2026-06-30T23:30:00.000Z")), "2026-06-01");
+    assert.equal(snapshotRunWindowStart(1, ANCHOR), utcDay(ANCHOR));
+    assert.equal(DEFAULT_SNAPSHOT_RUN_WINDOW_DAYS, 30);
   });
 });

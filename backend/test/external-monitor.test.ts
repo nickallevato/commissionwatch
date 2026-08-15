@@ -10,7 +10,9 @@ import {
   evaluateSources,
   evaluateVersion,
   readReleaseExpectation,
+  readSettlePolicy,
   resolveReleaseDrift,
+  resolveVersionSkew,
   summarise,
   DEFAULT_SETTLE_ATTEMPTS,
   DEFAULT_SETTLE_DELAY_MS,
@@ -719,6 +721,218 @@ describe("external monitor — the settle", () => {
     // Thirty seconds in the worst case, and only ever on a mismatch. Matching
     // deploy-aws-ssm.sh's own 10 × 3s host-side version poll.
     assert.equal(DEFAULT_SETTLE_ATTEMPTS * DEFAULT_SETTLE_DELAY_MS, 30_000);
+  });
+});
+
+/**
+ * The version check's half of the same race — G2d.
+ *
+ * The backend and frontend images roll independently, so a probe landing mid-swap
+ * catches one rolled and the other not, and `evaluateVersion` judged that from a
+ * single first read: a confident "half-finished rollout" about a deploy that was
+ * simply in progress. `deploy.yml` runs this monitor, so that is a red pipeline on
+ * a good deploy.
+ *
+ * The settle is the drift check's, reused rather than rewritten, so the same
+ * three refusals are asserted here: a persistent skew still fails, an unreadable
+ * reading is never converted into a skew or out of one, and a first-read
+ * agreement costs nothing.
+ */
+describe("external monitor — the version settle", () => {
+  /** Mid-swap: the backend has rolled, the frontend has not. */
+  const SKEWED = (): { api: ProbeResult; web: ProbeResult } => ({
+    api: response(200, versionBody("backend", OTHER_SHA)),
+    web: response(200, versionBody("frontend", SHA)),
+  });
+  /** Both images on the new commit. */
+  const ROLLED = (): { api: ProbeResult; web: ProbeResult } => ({
+    api: response(200, versionBody("backend", OTHER_SHA)),
+    web: response(200, versionBody("frontend", OTHER_SHA)),
+  });
+
+  function reader(sequence: Array<() => { api: ProbeResult; web: ProbeResult }>) {
+    const calls: number[] = [];
+    const waits: number[] = [];
+    return {
+      calls,
+      waits,
+      wait: (ms: number) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+      read: () => {
+        const next = sequence[calls.length] ?? sequence[sequence.length - 1];
+        calls.push(1);
+        return Promise.resolve(next());
+      },
+    };
+  }
+
+  const policy = readSettlePolicy({});
+
+  it("does not re-read at all when the two images already agree", async () => {
+    const r = reader([SKEWED]);
+    const outcome = await resolveVersionSkew(policy, ROLLED(), r.read, r.wait);
+
+    assert.equal(outcome.state, "pass");
+    assert.equal(r.calls.length, 0, "an agreement must cost nothing");
+    assert.deepEqual(r.waits, []);
+    assert.doesNotMatch(outcome.detail, /re-read/i);
+    assert.doesNotMatch(outcome.detail, /settled/i);
+  });
+
+  it("settles the mid-swap race: the frontend rolls on the second read", async () => {
+    const r = reader([ROLLED]);
+    const outcome = await resolveVersionSkew(policy, SKEWED(), r.read, r.wait);
+
+    assert.equal(outcome.state, "pass", `a finished swap must not fail the deploy: ${outcome.detail}`);
+    assert.equal(r.calls.length, 1);
+    assert.match(outcome.detail, /settled after 1 re-read/);
+    assert.match(outcome.detail, /\/api\/version and \/version\.json/);
+    assert.match(outcome.detail, /10s apart/);
+    assert.equal(summarise([outcome]).failed, false);
+  });
+
+  it("says how many re-reads it took, so a settled deploy is not read as a first-read match", async () => {
+    const r = reader([SKEWED, SKEWED, ROLLED]);
+    const outcome = await resolveVersionSkew(policy, SKEWED(), r.read, r.wait);
+
+    assert.equal(outcome.state, "pass");
+    assert.equal(r.calls.length, 3);
+    assert.match(outcome.detail, /settled after 3 re-read\(s\)/);
+  });
+
+  it("still FAILS a skew that persists across every re-read", async () => {
+    const r = reader([SKEWED]);
+    const outcome = await resolveVersionSkew(policy, SKEWED(), r.read, r.wait);
+
+    assert.equal(outcome.state, "fail");
+    assert.equal(r.calls.length, DEFAULT_SETTLE_ATTEMPTS, "the settle must be bounded");
+    assert.match(outcome.detail, /version skew/);
+    assert.match(outcome.detail, /Re-read \/api\/version and \/version\.json 3 time\(s\)/);
+    assert.match(outcome.detail, /still disagree/);
+    // Both shas survive the annotation.
+    assert.match(outcome.detail, /1fb246f/);
+    assert.match(outcome.detail, /9004d34/);
+    assert.equal(summarise([outcome]).failed, true);
+  });
+
+  describe("cannot read ≠ skew", () => {
+    const unreadable: Array<[string, { api: ProbeResult; web: ProbeResult }, RegExp]> = [
+      [
+        "the backend answered 502 — last night exactly",
+        { api: response(502, "Bad Gateway"), web: response(200, versionBody("frontend", SHA)) },
+        /\/api\/version: HTTP 502/,
+      ],
+      [
+        "the frontend document never arrived",
+        {
+          api: response(200, versionBody("backend", SHA)),
+          web: unreachable("connect ECONNREFUSED 10.0.0.1:443"),
+        },
+        /ECONNREFUSED/,
+      ],
+      [
+        "a version document is not JSON",
+        { api: response(200, "not json at all"), web: response(200, versionBody("frontend", SHA)) },
+        /not JSON/,
+      ],
+      [
+        "the images carry no build stamp",
+        {
+          api: response(200, versionBody("backend", "unknown")),
+          web: response(200, versionBody("frontend", "unknown")),
+        },
+        /no build stamp/,
+      ],
+    ];
+
+    for (const [label, reading, reason] of unreadable) {
+      it(`does not re-read, and does not call it a skew, when ${label}`, async () => {
+        const r = reader([ROLLED]);
+        const outcome = await resolveVersionSkew(policy, reading, r.read, r.wait);
+
+        assert.equal(outcome.state, "fail");
+        assert.equal(r.calls.length, 0, "an unreadable reading is not a mismatch to settle");
+        assert.match(outcome.detail, reason);
+        assert.doesNotMatch(outcome.detail, /version skew/);
+        assert.doesNotMatch(outcome.detail, /Re-read/);
+      });
+    }
+
+    it("does not let an unreadable re-read overturn the skew it already saw", async () => {
+      const r = reader([
+        () => ({ api: response(200, versionBody("backend", OTHER_SHA)), web: unreachable("socket hang up") }),
+      ]);
+      const outcome = await resolveVersionSkew(policy, SKEWED(), r.read, r.wait);
+
+      // An absence does not erase an observation. The skew was read cleanly.
+      assert.equal(outcome.state, "fail");
+      assert.equal(r.calls.length, 1, "no point re-reading past an unreadable endpoint");
+      assert.match(outcome.detail, /came back unreadable/);
+      assert.match(outcome.detail, /version skew/);
+    });
+  });
+
+  it("honours a configured settle count and delay, shared with the drift check", async () => {
+    const r = reader([SKEWED]);
+    const outcome = await resolveVersionSkew(
+      readSettlePolicy({ MONITOR_SETTLE_ATTEMPTS: "1", MONITOR_SETTLE_DELAY_MS: "250" }),
+      SKEWED(),
+      r.read,
+      r.wait,
+    );
+
+    assert.equal(outcome.state, "fail");
+    assert.deepEqual(r.waits, [250]);
+    assert.match(outcome.detail, /1 time\(s\) 0\.3s apart/);
+  });
+
+  it("can be switched off entirely with a zero settle count", async () => {
+    const r = reader([ROLLED]);
+    const outcome = await resolveVersionSkew(
+      readSettlePolicy({ MONITOR_SETTLE_ATTEMPTS: "0" }),
+      SKEWED(),
+      r.read,
+      r.wait,
+    );
+
+    assert.equal(outcome.state, "fail");
+    assert.equal(r.calls.length, 0);
+    assert.doesNotMatch(outcome.detail, /Re-read/);
+  });
+
+  it("keeps an observed skew a failure when the settle configuration is garbage", async () => {
+    // Unlike the drift check's `blocked` — where a missing expected head means
+    // nothing was ever compared — the skew here was genuinely read. A typo in an
+    // environment variable must not be able to silence a half-rolled stack.
+    for (const bad of [{ MONITOR_SETTLE_ATTEMPTS: "a few" }, { MONITOR_SETTLE_DELAY_MS: "ten seconds" }]) {
+      const r = reader([ROLLED]);
+      const outcome = await resolveVersionSkew(readSettlePolicy(bad), SKEWED(), r.read, r.wait);
+
+      assert.equal(outcome.state, "fail", `expected a failure for ${JSON.stringify(bad)}`);
+      assert.equal(r.calls.length, 0);
+      assert.match(outcome.detail, /version skew/);
+      assert.match(outcome.detail, /MONITOR_SETTLE_/);
+      assert.match(outcome.detail, /did not run/);
+    }
+  });
+
+  it("reads one settle policy for both checks", () => {
+    const parsed = readSettlePolicy({});
+    assert.equal(parsed.ok && parsed.policy.attempts, DEFAULT_SETTLE_ATTEMPTS);
+    assert.equal(parsed.ok && parsed.policy.delayMs, DEFAULT_SETTLE_DELAY_MS);
+
+    // The same two variables the drift check reads, so the two settles cannot
+    // disagree about how long a deploy is allowed to take.
+    const configured = readReleaseExpectation({
+      MONITOR_EXPECTED_SHA: SHA,
+      MONITOR_SETTLE_ATTEMPTS: "2",
+      MONITOR_SETTLE_DELAY_MS: "1500",
+    });
+    const shared = readSettlePolicy({ MONITOR_SETTLE_ATTEMPTS: "2", MONITOR_SETTLE_DELAY_MS: "1500" });
+    assert.equal(configured.ok && configured.settleAttempts, shared.ok && shared.policy.attempts);
+    assert.equal(configured.ok && configured.settleDelayMs, shared.ok && shared.policy.delayMs);
   });
 });
 
