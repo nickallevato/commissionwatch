@@ -101,7 +101,13 @@ const NARRATIVE: FeatureRow = {
 };
 
 function listing(features: FeatureRow[] = [DRAIN, PRERENDER, NARRATIVE]): FeatureListing {
-  return { features, pollIntervalMs: 5000 };
+  return {
+    features,
+    pollIntervalMs: 5000,
+    // Keyed by feature key, from the loops' own exported constants on the server.
+    // `mcp_server` is absent because it has no loop, which is not zero.
+    cycleIntervalMs: { event_drain: 5000, prerender: 10000 },
+  };
 }
 
 function serve(body: FeatureListing): void {
@@ -276,9 +282,10 @@ describe("AdminFeaturesPage", () => {
     renderPage();
 
     const latency = await screen.findByTestId("latency");
-    // 5s poll + one 10s consumer cycle. Composed from the served interval, so it
-    // tracks the deploy config rather than a number copied into the frontend.
+    // 5s poll + the slowest served cycle, which is the consumer's 10s.
     expect(latency).toHaveTextContent("15 seconds");
+    expect(latency).toHaveTextContent("5s for event drain");
+    expect(latency).toHaveTextContent("10s for prerendered pages");
     expect(latency).toHaveTextContent(/not instant/i);
     expect(latency).toHaveTextContent(/no longer needs a restart/i);
     expect(latency.textContent ?? "").not.toMatch(/takes effect on restart/i);
@@ -289,6 +296,44 @@ describe("AdminFeaturesPage", () => {
     renderPage();
 
     expect(await screen.findByTestId("latency")).toHaveTextContent("40 seconds");
+  });
+
+  it("recomputes the latency from the served cycle intervals", async () => {
+    // The half that used to be a constant in this file. If the drain's or the
+    // consumer's interval changes on the server, the number here moves with it —
+    // which is what makes the single-sourcing load-bearing rather than cosmetic.
+    serve({ ...listing(), cycleIntervalMs: { event_drain: 5000, prerender: 60000 } });
+    renderPage();
+
+    const latency = await screen.findByTestId("latency");
+    expect(latency).toHaveTextContent("65 seconds");
+    expect(latency).toHaveTextContent("60s for prerendered pages");
+  });
+
+  it("names a loop the server reports that this build has no manifest row for", async () => {
+    // A key in the cycle map and not in the features list still contributes its
+    // wait. Printing its key beats dropping it from a sentence about how long to
+    // wait for it.
+    serve({
+      ...listing(),
+      cycleIntervalMs: { event_drain: 5000, prerender: 10000, scheduled_extraction: 45000 },
+    });
+    renderPage();
+
+    const latency = await screen.findByTestId("latency");
+    expect(latency).toHaveTextContent("50 seconds");
+    expect(latency).toHaveTextContent("45s for scheduled_extraction");
+  });
+
+  it("adds no wait for a deployment whose features have no loops", async () => {
+    // Not "instant": the poll still has to happen. Absence in the map is absence
+    // of a loop, never a zero that rounds the sentence down to nothing.
+    serve({ ...listing(), cycleIntervalMs: {} });
+    renderPage();
+
+    const latency = await screen.findByTestId("latency");
+    expect(latency).toHaveTextContent("5 seconds");
+    expect(latency.textContent ?? "").not.toMatch(/one cycle of the loop/i);
   });
 
   it("shows when this process last read the switch table", async () => {

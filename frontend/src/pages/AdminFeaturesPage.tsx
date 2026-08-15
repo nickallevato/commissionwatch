@@ -55,10 +55,13 @@ import {
  * building, and the only one whose consequence cannot be undone by switching it
  * back. Reading the key and typing it is the pause.
  *
- * **The latency is printed as a number.** It is not instant and it is no longer
- * a restart — F1j made both loops re-read per cycle. Saying "takes effect
- * immediately" invites a second click during the gap; saying "restart" is simply
- * false. The screen states the seconds and what they are made of.
+ * **The latency is printed as a number, and every figure in it is served.** It is
+ * not instant and it is no longer a restart — F1j made both loops re-read per
+ * cycle. Saying "takes effect immediately" invites a second click during the gap;
+ * saying "restart" is simply false. The screen states the seconds and what they
+ * are made of, from the poll interval and the loops' own constants, because a
+ * duration typed into this file would be right on the day it was written and
+ * would go stale silently on the screen that exists to say how long to wait.
  *
  * **`loadedAt` is shown, separately from the values.** "The switch says on" and
  * "this process has confirmed the switch says on" are different facts.
@@ -125,23 +128,57 @@ function formatStamp(value: string | null): string {
   return new Date(value).toLocaleString();
 }
 
+function seconds(ms: number): number {
+  return Math.ceil(ms / 1000);
+}
+
+/**
+ * The slowest cycle any loop runs on, or 0 if no key has a loop.
+ *
+ * Read off the served map rather than known here. The frontend used to carry its
+ * own `SLOWEST_CYCLE_SECONDS = 10`, which was right on the day it was written and
+ * would have gone stale the day somebody changed the consumer's interval — on the
+ * screen whose whole job is saying what is running and how long to wait. The
+ * intervals now come from the loops' own exported constants, through the route.
+ */
+function slowestCycleMs(cycleIntervalMs: Record<string, number>): number {
+  let slowest = 0;
+  for (const interval of Object.values(cycleIntervalMs)) {
+    if (interval > slowest) slowest = interval;
+  }
+  return slowest;
+}
+
 /**
  * Worst case, in seconds, for a change made here to reach every process.
  *
- * Two parts, and both are real. Each process polls the switch table on its own
- * interval — the server tells us which, so this tracks the deploy config rather
- * than a number copied into the frontend — and then the loop being switched
- * notices on its next cycle. The drain cycles every 5s and the prerender consumer
- * every 10s, so the slowest path is one poll plus ten seconds. The MCP server
- * reads its switch per request and adds nothing.
+ * Two parts, and both are real and both are served. Each process polls the switch
+ * table on `pollIntervalMs`, and then the loop being switched notices on its next
+ * cycle. The MCP server resolves per request and adds nothing, which is why it
+ * has no entry in the map rather than an entry of zero.
  *
  * The process that served this page is current the moment the write returns; it
  * is the *other* processes this number is about.
  */
-const SLOWEST_CYCLE_SECONDS = 10;
+function worstCaseSeconds(listing: FeatureListing): number {
+  return seconds(listing.pollIntervalMs) + seconds(slowestCycleMs(listing.cycleIntervalMs));
+}
 
-function worstCaseSeconds(pollIntervalMs: number): number {
-  return Math.ceil(pollIntervalMs / 1000) + SLOWEST_CYCLE_SECONDS;
+/**
+ * "5s for the event drain, 10s for the prerender consumer" — composed, not typed
+ * out, so a loop that changes its interval or a fourth loop that gains one shows
+ * up here without anybody remembering to edit this sentence.
+ *
+ * Titles come from the listing's own rows, so a key present in the map and absent
+ * from the manifest prints as its key rather than vanishing.
+ */
+function cyclePhrases(listing: FeatureListing): string[] {
+  return Object.entries(listing.cycleIntervalMs)
+    .sort(([, a], [, b]) => a - b)
+    .map(([key, interval]) => {
+      const title = listing.features.find((feature) => feature.key === key)?.title ?? key;
+      return `${seconds(interval)}s for ${title.toLowerCase()}`;
+    });
 }
 
 type LoadResult = { ok: true; body: FeatureListing } | { ok: false };
@@ -470,16 +507,17 @@ export function AdminFeaturesPage() {
         refuses.
       </p>
 
+      {/* Every figure in this sentence is served. See `worstCaseSeconds`. */}
       {listing && (
         <p data-testid="latency" className="mt-3 max-w-prose text-sm leading-relaxed text-ink-soft">
           A change here reaches every process within about{" "}
-          <span className="tabular font-semibold text-ink">
-            {worstCaseSeconds(listing.pollIntervalMs)} seconds
-          </span>
-          : up to {Math.ceil(listing.pollIntervalMs / 1000)}s for each process to poll the switch,
-          then up to one cycle of the loop it gates — 5s for the event drain, 10s for the prerender
-          consumer. The MCP server reads its switch on every request and adds nothing. It is not
-          instant, and it no longer needs a restart.
+          <span className="tabular font-semibold text-ink">{worstCaseSeconds(listing)} seconds</span>
+          : up to {seconds(listing.pollIntervalMs)}s for each process to poll the switch
+          {cyclePhrases(listing).length > 0 && (
+            <>, then up to one cycle of the loop it gates — {cyclePhrases(listing).join(", ")}</>
+          )}
+          . A feature with no loop of its own — the MCP server, which resolves its switch on every
+          request — adds nothing to that. It is not instant, and it no longer needs a restart.
         </p>
       )}
 

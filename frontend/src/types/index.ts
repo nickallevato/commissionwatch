@@ -2005,8 +2005,22 @@ export interface FeatureRow {
 
 export interface FeatureListing {
   features: FeatureRow[];
-  /** `FEATURE_POLL_INTERVAL_MS`. Half of how long a change takes to land. */
+  /** `FEATURE_POLL_INTERVAL_MS`. One half of how long a change takes to land. */
   pollIntervalMs: number;
+  /**
+   * The other half: how long the loop behind a key waits between cycles, keyed by
+   * feature key, from the loops' own exported constants.
+   *
+   * Served rather than known here. A copy of the interval in the frontend would
+   * be right today and would go stale the day somebody changes it — silently, on
+   * the screen whose job is to say how long to wait.
+   *
+   * **A key is absent when it has no loop of its own**, which is not the same as
+   * zero: `mcp_server` resolves per request, and the keys with no consumer yet
+   * have nothing to wait for. The console renders absence as "no loop of its
+   * own", never as "instant".
+   */
+  cycleIntervalMs: Record<string, number>;
 }
 
 /** What `PUT /api/admin/features/:key` answers with. A subset of the row. */

@@ -12,6 +12,8 @@ import {
   getFeatureRegistry,
   killSwitchForcesOff,
 } from "../../services/features/registry";
+import { DEFAULT_DRAIN_INTERVAL_MS } from "../../services/events/drain";
+import { DEFAULT_PRERENDER_INTERVAL_MS } from "../../services/prerender/consumer";
 
 /**
  * `/api/admin/features` — the switch panel.
@@ -67,6 +69,31 @@ function registryFor(): FeatureRegistry {
   fallbackRegistry ??= new FeatureRegistry(db);
   return fallbackRegistry;
 }
+
+/**
+ * How long the loop behind a key waits between cycles, per key.
+ *
+ * Half of the honest answer to "how long until this takes effect": a process
+ * polls the switch table on `pollIntervalMs`, and then the loop it gates notices
+ * on its next cycle. The console adds the two and prints the number.
+ *
+ * **Imported from the loops, never re-declared here.** A copy of `10_000` in this
+ * file would be right today and would go stale the day somebody changes the
+ * consumer's interval — and it would go stale silently, on the screen whose job
+ * is to say what is running and how long to wait. This project spent a section of
+ * 0.3.0 on four surfaces that claimed to mirror something and had quietly
+ * stopped; a hardcoded interval is the same defect with a longer fuse.
+ *
+ * A key absent from this map has no loop of its own. `mcp_server` resolves its
+ * switch per request and adds nothing; the three keys with no consumer yet add
+ * nothing because there is nothing yet to add. Absence is the honest answer in
+ * both cases, and it is not the same as zero — the console renders it as "no
+ * loop of its own" rather than as "instant".
+ */
+const CYCLE_INTERVAL_MS: Readonly<Record<string, number>> = {
+  event_drain: DEFAULT_DRAIN_INTERVAL_MS,
+  prerender: DEFAULT_PRERENDER_INTERVAL_MS,
+};
 
 /** The last change to a key, from the log rather than from the mirror on `features`. */
 interface AuditRow {
@@ -188,9 +215,11 @@ router.get("/", async (_req: Request, res, next) => {
 
     res.json({
       features: viewOf(registry, await lastChanges()),
-      // Stated so the console can tell the operator how long a toggle takes to
-      // reach the worker processes, which run their own pollers.
+      // The two halves of the latency, served rather than assumed, so the console
+      // prints a number that tracks the deploy config and the loops' own
+      // constants instead of one somebody typed into the frontend.
       pollIntervalMs: featurePollIntervalMs(),
+      cycleIntervalMs: CYCLE_INTERVAL_MS,
     });
   } catch (err) {
     next(err);

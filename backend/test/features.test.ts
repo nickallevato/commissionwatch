@@ -31,6 +31,8 @@ import {
   setFeatureRegistry,
 } from "../src/services/features/registry";
 import { mcpEnabled } from "../src/routes/mcp";
+import { EventDrain } from "../src/services/events/drain";
+import { PrerenderConsumer } from "../src/services/prerender/consumer";
 import { signInOperator } from "./helpers/pressroom";
 
 /**
@@ -530,6 +532,34 @@ describe("GET /api/admin/features", () => {
 
     assert.equal(res.body.features.length, FEATURES.length);
     assert.equal(res.body.pollIntervalMs, featurePollIntervalMs());
+
+    // The console composes its latency figure from these two, so they are served
+    // rather than copied into the frontend.
+    //
+    // Asserted against **what a real loop instance would run on**, not against
+    // the constants the route imports. A literal in this test would be the same
+    // stale copy one file further along, and comparing the route's number to the
+    // constant the route itself imported would pass just as happily if somebody
+    // hardcoded the value here — the question is whether the console's figure
+    // matches the interval the loop actually uses.
+    const drainInterval = new EventDrain(db, {
+      dispatcher: { dispatch: async () => assert.fail("never ticked") },
+      enabled: false,
+      logger: { warn: () => {}, error: () => {} },
+    }).intervalMs;
+    const prerenderInterval = new PrerenderConsumer(db, {
+      baseUrl: "https://features-test.example",
+      enabled: false,
+      logger: { warn: () => {}, error: () => {} },
+    }).intervalMs;
+
+    assert.deepEqual(res.body.cycleIntervalMs, {
+      event_drain: drainInterval,
+      prerender: prerenderInterval,
+    });
+    // `mcp_server` resolves per request and has no loop of its own. Absent, not
+    // zero: the console says "no loop" rather than implying instant.
+    assert.equal("mcp_server" in res.body.cycleIntervalMs, false);
 
     const drain = res.body.features.find((f: { key: string }) => f.key === "event_drain");
     assert.ok(drain);
