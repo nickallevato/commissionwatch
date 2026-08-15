@@ -173,9 +173,17 @@ describe("MapPage", () => {
     server.use(http.get("/api/metrics", () => new HttpResponse(null, { status: 500 })));
     renderAt(NEAR);
 
+    // The `request-failed` sentence, which names this as our failure rather
+    // than as a fact about the record. `not-yet-ingested` — "No sweep has
+    // collected located decisions yet" — is the wrong claim here and reads
+    // almost identically in a component tree, which is how it got used.
     expect(
-      await screen.findByText(/could not check how much of the record has been located/i),
+      await screen.findByText(/could not be loaded\. That is a failure on our side/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/cannot tell an empty neighbourhood from a gap in our own collection/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No sweep has collected/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/try a wider radius/i)).not.toBeInTheDocument();
   });
 

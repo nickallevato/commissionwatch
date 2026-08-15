@@ -169,10 +169,18 @@ function PlacesAbsence({
   publicPlaces: number | undefined;
 }) {
   if (totalPlaces === undefined || publicPlaces === undefined) {
+    // `request-failed`, not `not-yet-ingested`. The two read almost the same in
+    // a component tree and are opposite claims: "No sweep has collected located
+    // decisions yet" is a definite statement about our collection, and we are
+    // in this branch precisely because we could not ask. The first version of
+    // this component used the wrong one and wrote the correction underneath it
+    // as body copy, so a reader met both sentences and had to pick.
+    // `request-failed` also carries `ours: true`, which is what makes the
+    // component say this is our failure rather than a fact about the record.
     return (
-      <Absence reason="not-yet-ingested" subject="located decisions">
-        We could not check how much of the record has been located, so this may
-        be a gap in our collection rather than a quiet neighbourhood.
+      <Absence reason="request-failed" subject="Located decisions">
+        Until that request answers we cannot tell an empty neighbourhood from a
+        gap in our own collection, and we will not guess which.
       </Absence>
     );
   }
