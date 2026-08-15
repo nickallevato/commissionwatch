@@ -74,14 +74,27 @@ const ALLOWED: Readonly<Record<string, string>> = {
   "members.ts": "the roster is public by design; its problem is provenance, not publication",
 };
 
+/**
+ * An alias counts. `db("meetings as m")` reads the same rows as `db("meetings")`
+ * and the first version of this extractor could not see it, because it required
+ * the whole quoted string to be one word. `services/source-viewer.ts` — the
+ * other end of every citation, serving stored document text — joins five tables
+ * and aliases all of them, so the shape is not hypothetical; a router written
+ * in that style would have walked straight past this guard.
+ */
+const TABLE_IN_QUOTES = String.raw`["'](\w+)(?:\s+as\s+\w+)?["']`;
+
 function knexTables(source: string): string[] {
   const found = new Set<string>();
-  for (const match of source.matchAll(/db\(\s*["'](\w+)["']/g)) {
-    if (WALLED_TABLES.has(match[1])) found.add(match[1]);
-  }
-  // `.from("meetings")` and `.join("meetings", …)` reach the same rows.
-  for (const match of source.matchAll(/\.(?:from|join|leftJoin|innerJoin)\(\s*["'](\w+)["']/g)) {
-    if (WALLED_TABLES.has(match[1])) found.add(match[1]);
+  const patterns = [
+    new RegExp(String.raw`db\(\s*` + TABLE_IN_QUOTES, "g"),
+    // `.from("meetings")` and `.join("meetings", …)` reach the same rows.
+    new RegExp(String.raw`\.(?:from|join|leftJoin|innerJoin|rightJoin)\(\s*` + TABLE_IN_QUOTES, "g"),
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      if (WALLED_TABLES.has(match[1])) found.add(match[1]);
+    }
   }
   return [...found].sort();
 }
@@ -146,6 +159,11 @@ describe("the publication wall is reached by every public router that needs it",
   it("can actually see a query, checked against the route that failed", () => {
     const source = readFileSync(join(ROUTES, "votes.ts"), "utf8");
     assert.ok(knexTables(source).includes("votes"), "the extractor cannot see db(\"votes\")");
+    // And the aliased form, which the first version of the extractor missed.
+    assert.deepEqual(knexTables('db("meetings as m").join("votes as v", …)'), [
+      "meetings",
+      "votes",
+    ]);
     assert.match(source, /from ["']\.\.\/services\/publication["']/);
     assert.match(source, /whereMeetingPublished/);
   });
