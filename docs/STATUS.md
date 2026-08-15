@@ -1,8 +1,12 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-14, after **closing ten unauthenticated public writes, deleting the dead
+> Last updated: 2026-08-15, after a long parallel build that took the product from *a corpus with
+> nowhere to go* to **a claim an operator can approve, a reader can see, and a citation that opens
+> the document it cites** — see § 2026-08-15 immediately below. Backend **1600 tests / 375 suites**,
+> frontend **572 / 54**, both packages typecheck- and lint-clean, deployed at `febae02`.
+> Before that: 2026-08-14, **closing ten unauthenticated public writes, deleting the dead
 > agent package, opening the crawler door, and landing the regions module** — see
-> § 2026-08-14 immediately below, and the new design of record at
+> § 2026-08-14, and the design of record at
 > `docs/superpowers/specs/2026-08-14-system-roadmap-design.md`. **Production is healthy and serving
 > the fix**; the "PRODUCTION IS DOWN" entry under Known defects is from 2026-08-09 and is stale,
 > annotated there rather than deleted. Before that: **minutes extraction landing and reading a real meeting** (below
@@ -30,6 +34,100 @@
 > Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
 > 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
+
+## 2026-08-15 — the pipeline joined up, end to end
+
+The through-line: **several pieces already existed and were simply unreachable**, and connecting
+them is what found the bugs. `DeliveryDispatcher` — 643 lines of durable, batching, consent-gating
+delivery — had never been constructed by a running server. `minute_claims` had review columns since
+migration 072 and nothing wrote them. `rosterCoverage` had no caller. Every one of those is now
+wired, and each wiring surfaced a defect that reading the code had not.
+
+**Deployed and verified in production at `febae02`.**
+
+### What is now true that was not
+
+- **An operator can approve a claim.** Migration 087 adds the render pin, and a CHECK that an
+  `approved` row carries the rendered sentence, the sha of *those exact bytes*, a version and an
+  approver. Approving is no longer a status flip — the pin is what stops a later template edit
+  republishing words nobody read.
+- **A reader can see one.** `GET /api/meetings/:id/claims`, rendered at `#claim-{id}` on the meeting
+  page. A claim is never its own page: a page whose entire content is one sentence about one named
+  person is an accusation; the same sentence inside the record it came from is a record.
+- **A citation opens the document it cites.** `/api/source/{sha256}` and the page over it.
+- **The archive has a second corpus.** Bozeman captions across 1,135 archived meetings, parsed into
+  cues and searchable. Minutes became searchable earlier the same day — they had been fetched,
+  stored, content-addressed and never indexed.
+- **A withdrawn record revokes what announced it**, in both directions: claim retraction and meeting
+  unpublish.
+- **Events exist, and the dispatcher is running dark.** `EVENT_DRAIN_ENABLED` is unset, so the loop
+  runs in production over an empty `channel_routes` table. That is deliberate: it is the cheapest
+  possible way to find out it works.
+
+### Also landed
+
+RSS/Atom and the query feed (the subscription is the URL — no account, nothing to leak, nothing to
+unsubscribe from). `vote_events`, so *"the motion failed 2–3"* is a stored fact with a check that the
+linked claims must sum to the counts. Extraction as a real queue stage. `/api/metrics` and `/metrics`,
+this project measured by its own standard. `/api/data/ocd.json`. The record receipt. `/bot`. The
+privacy page. Matters. Discord routing with audience separation. Email suppression.
+
+### The defects worth remembering
+
+**A fragment never leaves the browser.** `sourceHref` and the claims service, in three places
+total, built `/source/{sha}#offset-{n}`. The server picks the window, so every citation link would
+have opened a three-hundred-page packet at character zero regardless of what it cited — and nothing
+would have looked broken. Found by an agent building the page at the *other* end, not by reading the
+code. All three now build `?offset=&len=`; `len` exists because the API returns no quote length, so
+without it a viewer can find where a quote starts and not where it ends.
+
+**Second copies fail the same way, whether of a rule or a constant.** `emitEvent` kept its own copy
+of the claim wall and went one clause stale the moment migration 087 added `retracted_at` — so a
+claim withdrawn *after* its event was written still read as public. Two agents found it from
+opposite ends, the feed reading the wall and the retractor writing it, because the feed used
+`whereClaimPublic` and the emitter did not. Separately, `test/adapters/contract.ts` held a
+hand-copied duplicate of `DOCUMENT_KINDS`, so every well-formed transcript ref was called an unknown
+kind.
+
+**The email log was lying, daily, in production.** `sendEmail` returned `void` whether it reached a
+provider or wrote a line to stdout, and both callers then wrote `email_status: 'sent'` with a
+timestamp. `DigestScheduler` had been running that path against a service with no `RESEND_API_KEY`.
+Underneath it, `initResend` was an `async` method called un-awaited from a synchronous constructor,
+so `this.resend` was null for a window *even when a key was set*. `dry_run` is now its own status.
+
+**A NULL CHECK result counts as satisfied.** `jsonb_typeof(counts -> 'absent')` is NULL for a
+missing key, so the obvious constraint on `vote_events.counts` accepted exactly the malformed tally
+it existed to refuse.
+
+**Restart safety was not free.** Nothing ever returned a claimed `ingestion_jobs` row to the queue,
+so moving extraction onto the queue would have relocated the permanent-limbo bug rather than
+removing it. `recoverStalled` had to be built.
+
+**`return 301 /findings` emitted an absolute `Location`** built from the Host header and the
+container's own listen port — `commissionwatch.bmux.sh:3000`, unreachable from the internet.
+`nginx -t` was perfectly happy. Running the config in a container and reading the header is what
+found it.
+
+### Still not done, and known
+
+- **The roster is unsourced.** `members` carries no `source_url`, `fetched_at` or `artifact_sha256`,
+  so a row naming a real commissioner is indistinguishable from one somebody typed. `/metrics`
+  publishes `roster_sourced: false` and the page says so in the reader's words. This gates the claim
+  pipeline: every unmatched name is a true claim the verifier throws away.
+- **Nothing has run the backfill.** `npm run backfill:artifact-text` exists; until an operator runs
+  it on the host, minutes stay unindexed for the *existing* archive — the code fix only catches new
+  fetches. Start with `-- --dry-run`.
+- **The extraction failure distribution is unmeasured.** `failed_chunks` now carries a structured
+  reason (`truncated` / `refused` / `upstream-error` / `reasoning-only` / …). One SQL query answers
+  which dominates, and that answer decides whether the next work is chunk splitting, a prompt
+  change, or abandoning the free tier. Guessing wrong there costs a day.
+- **Email cannot ship.** SPF/DKIM/DMARC are unconfigured and `ALERT_FROM_EMAIL` still defaults to
+  `alerts@commissionwatch.org`, which is not the deployed domain and will fail alignment.
+- **The Methodology page must disclose transcripts before the first transcript sweep.** The vendor
+  robots exception is valid *only while disclosed*, and the current disclosure names agendas and
+  minutes.
+- Gallatin transcripts are **not** buildable: AV Capture All behind an AWS WAF challenge. The answer
+  is a records request, not a client.
 
 ## 2026-08-14 — the public writes were open, and the site was invisible
 
