@@ -74,6 +74,28 @@ export interface ManifestDataset {
   csv_url: string;
 }
 
+/**
+ * An export that is not a table.
+ *
+ * `datasets` describes row-shaped files: columns, a row count, a CSV and a JSON
+ * URL. The OCD export is none of those — it is nested documents in somebody
+ * else's schema — so listing it there would have meant inventing a column list
+ * for a thing that has no columns.
+ *
+ * It needs listing *somewhere*, though, and that is the point: `/bot` tells a
+ * machine consumer this manifest is where to start rather than guessing at
+ * paths, and for a while the manifest omitted the one export built specifically
+ * for machines. A discovery document that does not list an endpoint is that
+ * endpoint not existing, as far as anything reading it is concerned.
+ */
+export interface ManifestStructuredExport {
+  name: string;
+  description: string;
+  /** The vocabulary it speaks, so a consumer knows what to validate against. */
+  schema: string;
+  url: string;
+}
+
 export interface ExportManifest {
   generated_at: string;
   schema_migration: string | null;
@@ -82,6 +104,7 @@ export interface ExportManifest {
   republication_request: string;
   publication_rule: string;
   datasets: ManifestDataset[];
+  structured: ManifestStructuredExport[];
 }
 
 /** The newest applied migration, so a reader can pin what shape they received. */
@@ -105,6 +128,16 @@ export async function buildManifest(db: Knex, basePath: string): Promise<ExportM
     });
   }
 
+  const structured: ManifestStructuredExport[] = [
+    {
+      name: "ocd",
+      description:
+        "The published corpus as Open Civic Data Events, for a consumer ingesting the record rather than reading it. Every event carries at least one source; a published meeting we hold no source URL for is omitted and counted rather than emitted unsourced.",
+      schema: "open-civic-data/event",
+      url: `${basePath}/ocd.json`,
+    },
+  ];
+
   return {
     generated_at: new Date().toISOString(),
     schema_migration: await schemaMigration(db),
@@ -114,5 +147,6 @@ export async function buildManifest(db: Knex, basePath: string): Promise<ExportM
     publication_rule:
       "Only records an operator has published appear here. A meeting awaiting review, its agenda items, its documents, its votes and any finding about it are all absent, and a finding that is still held is absent whatever its meeting's state.",
     datasets,
+    structured,
   };
 }

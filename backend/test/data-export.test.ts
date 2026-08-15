@@ -222,7 +222,6 @@ describe("the bulk data export", () => {
   after(async () => {
     await cleanupByPrefix(PREFIX);
     await deleteArtifacts([PUBLISHED_SHA, WITHHELD_SHA, PUBLISHED_MINUTES_SHA]);
-    await db.destroy();
   });
 
   /* ------------------------------------------------------------- the wall */
@@ -449,4 +448,49 @@ describe("the bulk data export", () => {
       "the description was not quoted and escaped",
     );
   });
+});
+
+
+/**
+ * `/bot` tells a machine consumer this manifest is where to start rather than
+ * guessing at paths. For a while it omitted the one export built specifically
+ * for machines — a discovery document that does not list an endpoint is, as far
+ * as anything reading it is concerned, that endpoint not existing.
+ */
+describe("the manifest lists the exports that are not tables", () => {
+  it("names the OCD export, its schema, and a URL that actually serves", async () => {
+    const res = await request(app).get("/api/data").expect(200);
+
+    const ocd = (res.body.structured ?? []).find(
+      (entry: { name: string }) => entry.name === "ocd",
+    );
+    assert.ok(ocd, "the manifest must list the OCD export");
+    assert.equal(ocd.schema, "open-civic-data/event");
+
+    // The URL is followed rather than pattern-matched. A manifest advertising a
+    // path nobody fetches is how a 404 gets published on this project's behalf.
+    const served = await request(app).get(ocd.url).expect(200);
+    assert.equal(served.body.schema, "open-civic-data/event");
+  });
+
+  it("keeps it out of `datasets`, which describes row-shaped files", async () => {
+    const res = await request(app).get("/api/data").expect(200);
+    const names = res.body.datasets.map((d: { name: string }) => d.name);
+    // Listing it there would have meant inventing a column list for a thing
+    // that has no columns.
+    assert.ok(!names.includes("ocd"));
+  });
+});
+
+/**
+ * File scope, not inside a describe.
+ *
+ * node:test runs a describe's `after` the moment that block's tests finish, so
+ * `db.destroy()` inside the first one kills the pool for every suite declared
+ * below it — the manifest tests above failed with a 500 before running a single
+ * assertion. `sitemap.test.ts` was corrected for exactly this an hour earlier;
+ * pool teardown belongs where the file ends, not where the first block does.
+ */
+after(async () => {
+  await db.destroy();
 });
