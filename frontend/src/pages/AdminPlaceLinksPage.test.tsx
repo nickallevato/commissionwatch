@@ -270,10 +270,12 @@ describe("AdminPlaceLinksPage", () => {
     install(queue([makeItem()]));
     renderPage();
 
-    // 45.679123 at `block` — 100 m of uncertainty — is four decimals, not six.
-    // The sixth decimal of a latitude is about 10 cm.
+    // 45.679123 at `block` — 100 m of uncertainty — is THREE decimals, about
+    // 110 m. Four would be 11 m, nine times finer than a TIGER address-range
+    // interpolation supports, and the ±100 m written beside it does not undo a
+    // number that looks surveyed. The sixth decimal of a latitude is 10 cm.
     const figures = await screen.findByTestId(`coordinate-figures-${LINK_ID}`);
-    expect(figures.textContent).toBe("45.6791, -111.0385");
+    expect(figures.textContent).toBe("45.679, -111.038");
     expect(figures.textContent).not.toContain("45.679123");
   });
 

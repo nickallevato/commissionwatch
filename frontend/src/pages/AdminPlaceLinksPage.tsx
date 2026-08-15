@@ -160,6 +160,19 @@ function formatStamp(value: string | null): string {
  * single most common way civic maps mislead, applied to the digits rather than
  * to a radius.
  *
+ * The thresholds pick the decimal place *nearest* the grade's uncertainty rather
+ * than the first one finer than it. The distinction is the whole point and the
+ * first version of this table got it backwards: `block` carries 100 m and was
+ * printed to four places, which is 11 m — nine times finer than the record
+ * supports, on the grade the geocoder actually produces. An operator copying
+ * those digits into any map lands on a building, and the ±100 m written beside
+ * them does not undo a number that looks surveyed.
+ *
+ *   exact         10 m  → 4 places (11 m)
+ *   block        100 m  → 3 places (110 m)
+ *   centroid     250 m  → 3 places (110 m), the nearer of 110 m and 1.1 km
+ *   jurisdiction  none  → 2 places (1.1 km)
+ *
  * `null` uncertainty is `jurisdiction`, which carries no position at all; an
  * unrecognised grade is treated the same way, because a coordinate with no known
  * error bar is exactly the thing being refused.
@@ -168,9 +181,9 @@ function decimalsFor(precision: PlacePrecision | null): number {
   if (precision === null) return 2;
   const metres = PRECISION_GRADES[precision].uncertainty_metres;
   if (metres === null) return 2;
-  if (metres <= 10) return 5;
-  if (metres <= 100) return 4;
-  return 3;
+  if (metres <= 20) return 4;
+  if (metres <= 500) return 3;
+  return 2;
 }
 
 /**
