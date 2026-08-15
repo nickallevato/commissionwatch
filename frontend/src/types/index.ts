@@ -2024,6 +2024,53 @@ export interface FeatureRow {
   lastChange: FeatureLastChange | null;
 }
 
+/**
+ * The outcomes `export_snapshot_runs.outcome` is allowed to hold, per the CHECK
+ * constraint the migration writes and `SnapshotRunOutcome` in
+ * `backend/src/services/export/snapshot-scheduler.ts`.
+ *
+ * The list exists so the console can say what a value *means*. The wire field
+ * stays `string` for the reason `FeatureRow.risk` does — a value this build has
+ * no words for must render as itself rather than fall through a branch and
+ * vanish.
+ */
+export const SNAPSHOT_RUN_OUTCOMES = [
+  "taken",
+  "skipped_disabled",
+  "skipped_same_day",
+  "skipped_locked",
+  "failed",
+] as const;
+
+export type SnapshotRunOutcome = (typeof SNAPSHOT_RUN_OUTCOMES)[number];
+
+/**
+ * One day-and-outcome of the dated archive's snapshot loop.
+ *
+ * Read off `snapshotRunView` in `backend/src/routes/admin/features.ts`, which
+ * renames the columns of `export_snapshot_runs`: `run_day` → `day`,
+ * `first_at`/`last_at` → `firstAt`/`lastAt`, `snapshot_id` → `snapshotId`.
+ *
+ * The row is a **collapsed repeat**, not a single cycle: the unique index over
+ * `(run_day, outcome)` turns a second cycle with the same outcome on the same
+ * day into `cycles + 1` with a new `lastAt`. "It skipped 47 times today" and "it
+ * skipped once" are therefore the same row shape and different numbers, and the
+ * console has to print the number for them to read differently.
+ */
+export interface SnapshotRunRow {
+  /** `YYYY-MM-DD`, UTC, rendered by Postgres — the archive's own unit of address. */
+  day: string;
+  /** `string` on the wire; matched against `SNAPSHOT_RUN_OUTCOMES`. */
+  outcome: string;
+  /** Cycles that reached this outcome on this day. Never zero. */
+  cycles: number;
+  firstAt: string;
+  lastAt: string;
+  /** Set for `taken` and for `skipped_same_day`; null for a skip with no snapshot. */
+  snapshotId: string | null;
+  detail: string | null;
+}
+
 export interface FeatureListing {
   features: FeatureRow[];
   /** `FEATURE_POLL_INTERVAL_MS`. One half of how long a change takes to land. */
@@ -2042,6 +2089,18 @@ export interface FeatureListing {
    * own", never as "instant".
    */
   cycleIntervalMs: Record<string, number>;
+  /**
+   * The dated archive's snapshot cycles, skips included, newest day first — the
+   * last 30 days of `export_snapshot_runs`.
+   *
+   * **Optional on purpose, and the console must not treat `undefined` as `[]`.**
+   * A backend older than the loop serves no such field, and a console that
+   * renders a confident "no snapshots" against a server that never sent the data
+   * is the exact failure `/admin/features` exists to refuse. An empty array is a
+   * statement — the loop has recorded nothing. An absent field is not a
+   * statement at all, and the screen says so in different words.
+   */
+  snapshotRuns?: SnapshotRunRow[];
 }
 
 /** What `PUT /api/admin/features/:key` answers with. A subset of the row. */

@@ -14,10 +14,13 @@ import { Absence } from "@/components/ui/Absence";
 import {
   FEATURE_RISKS,
   FEATURE_SOURCES,
+  SNAPSHOT_RUN_OUTCOMES,
   type FeatureListing,
   type FeatureRisk,
   type FeatureRow,
   type FeatureSource,
+  type SnapshotRunOutcome,
+  type SnapshotRunRow,
 } from "@/types";
 
 /**
@@ -287,9 +290,237 @@ function DecisionForm({
   );
 }
 
+/**
+ * The one key whose loop keeps a durable ledger, and so the one row that carries
+ * one. See `SNAPSHOT_RUN_DAYS` in `backend/src/routes/admin/features.ts`.
+ */
+const SNAPSHOT_LEDGER_KEY = "dated_export_archive";
+
+const OUTCOME_LABEL: Record<SnapshotRunOutcome, string> = {
+  taken: "Snapshot taken",
+  skipped_disabled: "Skipped — the feature was off",
+  skipped_same_day: "Skipped — the day already had one",
+  skipped_locked: "Skipped — another process held the lock",
+  failed: "Failed",
+};
+
+const OUTCOME_MEANING: Record<SnapshotRunOutcome, string> = {
+  taken: "The archive can answer for this day.",
+  skipped_disabled:
+    "The loop ran and deliberately did nothing. Publication state is one mutable column, so a day nobody snapshotted cannot be reconstructed later.",
+  skipped_same_day:
+    "A further cycle on a day that already had a snapshot. A no-op, not a duplicate and not an error.",
+  skipped_locked:
+    "Another container held the advisory lock, so that one did the day's work and this cycle stood down.",
+  failed:
+    "The cycle raised. The detail is its error text, and the day has no snapshot unless a later cycle took one.",
+};
+
+/** As `sourceOf`: matched against the constant, never cast, so an unknown value survives. */
+function outcomeOf(outcome: string): SnapshotRunOutcome | null {
+  for (const known of SNAPSHOT_RUN_OUTCOMES) if (known === outcome) return known;
+  return null;
+}
+
+function cycleCount(cycles: number): string {
+  return cycles === 1 ? "1 cycle" : `${cycles} cycles`;
+}
+
+/**
+ * Whether nothing has ever turned this key on, so far as this response can say.
+ *
+ * Deliberately narrow: off now, no operator decision on record, and no step
+ * above the default deciding it. Anything else — a kill switch holding it off, a
+ * legacy variable, a recorded decision — leaves open that it has been on, and
+ * the console must not claim otherwise from the last change alone.
+ */
+function neverEnabled(feature: FeatureRow): boolean {
+  return !feature.enabled && feature.lastChange === null && feature.source === "default";
+}
+
+/** One collapsed day-and-outcome. `cycles` is the repeat count, not a row count. */
+function SnapshotRun({ run }: { run: SnapshotRunRow }) {
+  const outcome = outcomeOf(run.outcome);
+
+  return (
+    <li
+      data-testid={`snapshot-run-${run.day}-${run.outcome}`}
+      className="border-l-2 border-rule pl-3"
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+        <span className="tabular label-sm text-ink">{run.day}</span>
+        {outcome === null ? (
+          <span className="font-mono text-[12.5px] text-ink">{run.outcome}</span>
+        ) : (
+          <span
+            className={`text-[12.5px] font-semibold ${
+              outcome === "taken"
+                ? "text-pass"
+                : outcome === "failed"
+                  ? "text-accent"
+                  : "text-ink-soft"
+            }`}
+          >
+            {OUTCOME_LABEL[outcome]}
+          </span>
+        )}
+        {/* The count and the last-seen time, always. "It skipped 47 times
+          today" and "it skipped once" are the same row shape on the wire and
+          only the number tells them apart. */}
+        <span className="text-[12.5px] text-muted">
+          {cycleCount(run.cycles)}
+          {run.cycles > 1 ? (
+            <>
+              , first <span className="tabular">{formatStamp(run.firstAt)}</span>, last{" "}
+              <span className="tabular">{formatStamp(run.lastAt)}</span>
+            </>
+          ) : (
+            <>
+              {" "}
+              at <span className="tabular">{formatStamp(run.lastAt)}</span>
+            </>
+          )}
+        </span>
+      </div>
+
+      <p className="mt-0.5 max-w-prose text-[12.5px] leading-relaxed text-ink-soft">
+        {outcome === null
+          ? "This build has no words for that outcome, so nothing here says what the loop did. Read the detail and the server's own list of outcomes."
+          : OUTCOME_MEANING[outcome]}
+      </p>
+
+      {run.detail !== null && (
+        <p className="mt-0.5 max-w-prose text-[11.5px] leading-relaxed text-muted">{run.detail}</p>
+      )}
+      {run.snapshotId !== null && (
+        <p className="mt-0.5 text-[11.5px] text-muted">
+          Snapshot <span className="font-mono">{run.snapshotId}</span>
+        </p>
+      )}
+    </li>
+  );
+}
+
+/**
+ * The dated archive's cycles, under the switch they are evidence about.
+ *
+ * This exists because the two states an operator most needs to tell apart look
+ * identical from outside: `/api/data/archive` 404s while the flag is off, so it
+ * cannot report on its own scheduler, and "the loop skipped every cycle because
+ * the flag was off" and "the loop is not running at all" both present as no
+ * archive. The ledger separates them — a running loop writes a `skipped_disabled`
+ * row every cycle, so a *populated* ledger of skips is proof of life and an
+ * *empty* one is not.
+ *
+ * Which makes the empty case the one this component is really for, and it is
+ * four different facts rather than one:
+ *
+ * - **The field was not served.** An older backend than the loop. Not an empty
+ *   ledger — no answer at all, and a confident emptiness rendered against a
+ *   server that never sent the data is the precise failure this screen was built
+ *   to refuse.
+ * - **The read failed.** Same rule as the page's own `request-failed`: we could
+ *   not ask, which is not an answer of none.
+ * - **Empty, and nothing has ever turned the key on.** Expected, and still not a
+ *   claim that the scheduler is alive.
+ * - **Empty, and the key is not in its untouched state.** The thing to explain:
+ *   every cycle writes a row, so no rows means no cycle has completed here.
+ */
+function SnapshotLedger({
+  feature,
+  runs,
+  stale,
+}: {
+  feature: FeatureRow;
+  /** `undefined` when the server did not send the field. Never coerced to `[]`. */
+  runs: SnapshotRunRow[] | undefined;
+  /** The last read of this page failed, so what is in hand may be out of date. */
+  stale: boolean;
+}) {
+  return (
+    <div data-testid="snapshot-ledger" className="mt-4 border-t border-rule pt-4">
+      {/* "Most recent" and not "the last 30 days": the route asks for 30 *rows*,
+        and a day can produce a row per outcome, so the window this covers is
+        between six days and thirty and the screen cannot say which. Printing the
+        stronger claim would be the same defect as an empty list standing in for
+        a failed read. */}
+      <h4 className="label-sm text-ink">Snapshot cycles — most recent first</h4>
+      <p className="mt-1 max-w-prose text-[12.5px] leading-relaxed text-ink-soft">
+        Every cycle of the loop behind this switch is written down, skips and failures included,
+        because <span className="font-mono">/api/data/archive</span> answers 404 while the switch is
+        off and so cannot report on its own scheduler. A ledger full of skips means the loop is
+        running and the flag is off; an empty one does not mean that.
+      </p>
+
+      {runs === undefined ? (
+        /* No answer, not an answer of none. */
+        <p
+          data-testid="snapshot-ledger-not-served"
+          className="mt-3 max-w-prose text-[12.5px] leading-relaxed text-ink-soft"
+        >
+          This server did not send the ledger at all — the field is absent from the response, which
+          is what a backend older than the snapshot loop looks like. Nothing here can say whether a
+          cycle has run or a snapshot has been taken. Read it as no answer, and not as no snapshots.
+        </p>
+      ) : stale && runs.length === 0 ? (
+        <p
+          data-testid="snapshot-ledger-request-failed"
+          className="mt-3 max-w-prose text-[12.5px] leading-relaxed text-ink-soft"
+        >
+          The last read of this page failed, so there are no rows in hand and no claim to make about
+          them. That is a failure on our side, not a statement that no cycle has run.
+        </p>
+      ) : runs.length === 0 ? (
+        neverEnabled(feature) ? (
+          <p
+            data-testid="snapshot-ledger-never-enabled"
+            className="mt-3 max-w-prose text-[12.5px] leading-relaxed text-ink-soft"
+          >
+            No cycle has been recorded, and nothing has ever turned{" "}
+            <span className="font-mono">{feature.key}</span> on here: it is off, no operator decision
+            exists for it, and nothing above the default is deciding it. That is an absence with a
+            reason. It is still not evidence that the scheduler is alive — a running loop writes a{" "}
+            “{OUTCOME_LABEL.skipped_disabled}” row every cycle even while the switch is off, so if a
+            cycle had completed in this deployment there would be one here.
+          </p>
+        ) : (
+          <p
+            data-testid="snapshot-ledger-nothing-recorded"
+            className="mt-3 max-w-prose text-[12.5px] leading-relaxed text-ink-soft"
+          >
+            No cycle has been recorded, and this switch is not in its untouched state — so the empty
+            ledger is the thing to explain rather than the thing to expect. Every cycle writes a row,
+            skips and failures included, so this says the loop has not completed a cycle in this
+            deployment: it is not running, or the process has not reached its first tick. It does not
+            say a snapshot was taken and lost.
+          </p>
+        )
+      ) : (
+        <>
+          {stale && (
+            <p
+              data-testid="snapshot-ledger-stale"
+              className="mt-3 max-w-prose text-[12.5px] leading-relaxed text-ink-soft"
+            >
+              The last read of this page failed, so these rows are from an earlier load and may be
+              out of date.
+            </p>
+          )}
+          <ul className="mt-3 space-y-3">
+            {runs.map((run) => (
+              <SnapshotRun key={`${run.day}-${run.outcome}`} run={run} />
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** One switch, everything that decided it, and the control — or the reason there is none. */
 function Feature({
   feature,
+  ledger,
   open,
   busy,
   onOpen,
@@ -297,6 +528,8 @@ function Feature({
   onConfirm,
 }: {
   feature: FeatureRow;
+  /** The snapshot ledger, on the one row it is evidence about. Null elsewhere. */
+  ledger: { runs: SnapshotRunRow[] | undefined; stale: boolean } | null;
   open: boolean;
   busy: boolean;
   onOpen: () => void;
@@ -371,6 +604,12 @@ function Feature({
           </>
         )}
       </p>
+
+      {/* Under the switch it is evidence about, not in a section of its own.
+        "Has this loop been running" is a question about this row. */}
+      {ledger !== null && (
+        <SnapshotLedger feature={feature} runs={ledger.runs} stale={ledger.stale} />
+      )}
 
       {feature.forcedOff ? (
         /* In place, with the variable named. See the file header. */
@@ -487,6 +726,19 @@ export function AdminFeaturesPage() {
   const loadedAt = features[0]?.loadedAt ?? null;
   const unknownRisk = features.filter((feature) => riskOf(feature.risk) === null);
 
+  /**
+   * The ledger belongs to one row and travels with the listing that carried it.
+   *
+   * `listing.snapshotRuns` is passed through **as it arrived** — `undefined` when
+   * the server sent no such field — because the component's whole job is telling
+   * that apart from an empty array, and defaulting it here would erase the
+   * distinction before it ever reached the screen.
+   */
+  function ledgerFor(feature: FeatureRow) {
+    if (listing === null || feature.key !== SNAPSHOT_LEDGER_KEY) return null;
+    return { runs: listing.snapshotRuns, stale: error !== "" };
+  }
+
   return (
     <>
       <WorkTitle
@@ -589,6 +841,7 @@ export function AdminFeaturesPage() {
                     <Feature
                       key={feature.key}
                       feature={feature}
+                      ledger={ledgerFor(feature)}
                       open={openKey === feature.key}
                       busy={busy === feature.key}
                       onOpen={() => {
@@ -618,6 +871,7 @@ export function AdminFeaturesPage() {
                   <Feature
                     key={feature.key}
                     feature={feature}
+                    ledger={ledgerFor(feature)}
                     open={openKey === feature.key}
                     busy={busy === feature.key}
                     onOpen={() => {

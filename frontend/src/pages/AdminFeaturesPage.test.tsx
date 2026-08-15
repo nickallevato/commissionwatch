@@ -5,7 +5,12 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AdminFeaturesPage } from "./AdminFeaturesPage";
 import { server } from "@/mocks/server";
-import type { FeatureListing, FeatureRow, FeatureWriteResult } from "@/types";
+import type {
+  FeatureListing,
+  FeatureRow,
+  FeatureWriteResult,
+  SnapshotRunRow,
+} from "@/types";
 
 /**
  * `/admin/features` — the switch panel.
@@ -98,6 +103,49 @@ const NARRATIVE: FeatureRow = {
   loadedAt: LOADED_AT,
   forcedOff: false,
   lastChange: null,
+};
+
+/**
+ * The archive switch, in its untouched state: off, defaulted, never decided.
+ *
+ * The row the snapshot ledger hangs off. It is the only key in the manifest
+ * whose loop leaves a durable record, which is why it is the only row that
+ * carries one.
+ */
+const ARCHIVE: FeatureRow = {
+  key: "dated_export_archive",
+  title: "Dated export archive",
+  description: "`/api/data/archive` serves point-in-time exports addressed by date.",
+  risk: "publishes",
+  legacyEnv: null,
+  requiresSeed: null,
+  killSwitchEnv: "FEATURE_DATED_EXPORT_ARCHIVE",
+  enabled: false,
+  source: "default",
+  loadedAt: LOADED_AT,
+  forcedOff: false,
+  lastChange: null,
+};
+
+const SKIPPED: SnapshotRunRow = {
+  day: "2026-08-15",
+  outcome: "skipped_disabled",
+  cycles: 47,
+  firstAt: "2026-08-15T00:14:00.000Z",
+  lastAt: "2026-08-15T22:14:00.000Z",
+  snapshotId: null,
+  detail:
+    "the dated_export_archive feature is off, so no snapshot was taken and the archive cannot answer for this day",
+};
+
+const TAKEN: SnapshotRunRow = {
+  day: "2026-08-14",
+  outcome: "taken",
+  cycles: 1,
+  firstAt: "2026-08-14T01:14:00.000Z",
+  lastAt: "2026-08-14T01:14:00.000Z",
+  snapshotId: "33333333-4444-4555-8666-000000000009",
+  detail: "6 dataset(s), 1204 row(s)",
 };
 
 function listing(features: FeatureRow[] = [DRAIN, PRERENDER, NARRATIVE]): FeatureListing {
@@ -391,6 +439,193 @@ describe("AdminFeaturesPage", () => {
     // `Absence` says it in the shared words: a failure of ours, explicitly not a
     // statement that there are none.
     expect(screen.getByText(/not a statement that there are none/i)).toBeInTheDocument();
+  });
+
+  /**
+   * The snapshot ledger, under the switch it is evidence about.
+   *
+   * The reason it exists: `/api/data/archive` 404s while `dated_export_archive`
+   * is off, so it cannot report on its own scheduler, and "the loop skipped every
+   * cycle because the flag was off" and "the loop is not running at all" are
+   * indistinguishable from outside. A populated ledger of skips is proof of life;
+   * an empty one is not — which is why the empty case is four different facts
+   * here and never one.
+   */
+  describe("the snapshot ledger", () => {
+    function withRuns(runs: SnapshotRunRow[] | undefined, feature: FeatureRow = ARCHIVE): FeatureListing {
+      const body = listing([DRAIN, feature]);
+      // Assigned rather than spread with `snapshotRuns: undefined`, so the
+      // "older backend" case is a genuinely absent key in the JSON body and not
+      // a present key holding undefined.
+      if (runs !== undefined) body.snapshotRuns = runs;
+      return body;
+    }
+
+    it("renders the ledger inside the dated export archive row, not in a section of its own", async () => {
+      serve(withRuns([SKIPPED, TAKEN]));
+      renderPage();
+
+      const ledger = await screen.findByTestId("snapshot-ledger");
+      // Evidence about one switch belongs on that switch. An operator looking at
+      // the archive row must not have to find a separate panel to learn that its
+      // loop has never ticked.
+      const card = ledger.closest("section");
+      expect(card).not.toBeNull();
+      expect(within(card as HTMLElement).getByText("Dated export archive")).toBeInTheDocument();
+      expect(within(card as HTMLElement).queryByText("Event drain")).not.toBeInTheDocument();
+    });
+
+    it("prints the repeat count, so 47 skips do not read as one", async () => {
+      serve(withRuns([SKIPPED, TAKEN]));
+      renderPage();
+
+      // The row is a collapsed repeat: `(run_day, outcome)` is unique and a
+      // further cycle increments `cycles`. Without the number on screen, a loop
+      // that skipped all day and a loop that ticked once look identical.
+      const skipped = await screen.findByTestId("snapshot-run-2026-08-15-skipped_disabled");
+      expect(skipped).toHaveTextContent("47 cycles");
+      expect(skipped).toHaveTextContent(/skipped — the feature was off/i);
+      expect(skipped).toHaveTextContent(/cannot answer for this day/i);
+
+      const taken = screen.getByTestId("snapshot-run-2026-08-14-taken");
+      expect(taken).toHaveTextContent("1 cycle");
+      expect(taken).not.toHaveTextContent("1 cycles");
+      expect(taken).toHaveTextContent("33333333-4444-4555-8666-000000000009");
+    });
+
+    it("renders an outcome this build does not recognise as itself", async () => {
+      // Same rule as the unrecognised risk grade. A cycle dropped from this list
+      // is a cycle nobody knows happened.
+      serve(withRuns([{ ...SKIPPED, outcome: "skipped_quiesced", cycles: 3 }]));
+      renderPage();
+
+      const run = await screen.findByTestId("snapshot-run-2026-08-15-skipped_quiesced");
+      expect(run).toHaveTextContent("skipped_quiesced");
+      expect(run).toHaveTextContent("3 cycles");
+      expect(run).toHaveTextContent(/no words for that outcome/i);
+    });
+
+    it("says the server sent no ledger at all rather than rendering an empty one", async () => {
+      // A backend older than the loop. This is the failure the whole screen was
+      // built to refuse: a confident emptiness rendered against a server that
+      // never sent the data. "No answer" and "no snapshots" are different facts
+      // and they must not share a rendering.
+      serve(withRuns(undefined));
+      renderPage();
+
+      const note = await screen.findByTestId("snapshot-ledger-not-served");
+      expect(note).toHaveTextContent(/did not send the ledger at all/i);
+      expect(note).toHaveTextContent(/no answer, and not as no snapshots/i);
+      expect(screen.queryByTestId("snapshot-ledger-never-enabled")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("snapshot-ledger-nothing-recorded")).not.toBeInTheDocument();
+    });
+
+    it("distinguishes an empty ledger on a switch nothing has ever turned on", async () => {
+      serve(withRuns([]));
+      renderPage();
+
+      const note = await screen.findByTestId("snapshot-ledger-never-enabled");
+      expect(note).toHaveTextContent(/nothing has ever turned/i);
+      // And still not a claim that the scheduler is alive: a running loop writes
+      // a skip row every cycle even while the switch is off.
+      expect(note).toHaveTextContent(/not evidence that the scheduler is alive/i);
+      expect(screen.queryByTestId("snapshot-ledger-not-served")).not.toBeInTheDocument();
+    });
+
+    it("distinguishes an empty ledger on a switch somebody has decided", async () => {
+      // On, decided, and no cycle recorded. That is the state that needs
+      // explaining rather than the one to expect, and it is not the same
+      // sentence as a switch nobody has touched.
+      serve(
+        withRuns([], {
+          ...ARCHIVE,
+          enabled: true,
+          source: "registry",
+          lastChange: {
+            enabledFrom: null,
+            enabledTo: true,
+            operatorId: "11111111-2222-4333-8444-000000000002",
+            operatorEmail: "invented.operator@example.invalid",
+            reason: "Recording days before the archive is served.",
+            at: "2026-08-15T19:00:00.000Z",
+          },
+        }),
+      );
+      renderPage();
+
+      const note = await screen.findByTestId("snapshot-ledger-nothing-recorded");
+      expect(note).toHaveTextContent(/not in its untouched state/i);
+      expect(note).toHaveTextContent(/has not completed a cycle/i);
+      expect(screen.queryByTestId("snapshot-ledger-never-enabled")).not.toBeInTheDocument();
+    });
+
+    /** A first load that answers, then a reload that does not. */
+    function serveThenFail(body: FeatureListing): void {
+      let served = 0;
+      server.use(
+        http.get("/api/admin/features", () => {
+          served += 1;
+          return served === 1 ? HttpResponse.json(body) : HttpResponse.error();
+        }),
+        http.put("/api/admin/features/dated_export_archive", () => {
+          const written: FeatureWriteResult = {
+            key: "dated_export_archive",
+            enabled: true,
+            source: "registry",
+            loadedAt: LOADED_AT,
+            forcedOff: false,
+            lastChange: null,
+          };
+          return HttpResponse.json(written);
+        }),
+      );
+    }
+
+    async function reloadAfterWrite(): Promise<void> {
+      const user = userEvent.setup();
+      await user.click(await screen.findByTestId("toggle-dated_export_archive"));
+      await user.type(
+        screen.getByLabelText(/why is dated_export_archive being turned on/i),
+        "Recording days before the archive is served.",
+      );
+      await user.click(screen.getByTestId("confirm-dated_export_archive"));
+    }
+
+    it("renders a failed read as a failed read, never as an empty ledger", async () => {
+      serveThenFail(withRuns([]));
+      renderPage();
+      await reloadAfterWrite();
+
+      // We could not ask. That is not an answer of none, and on this row it is
+      // not "the loop has recorded nothing" either.
+      const note = await screen.findByTestId("snapshot-ledger-request-failed");
+      expect(note).toHaveTextContent(/last read of this page failed/i);
+      expect(note).toHaveTextContent(/not a statement that no cycle has run/i);
+      expect(screen.queryByTestId("snapshot-ledger-never-enabled")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("snapshot-ledger-nothing-recorded")).not.toBeInTheDocument();
+    });
+
+    it("marks rows kept from an earlier load as possibly out of date", async () => {
+      serveThenFail(withRuns([SKIPPED]));
+      renderPage();
+      await reloadAfterWrite();
+
+      expect(await screen.findByTestId("snapshot-ledger-stale")).toHaveTextContent(
+        /from an earlier load and may be out of date/i,
+      );
+      // The rows stay: withholding what we do have would be its own lie.
+      expect(screen.getByTestId("snapshot-run-2026-08-15-skipped_disabled")).toBeInTheDocument();
+    });
+
+    it("hangs no ledger on a switch whose loop keeps no record", async () => {
+      // The archive's loop is the only one whose cycles are durable. A ledger
+      // under the drain would imply a record that does not exist.
+      serve(listing());
+      renderPage();
+
+      await screen.findByText("Event drain");
+      expect(screen.queryByTestId("snapshot-ledger")).not.toBeInTheDocument();
+    });
   });
 
   it("renders a feature whose risk grade this build does not know", async () => {
