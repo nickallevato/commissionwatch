@@ -797,6 +797,14 @@ export type ExtractionFailureReason =
   | "request-failed"
   | "unreadable-reply"
   | "truncated-reply"
+  /**
+   * Cut off while repeating itself: the run of claims immediately before the cut
+   * introduced nothing new. Split out from `truncated-reply` on 2026-08-15,
+   * because "we ran out of budget mid-record" and "the model looped and the
+   * budget ran out on the loop" are different events and only the first is a
+   * reason to suspect the record was not read.
+   */
+  | "repetition-truncated"
   /** A row written before the taxonomy existed, or a reason this version does not know. */
   | "unclassified";
 

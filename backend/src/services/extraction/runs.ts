@@ -88,6 +88,7 @@ export const CHUNK_FAILURE_REASONS: Record<ChunkFailureReason, true> = {
   "request-failed": true,
   "unreadable-reply": true,
   "truncated-reply": true,
+  "repetition-truncated": true,
 };
 
 /**
@@ -123,6 +124,7 @@ export function asReason(value: unknown): ChunkFailureReason | null {
     case "request-failed":
     case "unreadable-reply":
     case "truncated-reply":
+    case "repetition-truncated":
       return value;
     default:
       return null;

@@ -22,6 +22,8 @@ import {
 import {
   chunkText,
   dedupeClaims,
+  dedupeRawClaims,
+  REPETITION_TAIL_THRESHOLD,
   extractClaims,
   persistClaims,
   pruneDisallowedClaims,
@@ -1037,6 +1039,213 @@ describe("a reply cut off by the token ceiling", () => {
     assert.equal(outcome.failedChunks.length, outcome.chunks);
     assert.match(outcome.failedChunks[0].error, /Truncated reply/);
     assert.notEqual(classifyExtraction(outcome), "succeeded");
+  });
+});
+
+/**
+ * The repetition loop, measured on the corpus 2026-08-15 and reproduced here.
+ *
+ * Two real replies from `nvidia/nemotron-3-nano-30b-a3b:free` over stored
+ * minutes: one emitted 95 objects of which 4 were distinct, one of them 92
+ * times; the other cycled three claims in a 3-beat pattern, 99 objects, 4
+ * distinct. Both were cut off mid-string by the 8000-token ceiling, and in both
+ * the loop began at object index 4 — after the genuine claims, not instead of
+ * them.
+ *
+ * What this suite holds:
+ *
+ *  - **a repeat is not evidence.** De-duplication happens before the verifier,
+ *    because 91 copies of one claim produced 91 rejections describing the model
+ *    rather than the record;
+ *  - **the two truncations are labelled differently.** "Cut off while still
+ *    producing new claims" and "cut off while repeating itself" support
+ *    different statements about the record, and the ledger has to be able to
+ *    tell an operator which one happened;
+ *  - **the label says what was observed, not what was lost.** A
+ *    `repetition-truncated` chunk still counts as unread. Whether any distinct
+ *    claim fell after the cut is a measurement over repeated runs, and no label
+ *    on a single reply can answer it.
+ *
+ * Every name here is invented.
+ */
+describe("a reply that repeats itself", () => {
+  const CLAIM = {
+    subject_name: "Commissioner Bode",
+    action: "spoke",
+    matter: "H.2 Ordinance Provisional Adoption",
+    quote: "Commissioner Bode spoke to the ordinance.",
+  };
+
+  function repeated(times: number): string {
+    return JSON.stringify(Array.from({ length: times }, () => CLAIM));
+  }
+
+  it("counts two claims agreeing on all four fields as one", () => {
+    const shape = dedupeRawClaims([CLAIM, { ...CLAIM }, { ...CLAIM }]);
+    assert.equal(shape.distinct.length, 1);
+    assert.equal(shape.repeats, 2);
+  });
+
+  it("ignores whitespace and case, which a model varies and the record does not", () => {
+    const shape = dedupeRawClaims([
+      CLAIM,
+      { ...CLAIM, quote: "  Commissioner Bode spoke\nto the ordinance.  " },
+      { ...CLAIM, subject_name: "commissioner bode" },
+    ]);
+    assert.equal(shape.distinct.length, 1);
+  });
+
+  it("keeps claims that differ in any one field", () => {
+    const shape = dedupeRawClaims([
+      CLAIM,
+      { ...CLAIM, action: "moved" },
+      { ...CLAIM, subject_name: "Commissioner Sweeney" },
+      { ...CLAIM, matter: "H.3 Something Else" },
+      { ...CLAIM, quote: "Commissioner Bode spoke again." },
+    ]);
+    assert.equal(shape.distinct.length, 5);
+    assert.equal(shape.repeats, 0);
+  });
+
+  it("keeps the first occurrence and its order", () => {
+    const first = { ...CLAIM, action: "moved" };
+    const shape = dedupeRawClaims([first, CLAIM, { ...first }]);
+    assert.deepEqual(
+      shape.distinct.map((claim) => claim.action),
+      ["moved", "spoke"],
+    );
+  });
+
+  it("measures the trailing run that introduced nothing new", () => {
+    // The number that separates the two truncations. A reply still producing new
+    // claims when it was cut has a tail of zero.
+    assert.equal(dedupeRawClaims([CLAIM, { ...CLAIM, action: "moved" }]).tail, 0);
+    assert.equal(dedupeRawClaims([CLAIM, { ...CLAIM }, { ...CLAIM }]).tail, 2);
+    assert.equal(dedupeRawClaims([]).tail, 0);
+  });
+
+  it("does not throw on a malformed object, and treats two alike as one", () => {
+    // The verifier refuses these. This function only decides identity, and a
+    // malformed object repeated fifty times is still one malformed object.
+    const bad = { subject_name: 7, action: null, quote: undefined } as unknown as typeof CLAIM;
+    const shape = dedupeRawClaims([bad, { ...bad }]);
+    assert.equal(shape.distinct.length, 1);
+  });
+
+  it("labels a looping truncation apart from an honest one", async () => {
+    // Cut mid-string after a long run of repeats, which is the shape both
+    // measured replies had.
+    const looping = repeated(40).replace(/\]$/, ',{"subject_name":"Commissioner Bo');
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: looping } }] }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    const failed = outcome.failedChunks[0];
+    assert.equal(failed.reason, "repetition-truncated");
+    assert.equal(failed.recovered, 1, "one distinct claim, not forty objects");
+    assert.equal(failed.proposed, 40);
+    assert.equal(failed.repeats, 39);
+    assert.equal(failed.repeated_tail, 39);
+    assert.match(failed.error, /looped rather than ran out of document/);
+  });
+
+  it("still calls a truncation that was producing new claims a truncation", async () => {
+    // The shape of an honest cut: distinct claims all the way to the ceiling.
+    // Nothing repeated, so the reason must not change and the operator must not
+    // be told the model looped when it did not.
+    const honest =
+      JSON.stringify([
+        CLAIM,
+        { ...CLAIM, action: "moved" },
+        { ...CLAIM, subject_name: "Commissioner Sweeney" },
+      ]).replace(/\]$/, ',{"subject_name":"Deputy Mayor Fis');
+    const read = readClaims(honest);
+    assert.ok(read.ok);
+    const shape = dedupeRawClaims(read.claims);
+    assert.equal(shape.repeats, 0);
+    assert.equal(shape.tail, 0);
+    assert.ok(shape.tail < REPETITION_TAIL_THRESHOLD);
+
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: honest } }] }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    assert.equal(outcome.failedChunks[0].reason, "truncated-reply");
+    assert.match(outcome.failedChunks[0].error, /still producing new claims/);
+  });
+
+  it("leaves a looping chunk counted as unread", async () => {
+    // The label is a statement about what the model did, never about what the
+    // document contained. This build cannot know what a reply that never arrived
+    // would have said, so the chunk stays unread and the run stays off
+    // `succeeded`.
+    const looping = repeated(40).replace(/\]$/, ',{"subject_name":"Commissioner Bo');
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: looping } }] }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    assert.equal(outcome.failedChunks.length, outcome.chunks);
+    assert.notEqual(classifyExtraction(outcome), "succeeded");
+  });
+
+  it("reports proposed claims after de-duplication", async () => {
+    // `proposed` reaches the operator console. Ninety-five there says the model
+    // found ninety-five facts in a passage that contains four.
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: repeated(30) } }] }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    assert.equal(outcome.proposed, 1);
+    // A complete reply, so nothing failed — repetition inside a reply that closed
+    // its array is a de-duplication matter and not a truncation at all.
+    assert.equal(outcome.failedChunks.length, 0);
+  });
+
+  it("hands the verifier one copy, not ninety-one", async () => {
+    // The rejection tally is the thing this protects. Ninety-one copies of one
+    // unverifiable claim recorded ninety-one problems with the record.
+    const client = new OpenRouterClient({
+      apiKey: "test-key",
+      model: DEFAULT_MODEL,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: repeated(91) } }] }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    const outcome = await extractClaims(client, { documentText: MINUTES });
+    assert.ok(
+      outcome.result.rejected.length <= 1,
+      `expected at most one rejection, got ${outcome.result.rejected.length}`,
+    );
   });
 });
 

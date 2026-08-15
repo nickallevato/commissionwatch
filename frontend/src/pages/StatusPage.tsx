@@ -344,6 +344,7 @@ const READING_FAILURE: Record<ExtractionFailureReason, string> = {
   "request-failed": "the request never came back",
   "unreadable-reply": "the reply held nothing that could be read",
   "truncated-reply": "the reply was cut off part-way through",
+  "repetition-truncated": "the model began repeating itself and was cut off while doing so",
   unclassified: "the reason was not recorded",
 };
 

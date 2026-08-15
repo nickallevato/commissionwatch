@@ -47,11 +47,15 @@ export interface ReasonTally {
   /**
    * Claims salvaged out of those chunks anyway.
    *
-   * Only `truncated-reply` can be non-zero: a reply that arrived, was cut off,
-   * and had complete claims read out of the part before the cut. It is the
-   * difference between "a third of the corpus went unread" and "a third of the
-   * corpus was cut short after yielding most of what it had", and the fix those
-   * two want is not the same.
+   * Only the two truncation reasons can be non-zero: a reply that arrived, was
+   * cut off, and had complete claims read out of the part before the cut. It is
+   * the difference between "a third of the corpus went unread" and "a third of
+   * the corpus was cut short after yielding most of what it had", and the fix
+   * those two want is not the same.
+   *
+   * Distinct claims, as of 2026-08-15. `repetition-truncated` rows recovered
+   * dozens of *objects* and a handful of *claims*, and reporting the objects
+   * flattered the corpus by a factor of twenty.
    */
   recovered: number;
 }

@@ -86,6 +86,15 @@ export type AttributedClaim = VerifiedClaim & { model: string };
  *   unreadable-reply  a reply arrived and contained no readable claim array.
  *   truncated-reply   a reply arrived, complete claims were salvaged from it,
  *                     and the tail of the chunk was still never read.
+ *   repetition-truncated
+ *                     a reply arrived and was cut off, and the run of claims
+ *                     immediately before the cut introduced nothing new — the
+ *                     model had locked into repeating claims it had already
+ *                     made. Split out from `truncated-reply` on 2026-08-15
+ *                     because they call for different responses and, more
+ *                     importantly, support different statements about the
+ *                     record. See `repetitionShape` for what is and is not
+ *                     established by this label.
  *
  * Closed because the point of the exercise is a tally. "A fifth of every
  * document goes unread" was only ever knowable by reading logs, and prose
@@ -95,7 +104,8 @@ export type ChunkFailureReason =
   | EmptyCompletionReason
   | "request-failed"
   | "unreadable-reply"
-  | "truncated-reply";
+  | "truncated-reply"
+  | "repetition-truncated";
 
 export interface FailedChunk {
   index: number;
@@ -121,8 +131,30 @@ export interface FailedChunk {
    * it fail" — that is answered and unanimous — it is "did we get anything
    * anyway", and nothing recorded it. `failed_chunks` is jsonb, so widening it
    * again needs no migration, exactly as the reason field did not.
+   *
+   * Counted **after** de-duplication as of 2026-08-15, so it is distinct claims
+   * salvaged rather than objects emitted. `proposed` below keeps the raw count.
    */
   recovered: number | null;
+  /**
+   * Objects the model emitted for this chunk, before de-duplication.
+   *
+   * Kept beside `recovered` because the ratio is the diagnosis: 95 proposed and 4
+   * recovered is a loop, 95 and 95 is a dense document, and one number cannot say
+   * which. Optional, because no row written before 2026-08-15 has it and a
+   * missing value must read as "not recorded" rather than as zero.
+   */
+  proposed?: number;
+  /** Objects dropped as repeats of one already seen in this chunk. */
+  repeats?: number;
+  /**
+   * How many claims at the end of the reply introduced nothing new.
+   *
+   * The number that separates the two truncation reasons. Stored rather than
+   * recomputed because the reply itself is not kept, so this is the only surviving
+   * evidence for the label on the row.
+   */
+  repeated_tail?: number;
 }
 
 export interface ExtractionOutcome {
@@ -229,6 +261,103 @@ export function salvageObjects(fragment: string): RawClaim[] {
   }
   return claims;
 }
+
+/* ---------------------------------------------------------------------------
+   Repetition
+   --------------------------------------------------------------------------- */
+
+/**
+ * What makes two proposed claims the same claim.
+ *
+ * All four fields, because they are the whole of what a claim asserts: who,
+ * what, about which matter, on the evidence of which sentence. Two objects
+ * agreeing on all four say the same thing and only one of them can be stored —
+ * they collapse into one row at the unique index anyway, so the only question is
+ * whether the verifier wastes a rejection on each copy first.
+ *
+ * Normalised on whitespace and case. A model that re-emits the same claim with a
+ * line break moved has still re-emitted the same claim, and the quote's verbatim
+ * bytes are checked by `verifyClaims` against the document — this function
+ * decides identity, never admissibility, and a claim that survives here is not
+ * thereby trusted.
+ *
+ * Non-string fields fold to a marker rather than throwing: a malformed object is
+ * still a duplicate of the next identically malformed object, and the verifier is
+ * the thing that refuses it.
+ */
+function signatureField(value: unknown): string {
+  if (typeof value !== "string") return ` ${typeof value}`;
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function claimSignature(claim: RawClaim): string {
+  return [
+    signatureField(claim.subject_name),
+    signatureField(claim.action),
+    signatureField(claim.matter),
+    signatureField(claim.quote),
+  ].join("");
+}
+
+export interface RepetitionShape {
+  /** The claims in first-seen order, each signature once. */
+  distinct: RawClaim[];
+  /** How many claims were dropped as repeats of one already in `distinct`. */
+  repeats: number;
+  /**
+   * How many claims at the very end of the reply introduced nothing new.
+   *
+   * The load-bearing number. A reply cut off while still producing new claims has
+   * a tail of 0 and may genuinely have lost content; a reply whose last ninety
+   * claims were all repeats was not producing anything when the ceiling stopped
+   * it. Those are different events and the ledger should not spell them the same
+   * way.
+   */
+  tail: number;
+}
+
+/**
+ * Claims deduplicated by signature, plus the shape of whatever repeated.
+ *
+ * Runs **before** the verifier. On 2026-08-15 one reply proposed 95 claims of
+ * which 4 were distinct, so the verifier was handed 91 copies to reject one at a
+ * time and the rejection tally recorded 91 problems with the record where there
+ * was one problem with the model. De-duplicating first is correct regardless of
+ * what else is done about the loop: a repeat is not evidence.
+ *
+ * First occurrence wins, and order is preserved, so quote offsets and the
+ * verifier's own ordering are unaffected.
+ */
+export function dedupeRawClaims(claims: RawClaim[]): RepetitionShape {
+  const seen = new Set<string>();
+  const distinct: RawClaim[] = [];
+  let lastNovelIndex = -1;
+
+  for (const [index, claim] of claims.entries()) {
+    const signature = claimSignature(claim);
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    distinct.push(claim);
+    lastNovelIndex = index;
+  }
+
+  return {
+    distinct,
+    repeats: claims.length - distinct.length,
+    tail: claims.length === 0 ? 0 : claims.length - 1 - lastNovelIndex,
+  };
+}
+
+/**
+ * How long a trailing run of nothing-new has to be before it is called a loop.
+ *
+ * Five, which is well clear of coincidence and well below anything observed. A
+ * document can legitimately produce a couple of adjacent duplicate proposals —
+ * the same sentence read twice at a chunk overlap, say — and calling that a
+ * repetition loop would be the same over-claiming this taxonomy exists to stop.
+ * The two loops measured on 2026-08-15 had tails of 91 and 95.
+ */
+export const REPETITION_TAIL_THRESHOLD = 5;
 
 /** How much of an unreadable reply to keep for diagnosis. */
 export const REPLY_SAMPLE_LENGTH = 500;
@@ -364,34 +493,56 @@ export async function extractClaims(
       });
       continue;
     }
+    // Before anything else looks at them. A repeat is not evidence, and handing
+    // ninety-one copies of one claim to the verifier produces ninety-one
+    // rejections that describe the model rather than the record.
+    const shape = dedupeRawClaims(read.claims);
+    const claims = shape.distinct;
+
     if (read.truncated) {
-      // Recorded as a failed chunk even though claims were recovered, because
-      // the tail of the chunk was genuinely never read. The run stays `partial`
-      // rather than `succeeded`, which is the honest label: some of this
-      // document was not examined.
+      // Recorded as a failed chunk either way. What changes is the label, and
+      // the label is a claim about the record, so it is made carefully.
+      //
+      // **`repetition-truncated` says what was observed, not what was lost.**
+      // What is established is that the run of claims immediately before the cut
+      // introduced nothing new — the model was repeating itself when the ceiling
+      // stopped it, so the tokens the cut cost were being spent on repeats. What
+      // is NOT established is that nothing further would have been said: this
+      // build cannot know what a reply that never arrived would have contained.
+      // The chunk therefore still counts as unread, and the honest way to find
+      // out whether anything was actually lost is to compare the distinct claims
+      // across several runs of the same chunk — which is a measurement, not a
+      // label, and it does not belong in here.
+      //
+      // The ceiling is deliberately not raised and chunks are deliberately not
+      // split. It has been raised twice already (2048 → 3000 → 8000) and a larger
+      // budget buys more repetition; splitting a chunk that loops gives two
+      // chunks that loop.
+      const looped = shape.tail >= REPETITION_TAIL_THRESHOLD;
       failedChunks.push({
         index,
-        // The old text ended "Raise the token ceiling." The first corpus
-        // measurement says that advice is wrong, so it is gone: the ceiling has
-        // been raised twice already (2048 → 3000 → 8000) and on 2026-08-15 four
-        // of twelve chunks still truncated — each after emitting eighty to a
-        // hundred and thirty "claims" from six thousand characters of minutes
-        // that contain a handful. That is a repetition loop, not a dense
-        // document, and a larger budget buys more repetition. The ratio is
-        // stated here so the next reader can tell the two apart on their own
-        // corpus rather than taking this note on trust.
-        error:
-          `Truncated reply from ${reply.servedModel}: recovered ${read.claims.length} complete ` +
-          `claim(s) from ${chunk.text.length} characters before the cut; the rest of this chunk ` +
-          "was not read. A claim count far above what the passage can support means the model " +
-          "looped, and a larger ceiling will not fix that.",
-        reason: "truncated-reply",
+        error: looped
+          ? `Repetition-truncated reply from ${reply.servedModel}: ${read.claims.length} claim(s) ` +
+            `proposed from ${chunk.text.length} characters, of which ${claims.length} were ` +
+            `distinct; the last ${shape.tail} introduced nothing new before the cut. The model ` +
+            "looped rather than ran out of document. Raising the ceiling buys more repetition, " +
+            "and whether any distinct claim fell after the cut is a question for a re-measurement " +
+            "over the same chunk, not for this line."
+          : `Truncated reply from ${reply.servedModel}: recovered ${claims.length} complete ` +
+            `claim(s) from ${chunk.text.length} characters before the cut; the rest of this chunk ` +
+            "was not read. The reply was still producing new claims when it was cut.",
+        reason: looped ? "repetition-truncated" : "truncated-reply",
         finish_reason: null,
         native_finish_reason: null,
-        recovered: read.claims.length,
+        recovered: claims.length,
+        proposed: read.claims.length,
+        repeats: shape.repeats,
+        repeated_tail: shape.tail,
       });
     }
-    const claims = read.claims;
+    // Counted after de-duplication. `proposed` feeds the operator console, and a
+    // number inflated by repeats says the model found ninety-five facts in a
+    // passage containing four.
     proposed += claims.length;
 
     // Verified against the WHOLE document, not the chunk it came from: the
