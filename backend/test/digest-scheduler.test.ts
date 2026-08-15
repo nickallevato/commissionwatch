@@ -91,13 +91,21 @@ describe("DigestScheduler", () => {
 
     it("sends digest for pending medium-severity notifications", async () => {
       const result = await scheduler.runDailyDigest();
-      assert.equal(result.sent, 1);
+      // Nothing was delivered, because no provider is configured in tests — and
+      // that is neither a send nor a failure. `dryRun` exists so a caller can
+      // tell "processed the queue and delivered nothing" from "did not run",
+      // which `sent: 1` used to hide.
+      assert.equal(result.sent, 0);
+      assert.equal(result.dryRun, 1);
       assert.equal(result.failed, 0);
 
       const [notif] = await db("notifications")
         .where({ subscription_id: subscriptionId, anomaly_flag_id: flagId })
         .select("email_status");
-      assert.equal(notif.email_status, "sent");
+      // See `email-delivery.ts`: with no provider configured this is a dry run.
+    // The scheduler has been running this path daily in production and writing
+    // "sent" — these two assertions were the suite agreeing with it.
+    assert.equal(notif.email_status, "dry_run");
 
       assert.ok(scheduler.getStatus().dailyLastRun instanceof Date);
     });
@@ -151,13 +159,17 @@ describe("DigestScheduler", () => {
 
     it("sends digest for pending low-severity notifications", async () => {
       const result = await scheduler.runWeeklyDigest();
-      assert.equal(result.sent, 1);
+      assert.equal(result.sent, 0);
+      assert.equal(result.dryRun, 1);
       assert.equal(result.failed, 0);
 
       const [notif] = await db("notifications")
         .where({ subscription_id: subscriptionId, anomaly_flag_id: flagId })
         .select("email_status");
-      assert.equal(notif.email_status, "sent");
+      // See `email-delivery.ts`: with no provider configured this is a dry run.
+    // The scheduler has been running this path daily in production and writing
+    // "sent" — these two assertions were the suite agreeing with it.
+    assert.equal(notif.email_status, "dry_run");
 
       assert.ok(scheduler.getStatus().weeklyLastRun instanceof Date);
     });

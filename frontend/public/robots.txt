@@ -8,6 +8,11 @@
 # fallback answered every request for it with a 200 and the application shell —
 # so a crawler asking for our policy was told, in HTML, that there wasn't one.
 #
+# What is here, in one page written for you rather than for a reader:
+#   https://commissionwatch.bmux.sh/bot
+# It names every bulk export, the Open Civic Data feed, the licence terms, and
+# how citations are addressed. Reading it will save you crawling for all of it.
+#
 # Contact: see /methodology. If we are crawling you and you would rather we
 # didn't, that page names a human and we stop.
 

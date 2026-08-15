@@ -10,6 +10,7 @@ import {
   anomalyFlags,
   matters,
   matterAppearances,
+  metrics,
 } from "./data";
 
 /** Newest first — matches `.orderBy("created_at", "desc")` on /votes and /anomalies. */
@@ -135,6 +136,8 @@ export const handlers = [
       .sort(byCreatedAtDesc);
     return list(docs);
   }),
+
+  http.get("/api/metrics", () => HttpResponse.json(metrics)),
 
   http.get("/api/matters", ({ request }) => {
     const state = new URL(request.url).searchParams.get("state");

@@ -43,6 +43,8 @@ const STATIC_PATHS = [
   "/corrections",
   "/public-records",
   "/status",
+  "/metrics",
+  "/bot",
   "/methodology",
   "/privacy",
   "/subscribe",

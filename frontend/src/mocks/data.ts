@@ -9,6 +9,7 @@ import type {
   AnomalyFlag,
   Matter,
   MatterAppearance,
+  Metrics,
 } from "@/types";
 
 /**
@@ -576,4 +577,36 @@ export const matterAppearances: Record<string, MatterAppearance[]> = {
       match_rule: "designator",
     },
   ],
+};
+
+/**
+ * Metrics. Chosen so the page's two hard cases are exercised by the default
+ * fixture: a published count well below the total (the gap is the point), and
+ * a documents-indexed count below documents-total (a scan that could not be
+ * read is held but not searchable).
+ */
+export const metrics: Metrics = {
+  corpus: {
+    meetings_total: 37,
+    meetings_published: 12,
+    agenda_items: 214,
+    documents_indexed: 48,
+    documents_total: 61,
+    votes: 96,
+    matters: 19,
+  },
+  review: {
+    findings_total: 14,
+    findings_published: 9,
+    findings_held: 5,
+    claims_total: 63,
+    claims_approved: 0,
+    disputes_received: 2,
+    disputes_resolved: 1,
+  },
+  latency: {
+    median_days_to_publish: 6.5,
+    last_published_at: "2024-12-05T17:02:00Z",
+  },
+  generated_at: "2024-12-06T09:00:00Z",
 };

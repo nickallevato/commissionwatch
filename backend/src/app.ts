@@ -19,6 +19,7 @@ import searchRouter from "./routes/search";
 import publicRecordsRouter from "./routes/public-records";
 import correctionsRouter from "./routes/corrections";
 import dataRouter from "./routes/data";
+import metricsRouter from "./routes/metrics";
 import sitemapRouter from "./routes/sitemap";
 import calendarRouter from "./routes/calendar";
 import adminRouter from "./routes/admin";
@@ -125,6 +126,10 @@ app.use("/sitemap.xml", sitemapRouter);
 // The public meeting calendar and the per-jurisdiction iCal feeds. Published
 // meetings only; a meeting with no published time is an all-day event rather
 // than an appointment at midnight.
+// This project's own numbers, on the same terms it demands of others. Public
+// and unauthenticated for the reason `/status` is: it describes this site's
+// collection, not anybody's record.
+app.use("/api/metrics", metricsRouter);
 app.use("/api/calendar", calendarRouter);
 app.use("/api/ingestion", ingestionRouter);
 // The legacy email-only subscription and notification routers, now operator-

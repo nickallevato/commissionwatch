@@ -19,33 +19,77 @@ interface ResendClient {
       to: string;
       subject: string;
       html: string;
-    }) => Promise<{ id: string }>;
+    }) => Promise<{ id?: string } | null | undefined>;
   };
 }
+
+/**
+ * What a send resolved to.
+ *
+ * A discriminated union rather than a boolean, because "nothing was configured"
+ * and "the provider answered but told us nothing" are different facts and only
+ * one of them is a failure worth retrying.
+ */
+/**
+ * What a digest run did.
+ *
+ * `dryRun` is separate from both `sent` and `failed` because it is neither. A
+ * deployment with no provider configured processes its whole queue correctly
+ * and delivers nothing; folding that into `sent` is the lie this change exists
+ * to remove, and folding it into `failed` would put a retry behind a
+ * configuration choice.
+ */
+export interface DigestResult {
+  sent: number;
+  failed: number;
+  dryRun: number;
+}
+
+export type SendOutcome =
+  | { delivered: true; providerId: string }
+  | { delivered: false; reason: "dry_run" | "no_provider_id" };
 
 export class EmailDeliveryService {
   private resend: ResendClient | null = null;
   private fromEmail: string;
+  private readonly apiKey: string | undefined;
+  /** Memoised so N concurrent sends import the provider once, not N times. */
+  private loading: Promise<void> | undefined;
 
+  /**
+   * The provider is loaded on first send, not in the constructor.
+   *
+   * It used to be `if (key) this.initResend(key)` — an `async` method called
+   * without `await` from a synchronous constructor. `this.resend` was therefore
+   * null for some window *after* construction even when `RESEND_API_KEY` was
+   * set, so the earliest sends silently took the dry-run path and were recorded
+   * as delivered. A constructor cannot await, so the fix is to stop pretending
+   * it can: `client()` resolves once, memoises the promise, and every send goes
+   * through it.
+   */
   constructor(
     private db: Knex,
     apiKey?: string,
     fromEmail?: string,
   ) {
     this.fromEmail = fromEmail || process.env.ALERT_FROM_EMAIL || "alerts@commissionwatch.org";
-    const key = apiKey || process.env.RESEND_API_KEY;
-    if (key) {
-      this.initResend(key);
-    }
+    this.apiKey = apiKey || process.env.RESEND_API_KEY;
   }
 
-  private async initResend(apiKey: string): Promise<void> {
-    try {
-      const { Resend } = await import("resend");
-      this.resend = new Resend(apiKey) as unknown as ResendClient;
-    } catch {
-      console.warn("EmailDeliveryService: resend package not available, emails will be logged only");
-    }
+  private async client(): Promise<ResendClient | null> {
+    if (!this.apiKey) return null;
+    this.loading ??= (async () => {
+      try {
+        const { Resend } = await import("resend");
+        this.resend = new Resend(this.apiKey) as unknown as ResendClient;
+      } catch {
+        console.warn(
+          "EmailDeliveryService: resend package not available, emails will be logged only",
+        );
+      }
+    })();
+    await this.loading;
+    return this.resend;
   }
 
   async sendImmediateAlerts(notificationIds: string[]): Promise<void> {
@@ -58,11 +102,18 @@ export class EmailDeliveryService {
         const subject = `[${notification.severity.toUpperCase()}] Civic anomaly detected in ${notification.jurisdiction_name}`;
         const html = this.renderImmediateEmail(notification);
 
-        await this.sendEmail(notification.email, subject, html);
+        const outcome = await this.sendEmail(notification.email, subject, html);
+        const status = this.statusFor(outcome);
 
         await this.db("notifications")
           .where({ id: notification.id })
-          .update({ email_status: "sent", email_sent_at: this.db.fn.now() });
+          .update({
+            email_status: status,
+            // Only a real delivery gets a timestamp. A dry run with a send time
+            // on it reads, to anyone querying this table later, exactly like a
+            // send.
+            email_sent_at: status === "sent" ? this.db.fn.now() : null,
+          });
       } catch (err) {
         console.error(`EmailDeliveryService: failed to send notification ${notification.id}`, err);
         await this.db("notifications")
@@ -72,9 +123,10 @@ export class EmailDeliveryService {
     }
   }
 
-  async sendDigest(subscriptionIds: string[], severities: string[]): Promise<{ sent: number; failed: number }> {
+  async sendDigest(subscriptionIds: string[], severities: string[]): Promise<DigestResult> {
     let sent = 0;
     let failed = 0;
+    let dryRun = 0;
 
     for (const subscriptionId of subscriptionIds) {
       try {
@@ -111,21 +163,30 @@ export class EmailDeliveryService {
           : `Daily civic digest for ${jurisdiction}`;
 
         const html = this.renderDigestEmail(notifications, jurisdiction, unsubToken, isWeekly);
-        await this.sendEmail(email, subject, html);
+        const outcome = await this.sendEmail(email, subject, html);
+        const status = this.statusFor(outcome);
 
         const ids = notifications.map((n: { id: string }) => n.id);
         await this.db("notifications")
           .whereIn("id", ids)
-          .update({ email_status: "sent", email_sent_at: this.db.fn.now() });
+          .update({
+            email_status: status,
+            email_sent_at: status === "sent" ? this.db.fn.now() : null,
+          });
 
-        sent++;
+        // The counter reports digests actually delivered. It used to count
+        // every loop iteration, which meant a dry-run deployment reported a
+        // day's work it had not done.
+        if (status === "sent") sent++;
+        else if (status === "dry_run") dryRun++;
+        else failed++;
       } catch (err) {
         console.error(`EmailDeliveryService: digest failed for subscription ${subscriptionId}`, err);
         failed++;
       }
     }
 
-    return { sent, failed };
+    return { sent, failed, dryRun };
   }
 
   private async getNotificationsWithContext(ids: string[]): Promise<NotificationWithContext[]> {
@@ -149,17 +210,43 @@ export class EmailDeliveryService {
       );
   }
 
-  private async sendEmail(to: string, subject: string, html: string): Promise<void> {
-    if (this.resend) {
-      await this.resend.emails.send({
-        from: this.fromEmail,
-        to,
-        subject,
-        html,
-      });
-    } else {
+  /**
+   * Sends, or reports that it did not.
+   *
+   * The old signature was `Promise<void>`, which made "delivered to a provider"
+   * and "written to stdout" indistinguishable to the caller — and both callers
+   * then wrote `email_status: 'sent'`. `DigestScheduler` ran that daily in
+   * production, so the notifications table has been recording sends that never
+   * happened. A transparency project cannot keep a delivery log it knows is
+   * false.
+   *
+   * `sent` now requires a provider message id. Nothing else is allowed to
+   * produce it: an id is the only evidence available here that a message left
+   * this process, and inferring delivery from the absence of an exception is
+   * how the lie got in.
+   */
+  private async sendEmail(to: string, subject: string, html: string): Promise<SendOutcome> {
+    const resend = await this.client();
+    if (!resend) {
       console.log(`EmailDeliveryService [dry-run]: to=${to} subject="${subject}"`);
+      return { delivered: false, reason: "dry_run" };
     }
+
+    const result = await resend.emails.send({ from: this.fromEmail, to, subject, html });
+    const providerId = typeof result?.id === "string" && result.id.length > 0 ? result.id : null;
+    if (providerId === null) {
+      // The provider answered without an id. That is not a delivery, and
+      // recording it as one would put this back where it started.
+      console.warn(`EmailDeliveryService: provider returned no message id for ${to}`);
+      return { delivered: false, reason: "no_provider_id" };
+    }
+    return { delivered: true, providerId };
+  }
+
+  /** What a send resolved to. `email_status` is derived from this, never assumed. */
+  private statusFor(outcome: SendOutcome): "sent" | "dry_run" | "failed" {
+    if (outcome.delivered) return "sent";
+    return outcome.reason === "dry_run" ? "dry_run" : "failed";
   }
 
   private renderImmediateEmail(n: NotificationWithContext): string {

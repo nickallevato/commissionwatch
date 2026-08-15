@@ -73,6 +73,8 @@ const PUBLIC_ROUTES = [
   "/public-records",
   "/corrections",
   "/status",
+  "/metrics",
+  "/bot",
   "/data",
   "/subscribe",
   // The `*` route. A 404 is a page a reader genuinely lands on, and it is the

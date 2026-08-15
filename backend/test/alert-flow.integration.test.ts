@@ -128,8 +128,20 @@ describe("Full alert flow: subscribe → detect anomaly → notification → ema
     await emailService.sendImmediateAlerts([notif.id]);
 
     const updated = await db("notifications").where({ id: notif.id }).first();
-    assert.equal(updated.email_status, "sent", "Notification should be marked as sent after email delivery");
-    assert.ok(updated.email_sent_at, "email_sent_at should be set");
+    // `dry_run`, not `sent`. No RESEND_API_KEY is configured in tests, so
+    // nothing left the process — and this assertion used to demand `sent`,
+    // which meant the suite was pinning the defect in place. `sent` now
+    // requires a provider message id, and there is no provider here.
+    assert.equal(
+      updated.email_status,
+      "dry_run",
+      "a send with no provider configured is a dry run, not a delivery",
+    );
+    assert.equal(
+      updated.email_sent_at,
+      null,
+      "a dry run gets no send timestamp — one would read exactly like a send",
+    );
   });
 
   it("step 4: notification appears in API with correct metadata", async () => {

@@ -200,6 +200,48 @@ export interface MatterDetail extends Matter {
   appearances: MatterAppearance[];
 }
 
+/* --------------------------------------------------------------- metrics */
+
+/**
+ * This project's own numbers — see `backend/src/services/metrics.ts`.
+ *
+ * Every field is a count or a duration. There are no identifiers here by
+ * design: an aggregate says how much is withheld without saying which record,
+ * which is what keeps `/metrics` on the right side of the publication wall.
+ */
+export interface CorpusMetrics {
+  meetings_total: number;
+  meetings_published: number;
+  agenda_items: number;
+  documents_indexed: number;
+  documents_total: number;
+  votes: number;
+  matters: number;
+}
+
+export interface ReviewMetrics {
+  findings_total: number;
+  findings_published: number;
+  findings_held: number;
+  claims_total: number;
+  claims_approved: number;
+  disputes_received: number;
+  disputes_resolved: number;
+}
+
+export interface LatencyMetrics {
+  /** Null means nothing has ever been published — never render it as 0. */
+  median_days_to_publish: number | null;
+  last_published_at: string | null;
+}
+
+export interface Metrics {
+  corpus: CorpusMetrics;
+  review: ReviewMetrics;
+  latency: LatencyMetrics;
+  generated_at: string;
+}
+
 /** Postgres `vote_value` enum — see backend/migrations/010_create_votes.ts */
 export type VoteValue = "yes" | "no" | "abstain" | "absent";
 

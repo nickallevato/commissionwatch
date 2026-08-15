@@ -1,5 +1,5 @@
 import type { Knex } from "knex";
-import { EmailDeliveryService } from "./email-delivery";
+import { EmailDeliveryService, type DigestResult } from "./email-delivery";
 
 interface CronJob {
   stop: () => void;
@@ -47,7 +47,7 @@ export class DigestScheduler {
     this.weeklyJob = null;
   }
 
-  async runDailyDigest(): Promise<{ sent: number; failed: number }> {
+  async runDailyDigest(): Promise<DigestResult> {
     console.log("DigestScheduler: running daily digest");
 
     const subscriptionIds = await this.getPendingSubscriptions(["medium"]);
@@ -58,7 +58,7 @@ export class DigestScheduler {
     return result;
   }
 
-  async runWeeklyDigest(): Promise<{ sent: number; failed: number }> {
+  async runWeeklyDigest(): Promise<DigestResult> {
     console.log("DigestScheduler: running weekly digest");
 
     const subscriptionIds = await this.getPendingSubscriptions(["low"]);

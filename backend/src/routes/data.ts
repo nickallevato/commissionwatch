@@ -1,6 +1,7 @@
 import { Router, type Response } from "express";
 import db from "../config/database";
 import { EXPORT_DATASETS, findDataset, readBatch, type ExportDataset } from "../services/export/datasets";
+import { buildOcdExport } from "../services/export/ocd";
 import { csvRow, projectRow } from "../services/export/serialize";
 import { buildManifest, DATA_LICENSE, DATA_ATTRIBUTION_HEADER } from "../services/export/manifest";
 
@@ -81,6 +82,25 @@ router.get("/", async (_req, res, next) => {
     const manifest = await buildManifest(db, "/api/data");
     res.set("Cache-Control", CACHE_CONTROL);
     res.json(manifest);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * The corpus in Open Civic Data's shape, for a consumer ingesting the record
+ * rather than reading it.
+ *
+ * Declared **before** `/:file` on purpose: that handler splits on the last dot
+ * and looks the stem up in `EXPORT_DATASETS`, so `ocd.json` would resolve to a
+ * dataset named `ocd` and 404. Express matches in declaration order, and this
+ * is the same class of precedence trap `frontend/nginx.conf` documents twice.
+ */
+router.get("/ocd.json", async (_req, res, next) => {
+  try {
+    const ocd = await buildOcdExport(db);
+    res.set("Cache-Control", CACHE_CONTROL);
+    res.json(ocd);
   } catch (err) {
     next(err);
   }

@@ -13,6 +13,8 @@ import { ElectionsPage } from "./pages/ElectionsPage";
 import { FindingsPage } from "./pages/FindingsPage";
 import { MatterDetailPage } from "./pages/MatterDetailPage";
 import { MattersPage } from "./pages/MattersPage";
+import { BotPage } from "./pages/BotPage";
+import { MetricsPage } from "./pages/MetricsPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
 import { PrivacyPage } from "./pages/PrivacyPage";
 import { PublicRecordsPage } from "./pages/PublicRecordsPage";
@@ -78,6 +80,13 @@ export function App() {
           {/* The public collection status. Unauthenticated: it describes this
             site's own ingestion, not anybody's record. */}
           <Route path="status" element={<StatusPage />} />
+          {/* This project measured by its own standard. Beside /status because
+            both describe this site rather than the record it keeps. */}
+          <Route path="metrics" element={<MetricsPage />} />
+          {/* The page robots.txt points at. An invitation should say what is
+            inside, and every machine-readable surface was previously
+            discoverable only by reading the source or guessing a path. */}
+          <Route path="bot" element={<BotPage />} />
           {/* B3. The corrections policy and the log that shows it is kept, and
             the route by which a person named in a record contests it. Both
             unauthenticated: the person who most needs them is the one this

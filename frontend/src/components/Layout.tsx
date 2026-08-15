@@ -190,6 +190,12 @@ export function Layout() {
               page rather than from the one a reader happens to be on when
               they find something wrong. */}
             <Link
+              to="/metrics"
+              className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
+            >
+              By the numbers
+            </Link>
+            <Link
               to="/corrections"
               className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
             >

@@ -1,0 +1,151 @@
+import { describe, it, before, after } from "node:test";
+import assert from "node:assert/strict";
+import request from "supertest";
+import app from "../src/app";
+import db from "../src/config/database";
+import { collectMetrics } from "../src/services/metrics";
+
+/**
+ * `/api/metrics` publishes this project's own numbers.
+ *
+ * The tests that matter here are not the arithmetic. They are the two ways this
+ * endpoint could become dishonest: by leaking an identifier from a record an
+ * operator withheld, and by rendering "we have never published anything" as a
+ * number that reads like a fast answer.
+ */
+
+const JURISDICTION_NAME = "Metrics Test County";
+
+let jurisdictionId: string;
+let commissionId: string;
+let publishedId: string;
+let withheldId: string;
+
+async function removeFixtures(): Promise<void> {
+  const rows = await db("jurisdictions").where({ name: JURISDICTION_NAME }).select("id");
+  for (const row of rows) {
+    await db("jurisdictions").where({ id: row.id }).del();
+  }
+}
+
+before(async () => {
+  await removeFixtures();
+  const [j] = await db("jurisdictions")
+    .insert({ name: JURISDICTION_NAME, state: "MT", type: "county" })
+    .returning("id");
+  jurisdictionId = typeof j === "string" ? j : j.id;
+
+  const [c] = await db("commissions")
+    .insert({ jurisdiction_id: jurisdictionId, name: "Metrics Board" })
+    .returning("id");
+  commissionId = typeof c === "string" ? c : c.id;
+
+  const [published] = await db("meetings")
+    .insert({
+      commission_id: commissionId,
+      date: "2026-01-05",
+      // Ten days between sitting and publication, so the median is assertable.
+      published_at: new Date("2026-01-15T00:00:00Z"),
+    })
+    .returning("id");
+  publishedId = typeof published === "string" ? published : published.id;
+
+  const [withheld] = await db("meetings")
+    .insert({ commission_id: commissionId, date: "2026-02-02" })
+    .returning("id");
+  withheldId = typeof withheld === "string" ? withheld : withheld.id;
+
+  await db("agenda_items").insert({
+    meeting_id: withheldId,
+    item_number: 1,
+    title: "Ordinance 7788 withheld-from-metrics probe",
+  });
+});
+
+after(async () => {
+  await removeFixtures();
+  await db.destroy();
+});
+
+describe("GET /api/metrics", () => {
+  it("is public and needs no operator session", async () => {
+    const res = await request(app).get("/api/metrics");
+    assert.equal(res.status, 200);
+  });
+
+  it("counts a withheld meeting in the total but not in the published count", async () => {
+    const metrics = await collectMetrics(db);
+    // The count is the point: a reader must be able to tell how much of the
+    // archive is being held back, without being able to tell *which*.
+    assert.ok(metrics.corpus.meetings_total >= 2);
+    assert.ok(metrics.corpus.meetings_total > metrics.corpus.meetings_published);
+  });
+
+  /**
+   * The wall. `publication.ts` answers 404 rather than 403 so a stranger cannot
+   * enumerate what has been ingested and withheld; an aggregate count names
+   * nobody, but a title or an id would undo that in one field.
+   */
+  it("returns no identifier or free text from any record", async () => {
+    const res = await request(app).get("/api/metrics");
+    const body = JSON.stringify(res.body);
+
+    assert.ok(!body.includes(withheldId), "leaked an unpublished meeting id");
+    assert.ok(!body.includes(publishedId), "leaked a meeting id");
+    assert.ok(
+      !body.includes("Ordinance 7788"),
+      "leaked the title of an item on an unpublished meeting",
+    );
+    assert.ok(!body.includes(JURISDICTION_NAME), "leaked a jurisdiction name");
+  });
+
+  it("reports every value as a number or a stated absence, never a mixture", async () => {
+    const metrics = await collectMetrics(db);
+    for (const [key, value] of Object.entries(metrics.corpus)) {
+      assert.equal(typeof value, "number", `corpus.${key} must be a number`);
+    }
+    for (const [key, value] of Object.entries(metrics.review)) {
+      assert.equal(typeof value, "number", `review.${key} must be a number`);
+    }
+  });
+
+  it("derives held findings so the parts always sum to the whole", async () => {
+    const metrics = await collectMetrics(db);
+    assert.equal(
+      metrics.review.findings_held + metrics.review.findings_published,
+      metrics.review.findings_total,
+    );
+  });
+
+  it("measures publication latency in days from the meeting date", async () => {
+    const metrics = await collectMetrics(db);
+    assert.ok(
+      metrics.latency.median_days_to_publish !== null,
+      "a published meeting exists, so there is a median",
+    );
+    assert.ok(
+      (metrics.latency.median_days_to_publish ?? 0) > 0,
+      "publication happened after the meeting, so the median is positive",
+    );
+  });
+
+  /**
+   * "Never" and "immediately" are opposite claims and both would render as 0.
+   * A transparency project reporting instant publication because it has never
+   * published anything is the worst available failure of this endpoint.
+   */
+  it("reports null, not zero, when nothing has ever been published", async () => {
+    await db.transaction(async (trx) => {
+      const empty = await collectMetrics(
+        // A transaction that hides every publication, rolled back afterwards, so
+        // the assertion runs against a real empty state rather than a stub.
+        await trx("meetings").update({ published_at: null }).then(() => trx),
+      );
+      assert.equal(empty.latency.median_days_to_publish, null);
+      assert.equal(empty.latency.last_published_at, null);
+      throw new Error("rollback");
+    }).catch((error: unknown) => {
+      if (!(error instanceof Error) || error.message !== "rollback") throw error;
+    });
+  });
+});
