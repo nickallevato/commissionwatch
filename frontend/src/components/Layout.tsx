@@ -36,6 +36,11 @@ const navItems: NavItem[] = [
   // P6. Search sits with the record it searches, not in the utility row: the
   // archive is the product, and a reader arriving with a question starts here.
   { to: "/search", label: "Search" },
+  // The record by location. Labelled "Nearby" rather than "Map" because the
+  // page is not a slippy map and cannot become one under this site's content
+  // policy — a nav item promising a map would be the same overclaim the page
+  // itself refuses to make about a block-level geocode.
+  { to: "/map", label: "Nearby" },
   // When these bodies sit. In the masthead rather than the colophon because a
   // reader who wants to attend a meeting is looking for the record, not for an
   // account of how the site works.

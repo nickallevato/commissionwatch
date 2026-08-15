@@ -1544,3 +1544,92 @@ export interface MeetingTranscriptSummary {
   /** Most recent check across this meeting's documents, or null. */
   checked_through: string | null;
 }
+
+/* ---------------------------------------------------------------------------
+   Places — where a decision happened
+   --------------------------------------------------------------------------- */
+
+/**
+ * Mirrors `PLACE_PRECISIONS` in `backend/src/services/places.ts`, which in turn
+ * repeats the CHECK constraint in migration 094.
+ *
+ * There is deliberately no `parcel`. It is in the geography spec and it is
+ * stage 2: a parcel is a polygon, polygons need PostGIS, and PostGIS is not
+ * merely un-installed in `pgvector/pgvector:pg16` — it is unavailable. A UI
+ * branch for a value the database cannot hold is a branch nobody can test and
+ * a shape a reader could be shown before it exists.
+ */
+export const PLACE_PRECISIONS = ["exact", "block", "centroid", "jurisdiction"] as const;
+export type PlacePrecision = (typeof PLACE_PRECISIONS)[number];
+
+/**
+ * One place, as `GET /api/places/near` and `GET /api/places/:id` send it.
+ *
+ * `kind` and `precision` are `string`, not the unions, because that is what the
+ * route returns: `placesNear` selects the columns straight out of `places` and
+ * types them as `string`. Declaring them narrower here would be the frontend
+ * asserting a database constraint it cannot see — the exact class of defect the
+ * "database is the source of truth for types" rule exists to stop. The page
+ * narrows `precision` at runtime instead, and says so when it cannot.
+ *
+ * `geocoded_at` is a `Date` on the server and arrives as an ISO string, because
+ * everything here has been through `JSON.stringify`.
+ */
+export interface Place {
+  id: string;
+  jurisdiction_id: string;
+  kind: string;
+  label: string;
+  lat: number;
+  lon: number;
+  precision: string;
+  external_ref: string | null;
+  external_source: string | null;
+  geocoder: string | null;
+  geocoded_at: string | null;
+}
+
+/** A place plus its great-circle distance from the point that was asked about. */
+export interface PlaceNearResult extends Place {
+  distance_metres: number;
+}
+
+/**
+ * `GET /api/places/near` — **not** the `{ data, total }` envelope.
+ *
+ * It answers `{ data, radius, limit }`, and the radius is echoed because the
+ * caller may have omitted it. A hook reaching for `fetchList` here would throw
+ * at the fetch boundary on the missing `total`, which is the contract check
+ * doing its job rather than a bug to work around.
+ */
+export interface PlacesNearResponse {
+  data: PlaceNearResult[];
+  radius: number;
+  limit: number;
+}
+
+/**
+ * One public link between a place and something on the record.
+ *
+ * The citation columns are nullable here because they are nullable in the
+ * table: `place_links_citation_check` only requires them of a link that is not
+ * `inferred`, and an `inferred` link is allowed to exist as an operator-only
+ * lead. A public link therefore always carries all three in practice — but the
+ * type says what the column says, and the page checks rather than asserting.
+ */
+export interface PlaceLinkView {
+  id: string;
+  subject_kind: string;
+  subject_id: string;
+  relation: string;
+  confidence: string;
+  artifact_sha256: string | null;
+  quote: string | null;
+  quote_offset: number | null;
+  updated_at: string;
+}
+
+/** `GET /api/places/:id`. 404 when every link it has is held, inferred or unpublished. */
+export interface PlaceDetail extends Place {
+  links: PlaceLinkView[];
+}

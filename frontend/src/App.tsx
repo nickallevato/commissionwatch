@@ -14,6 +14,7 @@ import { ElectionsPage } from "./pages/ElectionsPage";
 import { FindingsPage } from "./pages/FindingsPage";
 import { MatterDetailPage } from "./pages/MatterDetailPage";
 import { MattersPage } from "./pages/MattersPage";
+import { MapPage } from "./pages/MapPage";
 import { BotPage } from "./pages/BotPage";
 import { MetricsPage } from "./pages/MetricsPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
@@ -70,6 +71,11 @@ export function App() {
             from the nav — the roster is the index of this page. */}
           <Route path="officials/:id" element={<OfficialPage />} />
           <Route path="search" element={<SearchPage />} />
+          {/* The geography spec's public surface, at the address it names.
+            It is not a slippy map and it does not pretend to be one: the
+            site's content policy allows no third-party host, so there are no
+            tiles to draw and the page says so. See MapPage's header. */}
+          <Route path="map" element={<MapPage />} />
           {/* The address every citation points at. Reached from a citation
             chip, never from the nav — a content address is not something a
             reader browses to, it is something they arrive at holding. */}

@@ -50,6 +50,9 @@ describe("Layout", () => {
       ["Elections", "/elections"],
       // P6: search over the published record.
       ["Search", "/search"],
+      // The record by location. "Nearby", not "Map": the page draws distance
+      // and direction and no basemap, and the label must not promise one.
+      ["Nearby", "/map"],
       // When these bodies sit, and the iCal feeds behind it.
       ["Calendar", "/calendar"],
       ["Methodology", "/methodology"],

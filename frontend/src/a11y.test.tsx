@@ -66,6 +66,9 @@ const PUBLIC_ROUTES = [
   "/votes",
   "/findings",
   "/search",
+  // With no `?near=`, which is the state a reader arrives in: the form and the
+  // prompt, and no request fired at anybody's location.
+  "/map",
   "/elections",
   "/calendar",
   "/methodology",

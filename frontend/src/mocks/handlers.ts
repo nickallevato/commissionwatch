@@ -201,6 +201,33 @@ export const handlers = [
     return HttpResponse.json(window);
   }),
 
+  /**
+   * `GET /api/places/near` — **not** the `{ data, total }` envelope.
+   *
+   * `{ data, radius, limit }`, matching `backend/src/routes/places.ts`, which
+   * echoes the radius because the caller may have omitted it. Going through
+   * `list()` here would invent a `total` the route does not send and let a hook
+   * ship that cannot read the real response.
+   *
+   * Empty by default, which is not a convenience: `places` is empty in the
+   * database this project actually runs, extraction into it is still being
+   * built, and an empty radius is what a reader gets today. The suites that
+   * need located records supply their own.
+   */
+  http.get("/api/places/near", ({ request }) => {
+    const radius = Number(new URL(request.url).searchParams.get("radius") ?? 500);
+    return HttpResponse.json({ data: [], radius, limit: 25 });
+  }),
+
+  /**
+   * `GET /api/places/:id`. 404 with no distinction between "no such place" and
+   * "every link it has is held, inferred or unpublished", because that is what
+   * `findPlace` does and for the reason its header gives.
+   */
+  http.get("/api/places/:id", () =>
+    HttpResponse.json({ error: "Place not found", statusCode: 404 }, { status: 404 }),
+  ),
+
   http.get("/api/matters", ({ request }) => {
     const state = new URL(request.url).searchParams.get("state");
     return list(state ? matters.filter((m) => m.state === state) : matters);
