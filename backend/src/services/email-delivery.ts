@@ -86,6 +86,75 @@ export type SendOutcome =
   | { delivered: true; providerId: string }
   | { delivered: false; reason: "dry_run" | "no_provider_id" | "suppressed" };
 
+/* ---------------------------------------------------------------------------
+   The From address
+   --------------------------------------------------------------------------- */
+
+/**
+ * The mailbox every alert appears to come from.
+ *
+ * Kept as a local part joined to a host at runtime rather than as a whole
+ * address, which is the whole point of the change below.
+ */
+const ALERT_MAILBOX = "alerts";
+
+/**
+ * The domain to fall back on when `PUBLIC_BASE_URL` says nothing.
+ *
+ * This is the deployed host, and it is written here so that a deployment which
+ * has not set `PUBLIC_BASE_URL` still sends from a domain we actually control
+ * rather than from one we do not. It has to track the deploy: if the site moves,
+ * this moves. `defaultAlertFromEmail` prefers `PUBLIC_BASE_URL` precisely so that
+ * this constant is the exception rather than the mechanism.
+ */
+const DEPLOYED_DOMAIN = "commissionwatch.bmux.sh";
+
+/**
+ * The default From address, derived from `PUBLIC_BASE_URL`.
+ *
+ * **This used to be the literal `alerts@commissionwatch.org`**, and the site
+ * deploys at `commissionwatch.bmux.sh`. Those are different organizational
+ * domains, so the From header could never align with an SPF or DKIM record for
+ * the domain actually sending — DMARC alignment failed *by construction*, on
+ * every message, before any DNS was considered. A receiving mail server does not
+ * report that as a configuration error; it reports it by putting the message in
+ * a spam folder, which is indistinguishable from a subscriber ignoring it.
+ *
+ * Deriving it from `PUBLIC_BASE_URL` makes alignment a property of the code
+ * rather than of two literals in different files agreeing. The same variable
+ * already decides every canonical URL, every citation and every unsubscribe link,
+ * so a deployment that gets it wrong is already visibly wrong in ways somebody
+ * notices — which is exactly what the From address was not.
+ *
+ * **This does not make mail deliverable.** SPF, DKIM and DMARC records for the
+ * sending domain are an operator and DNS task, they are recorded as such in
+ * `docs/STATUS.md`, and nothing here creates or checks them. What this removes is
+ * a misalignment no DNS record could have fixed.
+ */
+export function defaultAlertFromEmail(env: NodeJS.ProcessEnv = process.env): string {
+  return `${ALERT_MAILBOX}@${alertDomain(env)}`;
+}
+
+/**
+ * The host of `PUBLIC_BASE_URL`, or the deployed domain.
+ *
+ * A port is stripped: `localhost:3000` is a host and an authority, and only the
+ * host belongs left of nothing and right of an `@`. An unparseable value falls
+ * back rather than throwing — this is called from a constructor that runs at
+ * boot, and refusing to start over a malformed variable would take the whole site
+ * down to protect a dormant mailer.
+ */
+function alertDomain(env: NodeJS.ProcessEnv): string {
+  const raw = env.PUBLIC_BASE_URL;
+  if (raw === undefined || raw.trim() === "") return DEPLOYED_DOMAIN;
+  try {
+    const host = new URL(raw.trim()).hostname.toLowerCase();
+    return host === "" ? DEPLOYED_DOMAIN : host;
+  } catch {
+    return DEPLOYED_DOMAIN;
+  }
+}
+
 export class EmailDeliveryService {
   private resend: ResendClient | null = null;
   private fromEmail: string;
@@ -111,7 +180,9 @@ export class EmailDeliveryService {
     /** A stand-in provider. Tests only — see `ResendClient`. */
     private readonly injectedClient?: ResendClient,
   ) {
-    this.fromEmail = fromEmail || process.env.ALERT_FROM_EMAIL || "alerts@commissionwatch.org";
+    // An explicit argument, then the operator's variable, then a default derived
+    // from the deployed host — never a literal on a domain we do not deploy.
+    this.fromEmail = fromEmail || process.env.ALERT_FROM_EMAIL || defaultAlertFromEmail();
     this.apiKey = apiKey || process.env.RESEND_API_KEY;
   }
 

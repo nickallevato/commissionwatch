@@ -380,8 +380,13 @@ found it.
   review path and its console exist, and nothing has been approved — so `/api/places/near` correctly
   answers 200 with nothing in it. That is the wall working, not a fault, and the reader map now says
   which kind of empty it is. The operator task is to work the `/admin/place-links` queue.
-- **Email cannot ship.** SPF/DKIM/DMARC are unconfigured and `ALERT_FROM_EMAIL` still defaults to
-  `alerts@commissionwatch.org`, which is not the deployed domain and will fail alignment.
+- **Email cannot ship.** SPF/DKIM/DMARC are unconfigured for the sending domain, and that is an
+  operator and DNS task — nothing in the codebase creates or checks those records.
+  The *second* half of this is fixed as of 0.4.0: `ALERT_FROM_EMAIL` no longer defaults to
+  `alerts@commissionwatch.org`, a domain this project does not deploy and could therefore never
+  align with any record. The default is now derived from `PUBLIC_BASE_URL`'s host, so alignment is a
+  property of the code rather than of two literals agreeing; `alert-from-email.test.ts` holds it.
+  An operator's `ALERT_FROM_EMAIL` still overrides it.
 - **The Methodology page must disclose transcripts before the first transcript sweep.** The vendor
   robots exception is valid *only while disclosed*, and the current disclosure names agendas and
   minutes.
