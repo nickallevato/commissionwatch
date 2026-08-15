@@ -1394,3 +1394,72 @@ export interface TranscriptCoverageRow {
 export interface TranscriptCoverageResponse {
   coverage: TranscriptCoverageRow[];
 }
+
+/**
+ * The four things that can be true of one transcript document, mirroring
+ * `MEETING_TRANSCRIPT_STATES` in `backend/src/services/transcript-coverage.ts`.
+ *
+ * `unchecked` is not a `transcript_status` state — that table has three. It is
+ * the *absence* of a row, given the same name the coverage query gives it, so a
+ * reader who has seen the coverage page does not have to learn a second set of
+ * words for the same four facts.
+ */
+export type MeetingTranscriptState =
+  | "published"
+  | "absent"
+  | "unavailable"
+  | "unchecked";
+
+/**
+ * What we know about one transcript document, mirroring
+ * `MeetingTranscriptDocument` in `backend/src/services/transcript-coverage.ts`.
+ *
+ * One entry per document, never per meeting: Bozeman's archive files a single
+ * sitting as two rows ("City Commission Meeting pt 1") each with its own clip,
+ * and a meeting whose first half published and whose second half we could not
+ * fetch is two statements. A scalar would have to pick one of them to tell.
+ */
+export interface MeetingTranscriptDocument {
+  meeting_document_id: string;
+  /** The custodian's own identifier for the recording. Null when unchecked. */
+  clip_id: string | null;
+  state: MeetingTranscriptState;
+  /**
+   * Cues indexed for this document — what a citation could resolve against.
+   *
+   * Zero for `absent`, and that zero is a fact: the custodian served a
+   * well-formed caption file with nothing in it. **Null for `unavailable` and
+   * `unchecked`**, where we do not know, and rendering either as 0 would
+   * publish our silence as theirs.
+   */
+  cue_count: number | null;
+  /**
+   * The bytes we read, so an absence claim is checkable with one command.
+   *
+   * Not a link to `/source/{sha}`: migration 089 deliberately made this **not**
+   * a foreign key to `artifacts`, because the row records which bytes were
+   * served on a date and must survive the artifact never having been stored.
+   * The source viewer would 404 on a hash that is nonetheless true.
+   */
+  observed_sha256: string | null;
+  last_checked_at: string | null;
+}
+
+/**
+ * `GET /api/meetings/:id` → `transcript`, mirroring `MeetingTranscript` in
+ * `backend/src/services/transcript-coverage.ts`. Named `…Summary` here only
+ * because `MeetingTranscript` is already the component that renders it.
+ *
+ * The route answers `null` when the meeting has no transcript document at all,
+ * and that is a **fifth** state rather than a fourth: `unchecked` says there is
+ * a document we never asked about, `null` says there is nothing to ask about.
+ */
+export interface MeetingTranscriptSummary {
+  documents: MeetingTranscriptDocument[];
+  published: number;
+  absent: number;
+  unavailable: number;
+  unchecked: number;
+  /** Most recent check across this meeting's documents, or null. */
+  checked_through: string | null;
+}

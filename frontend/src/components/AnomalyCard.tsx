@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { SeverityMark } from "@/components/AnomalyBadge";
 import { flagTypeLabels } from "@/components/flag-labels";
+import { FindingSource } from "@/components/ui/FindingSource";
+import { resolveFindingSource } from "@/components/ui/finding-source";
 import type { AnomalyFlag, Meeting } from "@/types";
 
 /** How the flag entered the ledger. Provenance is part of the citation. */
@@ -22,12 +24,23 @@ interface Props {
 /**
  * One entry in the flag ledger: severity square, flag type as a serif
  * sub-headline, the description in sans, jurisdiction and meeting date in
- * muted text, and a citation chip pointing at the source document.
+ * muted text, and a source chip pointing at the document it was drawn from.
+ *
+ * The chip is `<FindingSource>` as of 2026-08-15, and the rule behind it is the
+ * meeting page's. This card had its own — always the minutes, and
+ * `metadata.source_document` ignored entirely — so a finding an operator had
+ * pinned to a named staff report was cited here as the minutes. One row, two
+ * answers, and a reader who checked the wrong one found nothing.
+ *
+ * It is not `<Citation>`: a finding carries no quotation and no artifact hash.
+ * See `ui/finding-source.ts`.
  */
 export function AnomalyCard({ anomaly, meeting: meetingProp }: Props) {
   const meeting = meetingProp ?? anomaly.meeting;
   const jurisdiction = meeting?.commission?.jurisdiction;
-  const source = sourceDocument(meeting);
+  // No documents to pass: `/anomalies` returns flags without them, so the rule
+  // resolves against `meetings.minutes_url` / `agenda_url` alone.
+  const source = resolveFindingSource(anomaly, meeting);
 
   const meta = [
     jurisdiction ? `${jurisdiction.name}, ${jurisdiction.state}` : null,
@@ -51,16 +64,7 @@ export function AnomalyCard({ anomaly, meeting: meetingProp }: Props) {
         </p>
 
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          {source && (
-            <a
-              className="cite"
-              href={source.href}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {source.label}
-            </a>
-          )}
+          <FindingSource source={source} />
           {anomaly.meeting_id && (
             <Link className="cite" to={`/meetings/${anomaly.meeting_id}`}>
               Meeting record
@@ -71,19 +75,6 @@ export function AnomalyCard({ anomaly, meeting: meetingProp }: Props) {
       </div>
     </article>
   );
-}
-
-/** Prefer minutes over the agenda: minutes are the record of what happened. */
-function sourceDocument(
-  meeting: Meeting | undefined,
-): { href: string; label: string } | null {
-  if (meeting?.minutes_url) {
-    return { href: meeting.minutes_url, label: "Source: minutes" };
-  }
-  if (meeting?.agenda_url) {
-    return { href: meeting.agenda_url, label: "Source: agenda" };
-  }
-  return null;
 }
 
 /**

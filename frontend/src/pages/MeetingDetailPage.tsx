@@ -10,13 +10,16 @@ import { useMeetingVotes } from "@/hooks/useVotes";
 import { useMeetingAnomalies } from "@/hooks/useAnomalies";
 import { useMembers } from "@/hooks/useMembers";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Absence } from "@/components/ui/Absence";
+import { FindingSource } from "@/components/ui/FindingSource";
+import { resolveFindingSource } from "@/components/ui/finding-source";
 import { AgendaDiffTimeline } from "@/components/AgendaDiffTimeline";
 import { MeetingClaims } from "@/components/MeetingClaims";
 import { MeetingTranscript } from "@/components/MeetingTranscript";
 import { flagTypeLabels } from "@/components/flag-labels";
 import { SeverityMark } from "@/components/AnomalyBadge";
 import { severityRank } from "@/components/severity";
-import type { AnomalyFlag, Meeting, MeetingDocument, Vote, VoteValue } from "@/types";
+import type { MeetingDocument, Vote, VoteValue } from "@/types";
 
 /* ---------------------------------------------------------------- formatting */
 
@@ -86,85 +89,18 @@ const outcomeText: Record<Outcome, string> = {
 
 /* ----------------------------------------------------------------- citations */
 
-interface Citation {
-  label: string;
-  url: string | null;
-}
-
-function findDocument(
-  documents: MeetingDocument[],
-  kind: string,
-): MeetingDocument | undefined {
-  return documents.find(
-    (doc) =>
-      doc.document_type.toLowerCase().includes(kind) ||
-      doc.title.toLowerCase().includes(kind),
-  );
-}
-
 /**
- * Names the record a flag was drawn from. Only sources that actually exist on
- * the meeting are cited — when nothing is on file the chip says so rather than
- * implying a document that was never published.
+ * The source rule this page used to own now lives in
+ * `components/ui/finding-source.ts`, and the findings ledger uses the same one.
+ * It had grown a second, different answer over there — `AnomalyCard` ignored
+ * `metadata.source_document` and always preferred the minutes — so the two
+ * surfaces sent a reader to different documents for the same finding.
  */
-function citationFor(
-  anomaly: AnomalyFlag,
-  meeting: Meeting,
-  documents: MeetingDocument[],
-): Citation {
-  const named = anomaly.metadata?.source_document;
-  if (typeof named === "string" && named.length > 0) {
-    const match = documents.find((doc) => doc.title === named);
-    const url = anomaly.metadata?.source_url;
-    return {
-      label: named,
-      url: match?.url ?? (typeof url === "string" ? url : null),
-    };
-  }
-
-  const agendaDoc = findDocument(documents, "agenda");
-  const minutesDoc = findDocument(documents, "minutes");
-  const agenda: Citation | null =
-    agendaDoc || meeting.agenda_url
-      ? {
-          label: agendaDoc?.title ?? "agenda",
-          url: agendaDoc?.url ?? meeting.agenda_url,
-        }
-      : null;
-  const minutes: Citation | null =
-    minutesDoc || meeting.minutes_url
-      ? {
-          label: minutesDoc?.title ?? "minutes",
-          url: minutesDoc?.url ?? meeting.minutes_url,
-        }
-      : null;
-
-  if (anomaly.flag_type === "missing_minutes") {
-    return minutes ?? { label: "no minutes on file", url: null };
-  }
-  // How the meeting was noticed is evidenced by the agenda; what happened in
-  // the room is evidenced by the minutes.
-  if (
-    anomaly.flag_type === "last_minute_agenda_change" ||
-    anomaly.flag_type === "emergency_session"
-  ) {
-    return agenda ?? minutes ?? { label: "meeting record", url: null };
-  }
-  return minutes ?? agenda ?? { label: "meeting record", url: null };
-}
-
-function CitationChip({ citation }: { citation: Citation }) {
-  const text = `Source: ${citation.label}`;
-  if (!citation.url) return <span className="cite">{text}</span>;
-  return (
-    <a
-      className="cite"
-      href={citation.url}
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      {text}
-    </a>
+function minutesOnFile(documents: MeetingDocument[]): boolean {
+  return documents.some(
+    (doc) =>
+      doc.document_type.toLowerCase().includes("minutes") ||
+      doc.title.toLowerCase().includes("minutes"),
   );
 }
 
@@ -344,7 +280,7 @@ export function MeetingDetailPage() {
           the same condition the API derives a `missing_minutes` gap from, read
           off what this page already loaded rather than asked for again. The
           link states an absence and nothing about why. */}
-        {!meeting.minutes_url && !findDocument(documents, "minutes") && (
+        {!meeting.minutes_url && !minutesOnFile(documents) && (
           <p className="mt-3 text-sm text-muted">
             No minutes for this meeting are in the record.{" "}
             <Link className="cite" to={`/public-records?meeting=${meeting.id}`}>
@@ -391,21 +327,38 @@ export function MeetingDetailPage() {
       </div>
 
       {/* Flags --------------------------------------------------------- */}
-      {sortedAnomalies.length > 0 && (
-        <section aria-labelledby="flags-heading" className="mt-10">
-          <div className="rule-hi" />
-          <div className="pt-3">
-            <span className="kicker">Flagged by CommissionWatch</span>
-            <h2
-              id="flags-heading"
-              className="font-display text-2xl leading-headline tracking-headline text-ink"
-            >
-              {sortedAnomalies.length === 1
-                ? "One anomaly on this record"
-                : `${sortedAnomalies.length} anomalies on this record`}
-            </h2>
-          </div>
+      {/* The section renders unconditionally, and it did not before 2026-08-15.
+        A meeting with no published finding used to drop it silently, which is
+        the one shape of empty state this project has ruled out: a reader cannot
+        tell a record nothing was flagged on from a record whose findings are
+        all held in review, or from a request that failed. `<Absence>` is the
+        grammar for saying which — and "no findings from this record have been
+        reviewed yet" is exactly true of a meeting whose flags are queued. */}
+      <section aria-labelledby="flags-heading" className="mt-10">
+        <div className="rule-hi" />
+        <div className="pt-3">
+          <span className="kicker">Flagged by CommissionWatch</span>
+          <h2
+            id="flags-heading"
+            className="font-display text-2xl leading-headline tracking-headline text-ink"
+          >
+            {sortedAnomalies.length === 1
+              ? "One anomaly on this record"
+              : sortedAnomalies.length > 1
+                ? `${sortedAnomalies.length} anomalies on this record`
+                : "Nothing flagged on this record"}
+          </h2>
+        </div>
 
+        {anomaliesQuery.isLoading ? (
+          <p className="mt-4 text-sm text-muted" role="status">
+            Loading flags…
+          </p>
+        ) : anomaliesQuery.isError ? (
+          <Absence reason="request-failed" subject="Findings on this meeting" />
+        ) : sortedAnomalies.length === 0 ? (
+          <Absence reason="not-reviewed" subject="findings" />
+        ) : (
           <div className="mt-4 space-y-5">
             {sortedAnomalies.map((anomaly) => (
               <article
@@ -422,8 +375,8 @@ export function MeetingDetailPage() {
                   {anomaly.description}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <CitationChip
-                    citation={citationFor(anomaly, meeting, documents)}
+                  <FindingSource
+                    source={resolveFindingSource(anomaly, meeting, documents)}
                   />
                   <span className="label-sm">
                     {anomaly.source === "auto"
@@ -434,8 +387,8 @@ export function MeetingDetailPage() {
               </article>
             ))}
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
 
       {/* Agenda -------------------------------------------------------- */}
@@ -560,13 +513,22 @@ export function MeetingDetailPage() {
 
       {/* Transcript ---------------------------------------------------- */}
       {/* After the claims, because a transcript corroborates what was said
-        and never originates who said it — see migration 090. The jurisdiction
-        and body names are passed rather than ids: `/api/transcripts/coverage`
-        groups on `j.name` and `c.name`, so those are the keys that join. */}
+        and never originates who said it — see migration 090.
+
+        `meeting.transcript` is the per-document state `GET /api/meetings/:id`
+        now returns, and it is passed straight through: `undefined` (a backend
+        that predates the field) and `null` (no recording filed) are different
+        facts, and defaulting either one here would erase the difference before
+        the component that knows how to say it ever sees it.
+
+        The jurisdiction and body names are still passed, for the year-coverage
+        fallback: `/api/transcripts/coverage` groups on `j.name` and `c.name`,
+        so those are the keys that join. */}
       <MeetingTranscript
         jurisdiction={jurisdiction?.name ?? ""}
         body={bodyName}
         date={meeting.date}
+        transcript={meeting.transcript}
         documents={documents}
       />
 

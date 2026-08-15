@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { useMeetings } from "@/hooks/useMeetings";
 import { AnomalyCard } from "@/components/AnomalyCard";
+import { Absence } from "@/components/ui/Absence";
 import { flagTypeLabels } from "@/components/flag-labels";
 import {
   severityLabels,
@@ -60,11 +61,27 @@ export function FindingsPage() {
           reaches 'published' only when a named operator approves it, so
           everything on this page has now been read by a person. Saying
           otherwise undersold the one guarantee that matters most. */}
+        {/* Corrected 2026-08-15, and the correction matters more than the
+          original edit did.
+
+          This said "a person reviewed and published", which is false for most
+          entries here. `resolveReviewState` (backend/src/services/review/policy.ts)
+          holds a flag only when a detector marked it `alwaysHold` — which is
+          what "nothing naming a person auto-publishes" is made of — or when its
+          severity reaches the review threshold, `high` by default. A low or
+          medium flag naming nobody is published by rule, with no human in the
+          loop, and `anomaly_flags.review_state` defaults to 'published' besides.
+
+          Claiming a review that did not happen is the same category of defect
+          as an unsourced claim, and it was on the page that exists to explain
+          how this site behaves. The guarantee that IS true is narrower and
+          worth stating exactly: the person-naming ones are held. */}
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-soft">
-          Patterns in the public record that our checks singled out and a person
-          reviewed and published. Each one links to the documents it rests on,
-          so you can read the source and judge for yourself. A finding is not an
-          allegation.
+          Patterns in the public record that our checks singled out. Anything
+          naming a person is held until an operator approves it; the rest are
+          published by rule, at low and medium severity, without a human in the
+          loop. Each one links to the documents it rests on, so you can read the
+          source and judge for yourself. A finding is not an allegation.
         </p>
       </header>
 
@@ -125,9 +142,11 @@ export function FindingsPage() {
       </div>
 
       {isError ? (
-        <p className="py-16 text-center text-sm text-muted">
-          The ledger could not be loaded. Try again shortly.
-        </p>
+        // `<Absence>` rather than this page's own sentence, which said the
+        // ledger "could not be loaded" and stopped there. A reader cannot tell
+        // that from an empty ledger unless someone says whose failure it is,
+        // and the status page is where the answer lives.
+        <Absence reason="request-failed" subject="The findings ledger" />
       ) : isLoading ? (
         <div role="status" aria-live="polite">
           <span className="sr-only">Loading flagged entries</span>
@@ -157,6 +176,14 @@ export function FindingsPage() {
           ))}
         </div>
       ) : (
+        // Deliberately still this page's own sentence, where the error state
+        // above is not. Neither empty case has an honest `<Absence>` reason: a
+        // filter returning nothing is a statement about the filter rather than
+        // about the record, and `not-reviewed` — the closest fit for an empty
+        // ledger — reads "no findings **from this record** have been reviewed
+        // yet", which is true on a meeting page and false of a site-wide
+        // ledger. Mapping onto the nearest wrong reason is how the grammar of
+        // absence stops meaning anything.
         <p className="py-16 text-center text-sm text-muted">
           {filtered
             ? "No flags match this view."

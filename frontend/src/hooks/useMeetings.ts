@@ -7,6 +7,7 @@ import type {
   Jurisdiction,
   Meeting,
   MeetingDocument,
+  MeetingTranscriptSummary,
 } from "@/types";
 
 export interface MeetingsFilter {
@@ -18,12 +19,27 @@ export interface MeetingsFilter {
 
 /**
  * `GET /api/meetings/:id` does not return a bare `meetings` row: the route
- * loads the agenda and the document list alongside it and spreads all three
- * into one object.
+ * loads the agenda, the document list and the transcript state alongside it and
+ * spreads them into one object.
  */
 export interface MeetingDetail extends Meeting {
   agenda_items: AgendaItem[];
   documents: MeetingDocument[];
+  /**
+   * What we know about this meeting's transcript documents, or `null` when it
+   * has none. Three values, not two:
+   *
+   *   an object   per-document states, one entry per `meeting_documents` row
+   *   `null`      the archive lists no recording for this meeting at all
+   *   absent      **this backend does not send the field.** Optional for that
+   *               reason alone: the key shipped on 2026-08-15, and a frontend
+   *               image that reaches production ahead of the backend's would
+   *               otherwise read a missing key as `null` and publish "no
+   *               recording exists" about a meeting nobody has asked about.
+   *               `MeetingTranscript` falls back to year coverage on `undefined`
+   *               and says the fifth thing on `null`.
+   */
+  transcript?: MeetingTranscriptSummary | null;
 }
 
 /**

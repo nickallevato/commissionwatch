@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { within } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import { renderWithProviders, screen, waitFor } from "@/lib/test-utils";
 import { FindingsPage } from "./FindingsPage";
 import { server } from "@/mocks/server";
+import type { AnomalyFlag } from "@/types";
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
@@ -25,20 +27,31 @@ function articleFor(name: string): HTMLElement {
 
 describe("FindingsPage", () => {
   /**
-   * The heading changed on 2026-08-15; what it was guarding did not.
+   * This test asserted a guarantee the system does not make, and held it in
+   * place for half a day.
    *
-   * "Flagged for review" was one of four names this page used for one object —
-   * the nav said Findings, the URL said /anomalies, the body copy said "nothing
-   * here is a finding". The heading is now the vocabulary's word, and the thing
-   * worth protecting moves into the sentence under it: this page must say the
-   * entries were reviewed by a person and must not read as an accusation.
+   * The copy said "a person reviewed and published", and the assertion below
+   * required those words — so the page and its test agreed with each other and
+   * both disagreed with `resolveReviewState`, which publishes a low or medium
+   * flag naming nobody with no human in the loop. A test that pins a false
+   * claim is worse than no test: it makes the claim look checked.
+   *
+   * What it now asserts is the guarantee that is actually true, and it is the
+   * narrower one — person-naming findings are held — plus the scope that makes
+   * it honest.
    */
-  it("leads with the review framing, not an accusation", () => {
+  it("states the review guarantee it can keep, and scopes it honestly", () => {
     renderWithProviders(<FindingsPage />);
     expect(
       screen.getByRole("heading", { level: 1, name: "Findings" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/a person\s+reviewed and published/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/anything\s+naming a person is held until an operator approves it/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/published by rule[\s\S]*without a human in the\s+loop/i),
+      "the page must not imply every finding was read by somebody",
+    ).toBeInTheDocument();
     expect(screen.getByText(/a finding is not an allegation/i)).toBeInTheDocument();
   });
 
@@ -105,6 +118,85 @@ describe("FindingsPage", () => {
     expect(sources.length).toBeGreaterThan(0);
     expect(sources[0]).toHaveAttribute("target", "_blank");
     expect(sources[0].getAttribute("href")).toMatch(/^https?:\/\//);
+  });
+
+  /**
+   * The ledger and the meeting page resolve a finding's source with one rule as
+   * of 2026-08-15, and this is the case that proved they did not.
+   *
+   * `AnomalyCard` used to ignore `metadata.source_document` and always link the
+   * minutes, so a finding an operator had pinned to a named staff report was
+   * cited here as the minutes and on the meeting page as the report. A reader
+   * who followed the ledger's chip opened a document that does not contain what
+   * the entry describes — worse than an uncited entry, because the check
+   * appears to have been done.
+   */
+  it("cites the document a finding names, not the minutes it would default to", async () => {
+    const pinned: AnomalyFlag = {
+      id: "60000000-0000-4000-8000-00000000000f",
+      meeting_id: "30000000-0000-4000-8000-000000000001",
+      agenda_item_id: null,
+      flag_type: "quorum_issue",
+      description: "Only 2 of 5 members were recorded present.",
+      severity: "critical",
+      metadata: {
+        source_document: "Staff report on the culvert bid",
+        source_url: "https://records.example.invalid/staff-report-culvert.pdf",
+      },
+      source: "manual",
+      created_at: "2024-12-10T10:00:00Z",
+    };
+    server.use(
+      http.get("/api/anomalies", () =>
+        HttpResponse.json({ data: [pinned], total: 1 }),
+      ),
+    );
+    renderWithProviders(<FindingsPage />);
+
+    const chip = await screen.findByRole("link", {
+      name: "Source: Staff report on the culvert bid",
+    });
+    expect(chip).toHaveAttribute(
+      "href",
+      "https://records.example.invalid/staff-report-culvert.pdf",
+    );
+    expect(
+      screen.queryByRole("link", { name: "Source: minutes" }),
+    ).toBeNull();
+  });
+
+  /**
+   * A finding carries no quotation and no artifact hash — `anomaly_flags` has
+   * neither column, and the stored artifacts behind a finding are resolved only
+   * for the operator console at `/api/admin/review`. So the ledger cites a
+   * document and says so, and must never grow the furniture of `<Citation>`,
+   * which promises a verbatim span of stored bytes.
+   */
+  it("cites a document, and never dresses one up as a quotation", async () => {
+    const { container } = renderWithProviders(<FindingsPage />);
+
+    await waitFor(() => {
+      expect(entry("Quorum issue")).toBeInTheDocument();
+    });
+    expect(container.querySelector("blockquote")).toBeNull();
+    expect(container.querySelector("figcaption")).toBeNull();
+  });
+
+  it("says a failed ledger request is ours, not an empty record", async () => {
+    server.use(
+      http.get("/api/anomalies", () =>
+        HttpResponse.json({ error: "boom", statusCode: 500 }, { status: 500 }),
+      ),
+    );
+    renderWithProviders(<FindingsPage />);
+
+    expect(
+      await screen.findByText(/The findings ledger could not be loaded/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /collection status/i }),
+    ).toHaveAttribute("href", "/status");
+    expect(screen.queryByText("Nothing is flagged for review.")).toBeNull();
   });
 
   it("counts the entries on show", async () => {

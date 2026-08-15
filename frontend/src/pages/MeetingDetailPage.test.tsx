@@ -757,6 +757,54 @@ describe("MeetingDetailPage", () => {
       );
     });
 
+    /**
+     * The flags section used to disappear when a meeting had none, and a
+     * disappearing section is the one empty state this project has ruled out:
+     * "nothing was flagged", "everything flagged here is still in review" and
+     * "the request failed" are three different facts and the reader could tell
+     * none of them apart. `<Absence>` is the shared grammar for saying which,
+     * and the status link is what marks the third as ours.
+     */
+    it("states an empty flag list rather than dropping the section", async () => {
+      install({ anomalies: [] });
+      renderPage();
+
+      expect(
+        await screen.findByText(
+          "No findings from this record have been reviewed yet.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Nothing flagged on this record" }),
+      ).toBeInTheDocument();
+      // Not ours, so no status link is offered for it.
+      expect(
+        screen.queryByRole("link", { name: /collection status/i }),
+      ).toBeNull();
+    });
+
+    it("owns a failed flag request instead of rendering it as an empty record", async () => {
+      install();
+      server.use(
+        http.get("/api/anomalies", () =>
+          HttpResponse.json({ error: "boom", statusCode: 500 }, { status: 500 }),
+        ),
+      );
+      renderPage();
+
+      expect(
+        await screen.findByText(/Findings on this meeting could not be loaded/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: /collection status/i }),
+      ).toHaveAttribute("href", "/status");
+      expect(
+        screen.queryByText(
+          "No findings from this record have been reviewed yet.",
+        ),
+      ).toBeNull();
+    });
+
     it("names the meeting record, unlinked, when nothing is published", async () => {
       install({
         meeting: makeMeeting({ minutes_url: null, agenda_url: null }),
@@ -909,6 +957,72 @@ describe("MeetingDetailPage · claims", () => {
  * swept, on a meeting whose transcript we hold.
  */
 describe("MeetingDetailPage · transcript", () => {
+  /**
+   * The field `GET /api/meetings/:id` gained on 2026-08-15, passed through.
+   *
+   * What is guarded here is that the page hands the component the API's own
+   * value rather than a default of its own: `undefined` (a backend that
+   * predates the field) and `null` (a meeting with no recording filed) are
+   * different facts, and either one substituted for the other would put a
+   * sentence on a public page that the record does not support. The two
+   * documents are the Bozeman shape — one sitting, two clips — and the
+   * coverage endpoint must not be consulted at all.
+   */
+  it("states each transcript document the meeting response carried", async () => {
+    install({
+      meeting: makeMeeting({
+        transcript: {
+          documents: [
+            {
+              meeting_document_id: "8f1d0c66-6666-4a00-9000-00000000000a",
+              clip_id: "2325",
+              state: "published",
+              cue_count: 1284,
+              observed_sha256: "b".repeat(64),
+              last_checked_at: "2024-12-04T00:00:00.000Z",
+            },
+            {
+              meeting_document_id: "8f1d0c66-6666-4a00-9000-00000000000b",
+              clip_id: "2326",
+              state: "absent",
+              cue_count: 0,
+              observed_sha256: "c".repeat(64),
+              last_checked_at: "2024-12-04T00:00:00.000Z",
+            },
+          ],
+          published: 1,
+          absent: 1,
+          unavailable: 0,
+          unchecked: 0,
+          checked_through: "2024-12-04T00:00:00.000Z",
+        },
+      }),
+    });
+    server.use(
+      http.get("/api/transcripts/coverage", () => {
+        throw new Error("the meeting page must not fall back to year coverage");
+      }),
+    );
+    renderPage();
+
+    const rendered = await screen.findAllByTestId("transcript-document");
+    expect(rendered).toHaveLength(2);
+    expect(rendered[0]).toHaveAttribute("data-state", "published");
+    expect(rendered[1]).toHaveAttribute("data-state", "absent");
+    expect(screen.queryByTestId("transcript-year")).not.toBeInTheDocument();
+  });
+
+  it("says there is no recording filed when the API answers null", async () => {
+    install({ meeting: makeMeeting({ transcript: null }) });
+    renderPage();
+
+    const panel = await screen.findByTestId("transcript-none");
+    expect(panel.textContent).toContain(
+      "The record shows no recording of this meeting.",
+    );
+    expect(screen.queryByTestId("transcript-document")).not.toBeInTheDocument();
+  });
+
   it("reads coverage for this meeting's body and year", async () => {
     install();
     server.use(

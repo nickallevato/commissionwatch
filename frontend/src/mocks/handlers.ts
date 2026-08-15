@@ -108,7 +108,17 @@ export const handlers = [
     return list(filtered);
   }),
 
-  // `GET /meetings/:id` spreads the row together with its agenda and documents.
+  /**
+   * `GET /meetings/:id` spreads the row together with its agenda, its documents
+   * and what we know about its transcript.
+   *
+   * `transcript: null` is what the route answers for a meeting with no
+   * transcript document, and none of the fixtures has one — so it is the honest
+   * default rather than a convenience. Omitting the key would be a different
+   * statement: `undefined` means "this backend does not send the field", and a
+   * handler that sent it would let a component ship that cannot tell the two
+   * apart. The suites that care install their own.
+   */
   http.get("/api/meetings/:id", ({ params }) => {
     const meeting = meetings.find((m) => m.id === params.id);
     if (!meeting) return new HttpResponse(null, { status: 404 });
@@ -120,6 +130,7 @@ export const handlers = [
       documents: meetingDocuments
         .filter((d) => d.meeting_id === params.id)
         .sort(byCreatedAtAsc),
+      transcript: null,
     });
   }),
 
