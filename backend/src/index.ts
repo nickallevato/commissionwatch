@@ -88,6 +88,10 @@ function shutdown() {
   ingestion.worker.stop();
   ingestion.stationaryWorker.stop();
   ingestion.extractionWorker.stop();
+  // Optional: a misconfigured governor pin yields a null worker rather than
+  // failing the boot, because a second-opinion pass is not worth refusing to
+  // serve the archive over.
+  ingestion.governorWorker?.stop();
   eventDrain.stop();
   server.close(() => {
     // `flushAll` sends whatever is buffered in the dispatcher's batching window

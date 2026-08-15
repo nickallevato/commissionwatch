@@ -179,3 +179,54 @@ export async function findPublicClaim(
   const row: unknown = await whereClaimPublic(db, query).first();
   return typeof row === "object" && row !== null ? (row as Record<string, unknown>) : undefined;
 }
+
+
+/* ---------------------------------------------------------------------------
+   Was a finding read by a person, or published by rule?
+   --------------------------------------------------------------------------- */
+
+/**
+ * Adds `operator_reviewed` and `reviewed_at` to a findings query.
+ *
+ * `review_state = 'published'` says a finding is public. It does **not** say
+ * anybody read it. `resolveReviewState` holds a flag only when a detector marked
+ * it `alwaysHold` — a changed item naming somebody on the roster, a
+ * records-derived flag — or when its severity reaches the review threshold,
+ * `high` by default. A low or medium flag naming nobody is published by rule
+ * with no human in the loop, and migration 027 defaults the column to
+ * `'published'` besides.
+ *
+ * That distinction was invisible to a reader, and the findings page filled the
+ * gap by claiming every entry had been "reviewed and published" by a person —
+ * false for most of them, and asserted by its own test for half a day. The copy
+ * now states the rule. This lets it state the truth per finding instead.
+ *
+ * The evidence is `approval_requests`: a row reaching `approved` is a named
+ * operator's decision, recorded at the moment they made it. A finding with no
+ * such row was never queued, which is exactly what "published by rule" means.
+ * `reviewed_at` comes from that row rather than from the flag, because the flag
+ * carries no approval timestamp and inventing one from `updated_at` would date
+ * a decision by whenever the row was last touched.
+ */
+export function withFindingReview<T extends Knex.QueryBuilder>(
+  db: Knex,
+  query: T,
+  table = "anomaly_flags",
+): T {
+  query.select(
+    db.raw(
+      `exists (
+         select 1 from approval_requests ar
+          where ar.anomaly_flag_id = ??.id and ar.status = 'approved'
+       ) as operator_reviewed`,
+      [table],
+    ),
+    db.raw(
+      `(select ar.reviewed_at from approval_requests ar
+          where ar.anomaly_flag_id = ??.id and ar.status = 'approved'
+          order by ar.reviewed_at desc limit 1) as reviewed_at`,
+      [table],
+    ),
+  );
+  return query;
+}

@@ -114,6 +114,11 @@ services:
       # fails at construction rather than producing a bill.
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-}
+      # The governor is a second model judging pass 1's output. Optional: it
+      # defaults to a pin measured against the live free-model list, and an
+      # empty value reads as absent. It must not equal OPENROUTER_MODEL —
+      # a model judging its own output is a rubber stamp, and startup refuses.
+      - GOVERNOR_MODEL=${GOVERNOR_MODEL:-}
       - OPERATOR_SEED_EMAIL=${OPERATOR_SEED_EMAIL:-}
       - OPERATOR_SEED_PASSWORD=${OPERATOR_SEED_PASSWORD:-}
       - OPERATOR_SEED_NAME=${OPERATOR_SEED_NAME:-}

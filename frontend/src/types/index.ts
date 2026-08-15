@@ -324,6 +324,23 @@ export interface AnomalyFlag {
   metadata: Record<string, unknown> | null;
   source: AnomalySource;
   created_at: string;
+  /**
+   * Did a named operator approve this, or was it published by rule?
+   *
+   * `review_state = 'published'` says a finding is public. It does not say
+   * anybody read it: `resolveReviewState` holds a flag only when a detector
+   * marked it `alwaysHold` — which is what "nothing naming a person
+   * auto-publishes" is made of — or when its severity reaches the review
+   * threshold, `high` by default. A low or medium flag naming nobody is
+   * published with no human in the loop.
+   *
+   * Optional because older responses do not carry it, and `undefined` must stay
+   * distinguishable from `false`: "we do not know" and "nobody approved this"
+   * are different statements and only one of them should be printed.
+   */
+  operator_reviewed?: boolean;
+  /** The approval's own timestamp, never the row's `updated_at`. Null when unreviewed. */
+  reviewed_at?: string | null;
   meeting?: Meeting;
 }
 

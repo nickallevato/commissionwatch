@@ -10,6 +10,7 @@ import {
   type DiscoverTarget,
   type ExtractTarget,
   type FetchTarget,
+  type GovernTarget,
   type IngestionStage,
   type ParseTarget,
   type StageTargets,
@@ -131,6 +132,20 @@ export interface ExtractContext extends StoredArtifactContext {
   readonly target: ExtractTarget;
 }
 
+/**
+ * Checking the claims against the bytes they were read from, with a second model.
+ *
+ * A stored-artifact context for extraction's reason, and one more: the governor
+ * must judge the same characters the extractor's offsets index into, so it
+ * derives the document text from these bytes rather than from anything cached
+ * beside them. A window read out of a differently-produced copy would be a
+ * verdict about text nobody cited.
+ */
+export interface GovernContext extends StoredArtifactContext {
+  readonly stage: "govern";
+  readonly target: GovernTarget;
+}
+
 export type StageOutcome = Promise<StageResult | void>;
 
 /**
@@ -143,6 +158,7 @@ export interface HandlerRegistry {
   parse?: (ctx: ParseContext) => StageOutcome;
   analyze?: (ctx: AnalyzeContext) => StageOutcome;
   extract?: (ctx: ExtractContext) => StageOutcome;
+  govern?: (ctx: GovernContext) => StageOutcome;
 }
 
 /** Count key recorded when a stage succeeds. */
@@ -152,6 +168,7 @@ const SUCCESS_COUNT_KEY: Record<IngestionStage, string> = {
   parse: "parsed",
   analyze: "analyzed",
   extract: "extracted",
+  govern: "governed",
 };
 
 // ---------------------------------------------------------------------------
@@ -407,6 +424,17 @@ export class IngestionWorker {
         return handler({
           ...base,
           stage: "extract",
+          target: job.target,
+          artifact,
+          content,
+        });
+      }
+      case "govern": {
+        const handler = this.requireHandler("govern", this.handlers.govern);
+        const { artifact, content } = await this.loadArtifact(job.target.sha256);
+        return handler({
+          ...base,
+          stage: "govern",
           target: job.target,
           artifact,
           content,

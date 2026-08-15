@@ -362,3 +362,109 @@ after(async () => {
 after(async () => {
   await db.destroy();
 });
+
+
+/**
+ * `review_state = 'published'` says a finding is public. It does not say
+ * anybody read it.
+ *
+ * `resolveReviewState` holds a flag only when a detector marked it `alwaysHold`
+ * or when its severity reaches the review threshold — `high` by default — so a
+ * low or medium flag naming nobody is published by rule with no human in the
+ * loop. That distinction was invisible to a reader, and the findings page filled
+ * the gap by claiming every entry had been reviewed by a person. It had a test
+ * asserting those words, so the page and its test agreed with each other and
+ * both disagreed with the code.
+ *
+ * These assert the distinction is now visible per finding, so the page can stop
+ * generalising.
+ */
+describe("GET /api/anomalies · was it read by a person", () => {
+  const NAME = "Review Provenance County";
+  let ruleId: string;
+  let approvedId: string;
+
+  before(async () => {
+    await db("jurisdictions").where({ name: NAME }).del();
+    const [j] = await db("jurisdictions")
+      .insert({ name: NAME, state: "MT", type: "county" })
+      .returning("id");
+    const jid = typeof j === "string" ? j : j.id;
+    const [c] = await db("commissions")
+      .insert({ jurisdiction_id: jid, name: "Provenance Board" })
+      .returning("id");
+    const cid = typeof c === "string" ? c : c.id;
+    const [m] = await db("meetings")
+      .insert({ commission_id: cid, date: "2026-07-07", published_at: new Date() })
+      .returning("id");
+    const mid = typeof m === "string" ? m : m.id;
+
+    // Published by rule: low severity, no approval_requests row, exactly what
+    // resolveReviewState produces below the threshold.
+    const [rule] = await db("anomaly_flags")
+      .insert({
+        meeting_id: mid,
+        flag_type: "unanimous_controversial",
+        description: "Published by rule, read by nobody.",
+        severity: "low",
+        review_state: "published",
+      })
+      .returning("id");
+    ruleId = typeof rule === "string" ? rule : rule.id;
+
+    const [approved] = await db("anomaly_flags")
+      .insert({
+        meeting_id: mid,
+        flag_type: "quorum_issue",
+        description: "Approved by a named operator.",
+        severity: "critical",
+        review_state: "published",
+      })
+      .returning("id");
+    approvedId = typeof approved === "string" ? approved : approved.id;
+
+    await db("approval_requests").insert({
+      anomaly_flag_id: approvedId,
+      meeting_id: mid,
+      status: "approved",
+      severity: "critical",
+      reviewed_at: new Date("2026-07-10T09:00:00Z"),
+      expires_at: new Date("2026-07-20T09:00:00Z"),
+    });
+  });
+
+  after(async () => {
+    await db("jurisdictions").where({ name: NAME }).del();
+  });
+
+  /**
+   * `review_state = 'published'` says a finding is public. It does not say
+   * anybody read it. A low or medium flag naming nobody is published by rule
+   * with no human in the loop — and the findings page filled that gap by
+   * claiming every entry had been reviewed by a person, with a test asserting
+   * the words, so page and test agreed while both disagreed with the code.
+   */
+  it("distinguishes a rule-published finding from one an operator approved", async () => {
+    const res = await request(app).get("/api/anomalies?limit=200").expect(200);
+    const rows: Array<{ id: string; operator_reviewed: boolean; reviewed_at: string | null }> =
+      res.body.data;
+
+    const byRule = rows.find((r) => r.id === ruleId);
+    const byOperator = rows.find((r) => r.id === approvedId);
+
+    assert.ok(byRule, "the rule-published finding must be public");
+    assert.equal(byRule.operator_reviewed, false, "nobody approved it; it must not claim they did");
+
+    assert.ok(byOperator, "the approved finding must be public");
+    assert.equal(byOperator.operator_reviewed, true);
+  });
+
+  it("carries an approval date only where there was an approval", async () => {
+    const res = await request(app).get("/api/anomalies?limit=200").expect(200);
+    const rows: Array<{ id: string; reviewed_at: string | null }> = res.body.data;
+
+    // A date on an unreviewed finding would read like a decision nobody made.
+    assert.equal(rows.find((r) => r.id === ruleId)?.reviewed_at ?? null, null);
+    assert.ok(rows.find((r) => r.id === approvedId)?.reviewed_at);
+  });
+});

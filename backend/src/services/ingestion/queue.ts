@@ -11,7 +11,13 @@ import type { Knex } from "knex";
  * Schema of record: backend/migrations/018_create_ingestion_jobs.ts
  */
 
-export type IngestionStage = "discover" | "fetch" | "parse" | "analyze" | "extract";
+export type IngestionStage =
+  | "discover"
+  | "fetch"
+  | "parse"
+  | "analyze"
+  | "extract"
+  | "govern";
 
 export type IngestionJobStatus =
   | "pending"
@@ -91,12 +97,33 @@ export interface ExtractTarget {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Have a second model check the claims already extracted from these bytes.
+ *
+ * The same shape as `ExtractTarget`, and deliberately not "a claim id": the
+ * governor judges a claim against a window of the document, so the unit of work
+ * is the artifact the windows are cut from. One job per (meeting, artifact)
+ * reads the bytes once and judges every held claim they produced, rather than
+ * re-deriving the document text once per claim.
+ *
+ * Post-`fetch`, so a content address and no URL. Its one network call is to
+ * OpenRouter, which is not a source of record: nothing it returns is stored
+ * without first being located in these bytes.
+ */
+export interface GovernTarget {
+  /** Content address of a stored artifact. Lowercase hex SHA-256. */
+  sha256: string;
+  meetingId: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface StageTargets {
   discover: DiscoverTarget;
   fetch: FetchTarget;
   parse: ParseTarget;
   analyze: AnalyzeTarget;
   extract: ExtractTarget;
+  govern: GovernTarget;
 }
 
 export type JobTarget = StageTargets[IngestionStage];
@@ -176,6 +203,7 @@ const STAGES: readonly IngestionStage[] = [
   "parse",
   "analyze",
   "extract",
+  "govern",
 ];
 
 const STATUSES: readonly IngestionJobStatus[] = [
@@ -388,6 +416,16 @@ export function parseExtractTarget(raw: unknown): ExtractTarget {
   };
 }
 
+export function parseGovernTarget(raw: unknown): GovernTarget {
+  const target = asTargetRecord(raw, "govern");
+  rejectNetworkTarget(target, "govern");
+  return {
+    sha256: parseSha256(target, "govern"),
+    meetingId: requiredTargetString(target, "meetingId", "govern"),
+    metadata: optionalMetadata(target, "govern"),
+  };
+}
+
 /** Turns a stored record into a stage-discriminated, fully typed job. */
 export function toClaimedJob(record: JobRecord): ClaimedJob {
   const base = {
@@ -407,6 +445,8 @@ export function toClaimedJob(record: JobRecord): ClaimedJob {
       return { ...base, stage: "analyze", target: parseAnalyzeTarget(record.target) };
     case "extract":
       return { ...base, stage: "extract", target: parseExtractTarget(record.target) };
+    case "govern":
+      return { ...base, stage: "govern", target: parseGovernTarget(record.target) };
   }
 }
 
@@ -570,6 +610,9 @@ export class IngestionQueue {
         return;
       case "extract":
         parseExtractTarget(target);
+        return;
+      case "govern":
+        parseGovernTarget(target);
         return;
       default:
         throw new InvalidJobError(`unknown stage ${String(stage)}`);

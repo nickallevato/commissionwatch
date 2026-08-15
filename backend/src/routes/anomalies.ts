@@ -1,10 +1,6 @@
 import { Router, Request } from "express";
 import db from "../config/database";
-import {
-  findPublicFinding,
-  findPublishedMeeting,
-  whereFindingPublic,
-} from "../services/publication";
+import { findPublicFinding, findPublishedMeeting, whereFindingPublic, withFindingReview } from "../services/publication";
 import { loadPolicy, resolveReviewState } from "../services/review/policy";
 import { detectAnomalies, detectAnomaliesBatch } from "../services/anomaly-detection";
 import { requireOperator } from "../middleware/requireOperator";
@@ -65,8 +61,10 @@ router.get("/", async (req: Request<unknown, unknown, unknown, AnomaliesQuery>, 
     const countResult = await query.clone().count("* as total").first();
     const total = Number(countResult?.total ?? 0);
 
-    const data = await query
-      .select("anomaly_flags.*")
+    // `operator_reviewed` distinguishes a finding a named person approved from
+    // one published by rule at low or medium severity. Both are public and only
+    // one was read by anybody; a reader is entitled to know which.
+    const data = await withFindingReview(db, query.select("anomaly_flags.*"))
       .orderBy("anomaly_flags.created_at", "desc")
       .limit(limit)
       .offset(offset);

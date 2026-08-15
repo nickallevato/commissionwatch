@@ -20,6 +20,7 @@ import {
 import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services/pressroom/runs";
 import { ExtractionUnavailable } from "../../services/extraction/run";
 import { enqueueExtraction } from "../../services/extraction/stage";
+import { enqueueGovernance } from "../../services/governor/stage";
 import { isExtracting, listRuns } from "../../services/extraction/runs";
 import { listSources, setSourceEnabled } from "../../services/pressroom/sources";
 
@@ -404,6 +405,51 @@ router.post("/meetings/:id/extract", async (req: Request<{ id: string }>, res, n
         "Extraction queued. A worker claims it and takes a few minutes; poll " +
         "GET /meetings/:id/extract-runs for the outcome. Every claim it produces " +
         "is held for review — nothing naming a person is published without an operator.",
+    });
+  } catch (err) {
+    if (err instanceof ExtractionUnavailable) {
+      res.status(err.statusCode).json({ error: err.message, statusCode: err.statusCode });
+      return;
+    }
+    next(err);
+  }
+});
+
+/**
+ * Ask the governor to judge this meeting's claims.
+ *
+ * Pass 2, and it is a **judge, never an author**. It receives the ±2,000
+ * character window and the claim triple, never pass 1's reasoning — a judge
+ * shown the advocate's argument agrees with it — and it emits a verdict that
+ * must *point*, naming the fragments it says are unsupported.
+ *
+ * It cannot approve anything. Nothing it returns sets `status = 'approved'`; a
+ * `supported: false` marks the claim and sorts it to the bottom of the operator
+ * queue, and it is never deleted. A judge with a 5% error rate that
+ * auto-discarded would silently lose one true claim in twenty, and a
+ * transparency project cannot have a mechanism that quietly drops records.
+ *
+ * Separate from `/extract` on purpose rather than chained to it: re-judging
+ * after a model or prompt change is a thing an operator does deliberately, and
+ * the unique index on (claim, model, prompt_version, window sha) makes a re-run
+ * over unchanged bytes a no-op.
+ */
+router.post("/meetings/:id/govern", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) return badId(res, "meeting");
+    const live = requireStack(res);
+    if (live === null) return;
+
+    const queued = await enqueueGovernance(db, live.queue, id);
+
+    res.status(202).json({
+      ...queued,
+      status: "queued",
+      message:
+        "Governor pass queued. It judges the claims already extracted from this " +
+        "meeting and changes only the order and the annotation of the review " +
+        "queue — it approves nothing and deletes nothing.",
     });
   } catch (err) {
     if (err instanceof ExtractionUnavailable) {

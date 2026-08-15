@@ -4,6 +4,7 @@ import { emitEvent, retractSubject, subjectIsPublic } from "../events";
 import { appendCorrectionRow } from "../pressroom/corrections";
 import { whereClaimPublic } from "../publication";
 import { CLAIM_ACTIONS, locateQuote, type ClaimAction } from "../extraction/verify";
+import { governorBacklog, toClaimVerdict, type ClaimVerdict } from "../governor/store";
 import { motiveTerms } from "./language";
 import { loadPolicy } from "./policy";
 import { ReviewError, type ReviewActor } from "./queue";
@@ -315,6 +316,16 @@ export interface ClaimReviewItem {
     /** For an approved claim: whether the pin still holds. Null otherwise. */
     pin: ClaimRender | null;
   };
+  /**
+   * The second model's opinion, or the absence of one.
+   *
+   * `null` means *not checked by the governor* and the screen must say so. It is
+   * not a pass: a claim nobody could check labelled as though it had been is the
+   * failure the whole governor design is arranged against. Nothing here changes
+   * what is publishable — `render.approvable` does not consult it, and there is
+   * no path from a verdict to `status = 'approved'`.
+   */
+  governor: ClaimVerdict | null;
   citation: ClaimCitation;
   context: {
     meeting_date: string | null;
@@ -348,17 +359,49 @@ const CLAIM_COLUMNS = [
   "minute_claims.retracted_at as retracted_at",
   "minute_claims.retracted_reason as retracted_reason",
   "minute_claims.created_at as created_at",
+  // The newest verdict, or nulls. See `claimQuery`.
+  "verdict.supported as governor_supported",
+  "verdict.unsupported_fragments as governor_unsupported_fragments",
+  "verdict.relied_on as governor_relied_on",
+  "verdict.confidence as governor_confidence",
+  "verdict.model as governor_model",
+  "verdict.prompt_version as governor_prompt_version",
+  "verdict.window_sha256 as governor_window_sha256",
+  "verdict.created_at as governor_created_at",
   "meetings.date as meeting_date",
   "meetings.published_at as meeting_published_at",
   "commissions.name as commission_name",
   "jurisdictions.name as jurisdiction_name",
 ];
 
+/**
+ * The claim, its meeting, and the governor's newest verdict about it.
+ *
+ * A lateral join rather than a second query per row: the queue lists fifty
+ * claims at a time and a per-row lookup would be fifty round trips to annotate a
+ * page. Newest wins because a claim is re-judged when the model or the prompt
+ * changes and the current answer is the one an operator is being shown — the
+ * older rows stay in `claim_verdicts`, which is why they are rows and not
+ * columns.
+ *
+ * A claim with no verdict joins to nulls, and that is a state of its own: *not
+ * checked by the governor*. It is neither a pass nor a fail.
+ */
 function claimQuery(db: Knex): Knex.QueryBuilder {
   return db("minute_claims")
     .join("meetings", "meetings.id", "minute_claims.meeting_id")
     .leftJoin("commissions", "commissions.id", "meetings.commission_id")
-    .leftJoin("jurisdictions", "jurisdictions.id", "commissions.jurisdiction_id");
+    .leftJoin("jurisdictions", "jurisdictions.id", "commissions.jurisdiction_id")
+    .joinRaw(`
+      left join lateral (
+        select v.supported, v.unsupported_fragments, v.relied_on, v.confidence,
+               v.model, v.prompt_version, v.window_sha256, v.created_at
+        from claim_verdicts v
+        where v.claim_id = minute_claims.id
+        order by v.created_at desc, v.id desc
+        limit 1
+      ) verdict on true
+    `);
 }
 
 
@@ -574,6 +617,7 @@ async function toReviewItem(
             })
           : null,
     },
+    governor: toClaimVerdict(row),
     citation,
     context: {
       meeting_date: asIsoOrNull(row.meeting_date),
@@ -602,7 +646,22 @@ export interface ClaimQueueFilters {
 export interface ClaimQueueListing {
   data: ClaimReviewItem[];
   total: number;
-  counts: { held: number; approved: number; rejected: number; retracted: number; overdue: number };
+  counts: {
+    held: number;
+    approved: number;
+    rejected: number;
+    retracted: number;
+    overdue: number;
+    /**
+     * Held claims the governor has not judged.
+     *
+     * Visible as a count because a silently growing backlog of unjudged claims
+     * looks identical to a system with nothing to judge. A governor that has
+     * stopped running produces no error and no missing page — it produces this
+     * number climbing.
+     */
+    governor_unjudged: number;
+  };
 }
 
 /**
@@ -635,6 +694,12 @@ export async function listClaimQueue(
   const rows = await base
     .clone()
     .select<Array<Record<string, unknown>>>(CLAIM_COLUMNS)
+    // A claim the governor refused drops to the bottom. It is **not** hidden and
+    // **not** deleted: a judge with a 5% error rate that auto-discards silently
+    // loses one true claim in twenty, and a filter that hides these by default
+    // would make the governor an auto-discarder with extra steps. An unjudged
+    // claim sorts with the supported ones, because not-checked is not doubt.
+    .orderByRaw("coalesce(verdict.supported = false, false) asc")
     .orderBy([
       { column: "minute_claims.created_at", order: "asc" },
       { column: "minute_claims.meeting_id", order: "asc" },
@@ -655,7 +720,14 @@ export async function listClaimQueue(
     ])
     .groupByRaw("status, retracted, overdue");
 
-  const counts = { held: 0, approved: 0, rejected: 0, retracted: 0, overdue: 0 };
+  const counts = {
+    held: 0,
+    approved: 0,
+    rejected: 0,
+    retracted: 0,
+    overdue: 0,
+    governor_unjudged: await governorBacklog(db),
+  };
   for (const row of tallies) {
     const n = Number(row.count);
     if (row.status === "held") counts.held += n;

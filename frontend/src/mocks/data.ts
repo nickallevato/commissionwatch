@@ -304,6 +304,12 @@ export const anomalyFlags: AnomalyFlag[] = [
     severity: "high",
     metadata: { hours_before_meeting: 18 },
     source: "manual",
+    // High severity, so the review threshold held it and an operator approved
+    // it. The other fixture below is published by rule — both paths must be
+    // exercised by the default fixture, because the distinction between them is
+    // the reason the field exists.
+    operator_reviewed: true,
+    reviewed_at: "2024-12-04T16:20:00Z",
     created_at: "2024-12-03T10:00:00Z",
   },
   {
@@ -311,6 +317,8 @@ export const anomalyFlags: AnomalyFlag[] = [
     meeting_id: "30000000-0000-4000-8000-000000000003",
     agenda_item_id: null,
     flag_type: "quorum_issue",
+    operator_reviewed: false,
+    reviewed_at: null,
     description: "Only 2 of 5 board members were present. Meeting proceeded without formal quorum.",
     severity: "critical",
     metadata: null,

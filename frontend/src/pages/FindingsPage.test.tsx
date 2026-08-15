@@ -279,4 +279,55 @@ describe("FindingsPage", () => {
       /corrupt|illegal|unlawful|fraud|wrongdoing|misconduct|crime|criminal|scandal|cover-?up|conspir/i;
     expect(container.textContent ?? "").not.toMatch(accusations);
   });
+
+  /**
+   * The page's lead copy states the rule because that was once the most it
+   * could honestly say. These assert it now says the truth per entry — and, in
+   * particular, that an entry nobody read says so rather than staying silent
+   * and letting the reader assume the generous reading.
+   */
+  it("says which entries an operator approved and which published by rule", async () => {
+    renderWithProviders(<FindingsPage />);
+    await screen.findByRole("heading", { name: "Last-minute agenda change" });
+
+    expect(
+      screen.getByText(/approved for publication by an operator on/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/published by rule at this severity\. no operator read it\./i),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * `undefined` is not `false`. An older response that omits the field means "we
+   * do not know", and printing "no operator read it" for that would be the same
+   * overclaim the lead copy just had, one layer down.
+   */
+  it("says nothing at all when the response does not carry the field", async () => {
+    server.use(
+      http.get("/api/anomalies", () =>
+        HttpResponse.json({
+          data: [
+            {
+              id: "60000000-0000-4000-8000-0000000000ff",
+              meeting_id: "30000000-0000-4000-8000-000000000001",
+              agenda_item_id: null,
+              flag_type: "quorum_issue",
+              severity: "high",
+              description: "A finding from a response that predates the field.",
+              metadata: null,
+              source: "auto",
+              created_at: "2024-12-03T10:00:00Z",
+            },
+          ],
+          total: 1,
+        }),
+      ),
+    );
+    renderWithProviders(<FindingsPage />);
+    await screen.findByRole("heading", { name: "Quorum issue" });
+
+    expect(screen.queryByText(/no operator read it/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/approved for publication/i)).not.toBeInTheDocument();
+  });
 });

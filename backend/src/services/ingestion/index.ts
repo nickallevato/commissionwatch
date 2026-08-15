@@ -9,8 +9,10 @@ import { registerSources, type RegisteredSource } from "./registration";
 import { SourceScheduler, schedulerEnabled } from "./scheduler";
 import { IngestionWorker } from "./worker";
 import { downloadDocument, uploadDocument } from "../storage";
-import { OpenRouterClient } from "../extraction/openrouter";
+import { OpenRouterClient, OpenRouterError } from "../extraction/openrouter";
 import { createExtractHandler, EXTRACT_CONCURRENCY } from "../extraction/stage";
+import { createGovernorClient, GovernorMisconfigured } from "../governor/model";
+import { createGovernHandler, GOVERN_CONCURRENCY } from "../governor/stage";
 
 /**
  * Assembles the ingestion stack.
@@ -68,6 +70,17 @@ export const STATIONARY_STAGES = ["parse", "analyze"] as const;
  */
 export const EXTRACT_STAGES = ["extract"] as const;
 
+/**
+ * `govern` gets its own loop too, for `EXTRACT_STAGES`' reasons and one more.
+ *
+ * The governor calls a *different* model from the extractor — that is the point
+ * of it — but both calls go out on this project's single API key, and a governor
+ * sharing the extraction loop would take turns with the pass that feeds it.
+ * Separate loops, separate concurrency knobs, and a governor outage that leaves
+ * extraction untouched.
+ */
+export const GOVERN_STAGES = ["govern"] as const;
+
 export interface IngestionStack {
   registry: AdapterRegistry;
   queue: IngestionQueue;
@@ -76,6 +89,16 @@ export interface IngestionStack {
   stationaryWorker: IngestionWorker;
   /** Polls `extract` from boot, one job at a time. */
   extractionWorker: IngestionWorker;
+  /**
+   * Polls `govern` from boot, or `null` when the pins are misconfigured.
+   *
+   * Null rather than a worker that throws: a governor whose model equals the
+   * extractor's, or whose pin is not free, must not run — but that is a reason
+   * to have no second opinion, not a reason to take the site down. The jobs are
+   * held in `blocked` with "no handler registered for stage 'govern'", which is
+   * visible in the console and reversible once the environment is fixed.
+   */
+  governorWorker: IngestionWorker | null;
   scheduler: SourceScheduler;
 }
 
@@ -145,6 +168,36 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     stages: EXTRACT_STAGES,
     idleDelayMs: 5000,
   });
+  /**
+   * The governor loop, or nothing at all.
+   *
+   * `createGovernorClient` is the startup refusal: it asserts the pin is free
+   * and that it is not the extractor's, in the constructor path rather than at
+   * call time, so a deployment that copied one environment variable into the
+   * other finds out here instead of after a batch of rubber-stamped claims. The
+   * refusal is caught because a bad governor pin is a reason to run without a
+   * second opinion, not a reason for the API to fail to boot.
+   */
+  let governorWorker: IngestionWorker | null = null;
+  try {
+    const governor = createGovernorClient();
+    governorWorker = new IngestionWorker(db, queue, {
+      handlers: { govern: createGovernHandler({ client: governor }) },
+      artifacts: createArtifactStore(options.read ?? downloadDocument),
+      batchSize: GOVERN_CONCURRENCY,
+      stages: GOVERN_STAGES,
+      idleDelayMs: 5000,
+    });
+  } catch (error) {
+    // Both refusals land here: the two pins being equal, and a pin that would
+    // cost money. `assertFreeModel` throws the second one.
+    if (!(error instanceof GovernorMisconfigured) && !(error instanceof OpenRouterError)) {
+      throw error;
+    }
+    // Loud, and it names the fix. A governor that quietly does not exist is the
+    // same failure as a backlog nobody counts.
+    console.error(`Ingestion: the governor will not run — ${error.message}`);
+  }
   const scheduler = new SourceScheduler(db, {
     queue,
     worker,
@@ -152,7 +205,15 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     ...(options.enabled === undefined ? {} : { enabled: options.enabled }),
     ...(options.lookbackDays === undefined ? {} : { lookbackDays: options.lookbackDays }),
   });
-  return { registry, queue, worker, stationaryWorker, extractionWorker, scheduler };
+  return {
+    registry,
+    queue,
+    worker,
+    stationaryWorker,
+    extractionWorker,
+    governorWorker,
+    scheduler,
+  };
 }
 
 /**
@@ -238,6 +299,18 @@ export async function startIngestion(
     void stack.extractionWorker.start().catch((error: unknown) => {
       console.error("Ingestion: extract worker loop stopped", error);
     });
+    // Third loop, same gate. Absent when the governor pins are misconfigured —
+    // see `buildIngestionStack` — in which case govern jobs are held in
+    // `blocked` and say so, rather than disappearing.
+    //
+    // NOTE FOR THE SHUTDOWN PATH: `src/index.ts` stops the other two loops on
+    // SIGTERM and does not yet stop this one. It needs
+    // `ingestion.governorWorker?.stop();` beside them.
+    if (stack.governorWorker !== null) {
+      void stack.governorWorker.start().catch((error: unknown) => {
+        console.error("Ingestion: govern worker loop stopped", error);
+      });
+    }
   }
 
   return registered;

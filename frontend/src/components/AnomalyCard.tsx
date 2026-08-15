@@ -63,6 +63,35 @@ export function AnomalyCard({ anomaly, meeting: meetingProp }: Props) {
           {meta.join(" · ")}
         </p>
 
+        {/* Per finding, not per page.
+          
+          The ledger's lead copy states the rule — anything naming a person is
+          held, the rest publish at low and medium severity by rule — because
+          until now that was the most the page could honestly say. `review_state`
+          is 'published' for both, so a reader had no way to tell which entry in
+          front of them had been read by anybody.
+          
+          `undefined` prints nothing at all. An older response that does not
+          carry the field means "we do not know", and that is not the same
+          statement as "nobody approved this" — printing the latter for the
+          former would be the same overclaim, one layer down. */}
+        {anomaly.operator_reviewed === true ? (
+          <p className="mt-1 text-[0.6875rem] leading-normal text-muted">
+            Approved for publication by an operator
+            {anomaly.reviewed_at ? (
+              <>
+                {" on "}
+                <span className="figure">{anomaly.reviewed_at.slice(0, 10)}</span>
+              </>
+            ) : null}
+            .
+          </p>
+        ) : anomaly.operator_reviewed === false ? (
+          <p className="mt-1 text-[0.6875rem] leading-normal text-muted">
+            Published by rule at this severity. No operator read it.
+          </p>
+        ) : null}
+
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           <FindingSource source={source} />
           {anomaly.meeting_id && (
