@@ -190,6 +190,7 @@ describe("the roster distribution names no body and no person", () => {
         seats_sourced: 5,
         seats_implied: 5,
         unmatched: [],
+        seats_traceable: 0,
         provenance: "unsourced",
       },
       {
@@ -198,6 +199,7 @@ describe("the roster distribution names no body and no person", () => {
         seats_sourced: 2,
         seats_implied: 3,
         unmatched: ["emma bode"],
+        seats_traceable: 0,
         provenance: "unsourced",
       },
       {
@@ -206,6 +208,7 @@ describe("the roster distribution names no body and no person", () => {
         seats_sourced: 0,
         seats_implied: 3,
         unmatched: ["a", "b", "c"],
+        seats_traceable: 0,
         provenance: "unsourced",
       },
       {
@@ -214,6 +217,7 @@ describe("the roster distribution names no body and no person", () => {
         seats_sourced: 0,
         seats_implied: 0,
         unmatched: [],
+        seats_traceable: 0,
         provenance: "unsourced",
       },
     ]);
@@ -246,6 +250,7 @@ describe("the roster distribution names no body and no person", () => {
         seats_sourced: 5,
         seats_implied: 2,
         unmatched: ["one", "two"],
+        seats_traceable: 0,
         provenance: "unsourced",
       },
     ]);

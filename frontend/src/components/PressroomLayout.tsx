@@ -89,6 +89,11 @@ const RAIL: readonly RailGroup[] = [
         to: null,
         note: "Officials are published from the seed data and have no operator surface yet.",
       },
+      // Not a queue and deliberately not beside them: nothing on this screen is
+      // decided and nothing on it writes a row. It reports which body's roster
+      // is unsourced and which names the record prints that the roster does not
+      // account for — the gap that makes the claim verifier discard true claims.
+      { label: "Roster", to: "/admin/roster" },
       { label: "Requests", to: "/admin/records" },
     ],
   },

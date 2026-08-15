@@ -158,6 +158,53 @@ describe("MethodologyPage", () => {
       ).toBeInTheDocument();
     });
 
+    /**
+     * The disclosure has to name each class of material, not "documents".
+     *
+     * This is the assertion that would have caught the page going stale. Captions
+     * were fetched and stored for 1,135 meetings while the disclosure still said
+     * "agendas and minutes" — the exception is valid only while it is disclosed,
+     * and a disclosure that omits a class of material we take is not a disclosure
+     * of it. A vague word is how that happened, so a vague word is what this
+     * refuses: the four names are asserted individually, and the day a fifth kind
+     * of document is fetched this test is what has to be edited.
+     */
+    it("names every class of material it fetches, not just 'documents'", () => {
+      const { container } = renderWithProviders(<MethodologyPage />);
+      const disclosure = screen
+        .getByRole("heading", { name: "How this site treats robots.txt" })
+        .parentElement;
+      expect(disclosure).not.toBeNull();
+      const text = disclosure!.textContent ?? "";
+      for (const kind of ["agendas", "minutes", "caption files", "video player page"]) {
+        expect(text.toLowerCase(), `the disclosure does not name ${kind}`).toContain(
+          kind.toLowerCase(),
+        );
+      }
+      // And the whole page must not describe the fetched set as merely "documents"
+      // in the disclosure itself, which is the wording that went stale.
+      expect(container.textContent).toMatch(/Four classes of material/);
+    });
+
+    /**
+     * The media is not fetched, and the page says why rather than being silent.
+     *
+     * Silence would read as "we have not got round to it". The truth is that the
+     * only route to those bytes is to claim to be a browser, which is the line
+     * this project does not cross — and a reader is owed that distinction,
+     * because it is the difference between a gap in our work and a gap the
+     * statutory route exists to fill.
+     */
+    it("states that the recordings themselves are refused, and why", () => {
+      renderWithProviders(<MethodologyPage />);
+      expect(
+        screen.getByText(/The recordings themselves are not fetched, and cannot be/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/pretending to be software we are\s+not/),
+      ).toBeInTheDocument();
+    });
+
     it("states that the exception ends if the disclosure does", () => {
       renderWithProviders(<MethodologyPage />);
       expect(

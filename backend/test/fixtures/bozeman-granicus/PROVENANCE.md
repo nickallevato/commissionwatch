@@ -146,3 +146,75 @@ $ printf 'WEBVTT\n\n' | sha256sum
 ```
 
 That single shared hash is why `transcript_status` exists — see `migrations/089`.
+
+## `mediaplayer-clip2325.html.gz` — captured 2026-08-15
+
+One request, honest user agent, no evasion, to the same clip the caption fixture above
+came from — deliberately, so the two can be checked against each other:
+
+```
+$ curl -sS -A 'CommissionWatch/1.0 (+https://commissionwatch.bmux.sh/about; civic transparency research)' \
+    -L 'https://bozeman.granicus.com/MediaPlayer.php?view_id=1&clip_id=2325'
+http=200 size=75807 type=text/html; charset=UTF-8
+final=https://bozeman.granicus.com/player/clip/2325?view_id=1&redirect=true
+```
+
+Gzipped on disk for the same reason `viewpublisher-view1.html.gz` is — 76 KB of player
+markup against 14 KB compressed — and provable the same way:
+
+```
+$ gunzip -c mediaplayer-clip2325.html.gz | sha256sum
+84c775076b5b130ce20ff846be5c309bd728f7ce8a4a85ccdacf8ed8c9c35a80
+```
+
+**Byte-stable.** Clip 2775's page was fetched twice, seven minutes apart on 2026-08-15, and
+hashed identically both times. That is what makes `meeting_recordings.observed_sha256` a
+hash a stranger can reproduce rather than a hash of whatever we happened to receive.
+
+What it states, and the corroboration:
+
+| Read from the page | Value |
+|---|---|
+| `video_url` | `https://archive-stream.granicus.com/OnDemand/_definst_/mp4:archive/bozeman/bozeman_fa3dbfab-286a-4bb1-8643-fb050de5c02a.mp4/playlist.m3u8` |
+| `maxValInSec` | `1678` — the ceiling the page sets on its own embed end-time input, i.e. the clip's length |
+| `cuepoints` | a media-time index of agenda items, `[{"time":…,"type":"Agenda","id":"…"}, …]` |
+
+`captions-clip2325.vtt`, captured independently from a different endpoint, ends its last
+cue at **1676 seconds**. Two seconds from the page's 1678. The duration this project
+publishes is therefore corroborated by a second document rather than merely parsed out of
+one.
+
+## The recording itself is not fetched, and here is the probe that decided it
+
+`docs/superpowers/specs/2026-08-14-audio-transcription-design.md` §5 left it open whether
+Bozeman's media is fetchable under the same posture as the captions. Probed 2026-08-15:
+
+```
+$ curl -sS -A 'CommissionWatch/1.0 (+https://commissionwatch.bmux.sh/about; …)' -I -L \
+    'https://archive-video.granicus.com/bozeman/bozeman_a1f0657c-7758-43c1-bb2c-a8450f107cb3.mp4'
+HTTP/2 403      server: CloudFront      x-cache: Error from cloudfront
+
+$ curl -sS -I -L <same url>                          # curl's own default user agent
+HTTP/2 403
+
+$ curl -sS -A 'Mozilla/5.0 (X11; Linux x86_64) … Chrome/127.0.0.0 …' -I -L <same url>
+HTTP/2 200      content-length: 6008707697      server: AmazonS3      accept-ranges: bytes
+```
+
+The custodian's own download link, `bozeman.granicus.com/DownloadFile.php?view_id=1&clip_id=2775`,
+redirects onto that host and inherits the 403. The single browser-UA request above was a
+diagnostic run once to establish *why* the honest request failed; nothing was downloaded, and
+no fetch in this codebase sends a browser user-agent string.
+
+So the media is reachable only by claiming to be a browser, which is browser-fingerprint
+spoofing and is the line `SKILL.md` draws. **The finding is "not accessible by acceptable
+means" and the route is a public-records request.** `archive-video.granicus.com` and
+`archive-stream.granicus.com` are not in the adapter's `allowedOrigins` and must not be added.
+
+Two further facts from the same probe, recorded so nobody re-derives them:
+
+- `bozeman.granicus.com/podcast.php?view_id=1` returns a valid RSS channel with
+  `<gran:podCastEnabled/>` and **zero items**. There is no audio podcast feed to subscribe to.
+- `ASX.php?view_id=1&clip_id=N` answers `200 video/x-ms-asf` to an honest client and yields
+  only an `rtmp://69.5.90.100/...` reference — the same media, over a protocol retired years
+  ago, on a host that is equally not ours to reach around.

@@ -26,30 +26,51 @@ import { namesAnOfficial, RECORDED_OFFICES } from "./extraction/verify";
  * A roster derived from the corpus the extractor reads is circular, and this
  * module exists to measure the hole, not to fill it.
  *
- * **What a real roster needs, and what the schema is missing.** `members` has
- * `name`, `title`, `term_start` and `term_end` — the term columns are already
- * there — and no provenance at all: no source URL, no fetched-at, no artifact
- * sha. So a row saying "Emma Bode, Commissioner" is indistinguishable from a
- * row somebody typed, which is why `provenance` below reports `unsourced` for
- * every jurisdiction rather than pretending. Closing this needs, in order:
+ * **What a real roster needs.** `members` has `name`, `title`, `term_start` and
+ * `term_end`, and since **migration 103** it has `source_url`, `fetched_at` and
+ * `artifact_sha256` too. Closing the gap needs, in order:
  *
  *  1. provenance columns on `members` (`source_url`, `artifact_sha256`,
- *     `fetched_at`), and a loader that refuses a roster without them;
+ *     `fetched_at`), and a loader that refuses a roster without them —
+ *     **done**: migration 103 adds the columns with an all-or-nothing CHECK,
+ *     and `src/scripts/roster-load.ts` is the loader that refuses;
  *  2. a jurisdiction-scoped, term-dated import from a published roster page —
  *     Bozeman via `bozeman.granicus.com`, Gallatin via CivicPlus — or from the
  *     Montana Secretary of State's CERS, which is structured and is already an
- *     adapter target;
+ *     adapter target. **Not done.** Nothing here fetches;
  *  3. attendance rolls used only as *corroboration*, parsed deterministically
- *     rather than by the model, and reconciled against 1 or 2.
+ *     rather than by the model, and reconciled against 1 or 2. **Not done.**
  *
- * None of that is done here and none of it should be inferred from what is.
+ * Step 1 landing changes what this module can say, and changes nothing about
+ * what the table holds: migration 103 backfilled nothing, because every
+ * existing row is genuinely unsourced. `seats_traceable` is read off the real
+ * columns now rather than hardcoded, so the day step 2 lands the number moves
+ * on its own — and until then it reports zero because zero is true.
  */
+
+/**
+ * Whether the seats counted for a body can prove where they came from.
+ *
+ * `partial` is its own value rather than being rounded to either neighbour. A
+ * body with three sourced seats and two typed ones is not a sourced roster, and
+ * calling it one publishes the typed rows under the sourced rows' credibility;
+ * calling it `unsourced` throws away the fact that somebody did the work on
+ * three of them, which is the thing an operator needs to see to finish the job.
+ */
+export type RosterProvenanceState = "unsourced" | "partial" | "sourced";
 
 export interface RosterCoverage {
   jurisdiction_id: string;
   jurisdiction_name: string;
   /** Member rows whose term covers `asOf`. */
   seats_sourced: number;
+  /**
+   * Of those, the rows carrying a source URL, a fetched-at and an artifact sha.
+   *
+   * Read off migration 103's columns. The CHECK there is all-or-nothing, so a
+   * row counted here carries all three and not one of them.
+   */
+  seats_traceable: number;
   /** Distinct office-holders the stored claims name. A lower bound. */
   seats_implied: number;
   /** Implied names with no member row. Every one is a rejection waiting to happen. */
@@ -57,11 +78,34 @@ export interface RosterCoverage {
   /**
    * Where the sourced seats came from.
    *
-   * Always `unsourced` today: `members` carries no provenance columns, so no
-   * row can prove where it came from. A second value here means the loader in
-   * the header note exists.
+   * `unsourced` for every body today — migration 103 added the columns and
+   * deliberately backfilled nothing, so nothing yet fills them. This is derived
+   * from the rows, not asserted: it moves the day a loader writes one.
    */
-  provenance: "unsourced";
+  provenance: RosterProvenanceState;
+}
+
+/**
+ * Which coverage bucket a body falls in.
+ *
+ * Exported and used by `rosterProvenance` rather than duplicated there, because
+ * the public distribution and the operator's per-body roll disagreeing about
+ * what "accounted" means is a bug that would show up as an argument between two
+ * screens.
+ */
+export type RosterCoverageState = "accounted" | "partial" | "none" | "unmeasured";
+
+export function coverageState(row: RosterCoverage): RosterCoverageState {
+  // A body with nothing to match against matches everything. That is the
+  // confident zero this project exists to catch, so it gets its own bucket
+  // rather than being counted as full coverage.
+  if (row.seats_implied === 0) return "unmeasured";
+  if (row.unmatched.length === 0) return "accounted";
+  // Keyed on the names accounted for, not on whether any roster row exists: a
+  // body with five rows that match none of the five names the minutes print
+  // accounts for nothing, and calling that partial coverage would flatter it.
+  if (row.unmatched.length === row.seats_implied) return "none";
+  return "partial";
 }
 
 /**
@@ -109,10 +153,17 @@ export interface RosterProvenance {
    */
   unmeasured: number;
   /**
-   * Bodies whose roster rows can prove where they came from. Zero today, for
-   * every body: `members` carries no `source_url`, no `fetched_at` and no
-   * `artifact_sha256`, so no row can prove anything. Published rather than
-   * omitted, because a zero somebody can see is a commitment.
+   * Bodies whose roster rows can *all* prove where they came from.
+   *
+   * Zero today for every body, and now zero by measurement rather than by
+   * assertion: migration 103 added `source_url`, `fetched_at` and
+   * `artifact_sha256` to `members` and backfilled nothing, so the count is read
+   * off real columns and will move the day a loader writes one. Published
+   * rather than omitted, because a zero somebody can see is a commitment.
+   *
+   * A body whose roster is *partly* traceable does not count here. Half a
+   * sourced roster is not a sourced roster, and this is the number a reader
+   * uses to decide whether to trust the names on the site.
    */
   traceable: number;
 }
@@ -128,14 +179,24 @@ export function rosterProvenance(coverage: RosterCoverage[]): RosterProvenance {
   };
 
   for (const row of coverage) {
-    if (row.provenance !== "unsourced") provenance.traceable += 1;
-    if (row.seats_implied === 0) provenance.unmeasured += 1;
-    else if (row.unmatched.length === 0) provenance.accounted += 1;
-    // Keyed on the names accounted for, not on whether any roster row exists: a
-    // body with five rows that match none of the five names the minutes print
-    // accounts for nothing, and calling that partial coverage would flatter it.
-    else if (row.unmatched.length === row.seats_implied) provenance.none += 1;
-    else provenance.partial += 1;
+    if (row.provenance === "sourced") provenance.traceable += 1;
+    // `coverageState` rather than the comparison inline: the operator console's
+    // per-body roll labels each row with the same function, and two copies of
+    // this would eventually disagree in front of the person fixing it.
+    switch (coverageState(row)) {
+      case "unmeasured":
+        provenance.unmeasured += 1;
+        break;
+      case "accounted":
+        provenance.accounted += 1;
+        break;
+      case "none":
+        provenance.none += 1;
+        break;
+      case "partial":
+        provenance.partial += 1;
+        break;
+    }
   }
 
   return provenance;
@@ -218,11 +279,18 @@ export async function rosterCoverage(
       .where({ jurisdiction_id: jurisdictionId })
       .where("term_start", "<=", day)
       .where((builder) => builder.whereNull("term_end").orWhere("term_end", ">=", day))
-      .select("name");
-    const memberNames = (Array.isArray(members) ? members : [])
+      .select("name", "source_url", "fetched_at", "artifact_sha256");
+    const memberRows = (Array.isArray(members) ? members : [])
       .filter(isRecord)
-      .map((member) => (typeof member.name === "string" ? member.name : ""))
-      .filter((name) => name !== "");
+      .filter((member) => typeof member.name === "string" && member.name !== "");
+    const memberNames = memberRows.map((member) => String(member.name));
+
+    // Migration 103's CHECK is all-or-nothing, so the sha alone decides. Reading
+    // one column rather than three keeps this from disagreeing with the
+    // constraint about what a half-filled row counts as — it cannot exist.
+    const seatsTraceable = memberRows.filter(
+      (member) => typeof member.artifact_sha256 === "string" && member.artifact_sha256 !== "",
+    ).length;
 
     const claims: unknown = await db("minute_claims as c")
       .join("meetings as m", "c.meeting_id", "m.id")
@@ -248,11 +316,115 @@ export async function rosterCoverage(
       jurisdiction_id: jurisdictionId,
       jurisdiction_name: typeof row.name === "string" ? row.name : "",
       seats_sourced: memberNames.length,
+      seats_traceable: seatsTraceable,
       seats_implied: implied.size,
       unmatched,
-      provenance: "unsourced",
+      // A body with no seats at all is `unsourced`, not `sourced` by vacuity —
+      // the same confident-zero refusal `unmeasured` makes on the other axis.
+      provenance:
+        seatsTraceable === 0
+          ? "unsourced"
+          : seatsTraceable === memberNames.length
+            ? "sourced"
+            : "partial",
     });
   }
 
   return coverage;
+}
+
+/** One ingestion source already registered against the body. */
+export interface RosterRollSource {
+  adapter_key: string;
+  enabled: boolean;
+}
+
+/**
+ * One body's row in the operator's roll: the coverage, its bucket, and the two
+ * facts an operator needs to act on it.
+ *
+ * `website_url` and `sources` are stored columns, not suggestions. Nothing here
+ * proposes a roster URL: this module has never fetched one and inventing a
+ * likely-looking address for an operator to trust is the same fabrication the
+ * `members` table is being fixed to stop.
+ */
+export interface RosterRollRow extends RosterCoverage {
+  state: RosterCoverageState;
+  /** `jurisdictions.website_url`. Null means the record does not hold one. */
+  website_url: string | null;
+  /** Adapters already registered against this body, whether or not enabled. */
+  sources: RosterRollSource[];
+}
+
+export interface RosterRollTotals {
+  seats_sourced: number;
+  seats_traceable: number;
+  seats_implied: number;
+  unmatched: number;
+}
+
+/**
+ * The per-body roll, for the operator console and for nowhere else.
+ *
+ * This names bodies. `/api/metrics` publishes `rosterProvenance` — the same
+ * facts with every name removed — because a per-body list on a public, id-less
+ * endpoint tells a stranger which counties we hold withheld records for, which
+ * is the enumeration the 404-not-403 publication design exists to prevent. The
+ * route that serves this sits behind `requireOperator`, and naming the body is
+ * the entire point there: the operator is the person who has to go and source
+ * it.
+ */
+export interface RosterRoll {
+  /** The day the terms were evaluated against. */
+  as_of: string;
+  data: RosterRollRow[];
+  totals: RosterRollTotals;
+  /** The same distribution `/api/metrics` publishes, for the summary strip. */
+  provenance: RosterProvenance;
+}
+
+export async function rosterRoll(
+  db: Knex,
+  options: RosterCoverageOptions = {},
+): Promise<RosterRoll> {
+  const asOf = options.asOf ?? new Date();
+  const coverage = await rosterCoverage(db, { asOf });
+
+  const jurisdictions: unknown = await db("jurisdictions").select("id", "website_url");
+  const websiteById = new Map<string, string | null>();
+  for (const row of Array.isArray(jurisdictions) ? jurisdictions : []) {
+    if (!isRecord(row) || typeof row.id !== "string") continue;
+    websiteById.set(row.id, typeof row.website_url === "string" ? row.website_url : null);
+  }
+
+  const sourceRows: unknown = await db("ingestion_sources")
+    .orderBy("adapter_key", "asc")
+    .select("jurisdiction_id", "adapter_key", "enabled");
+  const sourcesById = new Map<string, RosterRollSource[]>();
+  for (const row of Array.isArray(sourceRows) ? sourceRows : []) {
+    if (!isRecord(row) || typeof row.jurisdiction_id !== "string") continue;
+    if (typeof row.adapter_key !== "string") continue;
+    const list = sourcesById.get(row.jurisdiction_id) ?? [];
+    list.push({ adapter_key: row.adapter_key, enabled: row.enabled === true });
+    sourcesById.set(row.jurisdiction_id, list);
+  }
+
+  const data: RosterRollRow[] = coverage.map((row) => ({
+    ...row,
+    state: coverageState(row),
+    website_url: websiteById.get(row.jurisdiction_id) ?? null,
+    sources: sourcesById.get(row.jurisdiction_id) ?? [],
+  }));
+
+  return {
+    as_of: asOf.toISOString().slice(0, 10),
+    data,
+    totals: {
+      seats_sourced: coverage.reduce((total, row) => total + row.seats_sourced, 0),
+      seats_traceable: coverage.reduce((total, row) => total + row.seats_traceable, 0),
+      seats_implied: coverage.reduce((total, row) => total + row.seats_implied, 0),
+      unmatched: coverage.reduce((total, row) => total + row.unmatched.length, 0),
+    },
+    provenance: rosterProvenance(coverage),
+  };
 }

@@ -125,17 +125,39 @@ describe("GET /api/metrics", () => {
   });
 
   /**
-   * `members` has no source URL, no fetched-at and no artifact sha, so no row
-   * can prove where it came from. Publishing the `false` is the point — it is
-   * the gap that gates the whole claims pipeline, and a page that quietly
-   * reported `true` would be claiming provenance the schema cannot carry.
+   * `roster_sourced` must agree with the database, whatever the database says.
+   *
+   * This asserted a flat `false`, on the reasoning that `members` carried no
+   * source URL, no fetched-at and no artifact sha — so no row could prove where
+   * it came from and reporting `true` would claim provenance the schema could
+   * not hold. That reasoning was right and is now out of date: migration 103
+   * added exactly those three columns.
+   *
+   * It failed the moment a suite that runs before this one inserted a member
+   * row *with* provenance, which is the roster console's whole subject. The
+   * value was correct and the assertion was stale — the constant had been
+   * pinned instead of the property.
+   *
+   * So the property: `roster_sourced` is true exactly when some row can prove
+   * where it came from. Order-independent, and it keeps meaning the same thing
+   * on the day a real roster is loaded, when a test demanding `false` would
+   * have to be deleted to go green.
    */
-  it("says plainly that no roster is sourced yet", async () => {
+  it("reports the roster as sourced exactly when a row can prove it", async () => {
     const metrics = await collectMetrics(db);
+
+    const traceable = await db("members")
+      .whereNotNull("source_url")
+      .whereNotNull("fetched_at")
+      .whereNotNull("artifact_sha256")
+      .first<{ id: string } | undefined>("id");
+
     assert.equal(
       metrics.quality.roster_sourced,
-      false,
-      "members carries no provenance columns; reporting true would be a claim we cannot support",
+      traceable !== undefined,
+      traceable === undefined
+        ? "no member row carries provenance, so this must be false"
+        : "a member row carries full provenance, so this must be true",
     );
   });
 

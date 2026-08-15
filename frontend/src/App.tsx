@@ -37,6 +37,7 @@ import { AdminMeetingDetailPage } from "./pages/AdminMeetingDetailPage";
 import { AdminReviewPage } from "./pages/AdminReviewPage";
 import { AdminClaimsPage } from "./pages/AdminClaimsPage";
 import { AdminPlaceLinksPage } from "./pages/AdminPlaceLinksPage";
+import { AdminRosterPage } from "./pages/AdminRosterPage";
 import { SubscribePage } from "./pages/SubscribePage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -182,6 +183,12 @@ export function App() {
             thing that puts a pin on the public map. Until this screen existed
             `place_links.status` could only ever read `held`. */}
           <Route path="admin/place-links" element={<AdminPlaceLinksPage />} />
+          {/* The roster roll. Not a queue: nothing here is decided and
+            nothing here writes a member row. It is the per-body view of the
+            gap `/metrics` can only publish as a distribution, because that
+            endpoint is public and naming a body on it would enumerate the
+            counties we hold withheld records for. */}
+          <Route path="admin/roster" element={<AdminRosterPage />} />
           <Route path="admin/meetings/:id" element={<AdminMeetingDetailPage />} />
         </Route>
 

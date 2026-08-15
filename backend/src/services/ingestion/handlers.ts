@@ -17,6 +17,11 @@ import {
   transcriptFetchSettled,
 } from "./transcripts";
 import { parseWebVttCues } from "./webvtt";
+import {
+  readRecording,
+  recordMeetingRecording,
+  recordingFetchSettled,
+} from "./recordings";
 import type { ArtifactRef, HandlerRegistry, StageResult } from "./worker";
 
 /**
@@ -446,6 +451,7 @@ export function createIngestionHandlers(
       let documents = 0;
       let unattributed = 0;
       let transcriptsSettled = 0;
+      let recordingsSettled = 0;
 
       for (const ref of meetings) {
         const commissionId = commissions.byBodyKey.get(ref.bodyKey);
@@ -491,6 +497,19 @@ export function createIngestionHandlers(
               continue;
             }
           }
+          if (document.kind === "recording") {
+            // The same gate, for the same reason: no ETag on this host, so a
+            // re-check is a full 76 KB download at one request per ten seconds,
+            // and the player page for a 2015 meeting will never change again.
+            const documentId = await findMeetingDocumentId(db, result.meetingId, document.url);
+            if (
+              documentId !== null &&
+              (await recordingFetchSettled(db, documentId, ref.date, new Date()))
+            ) {
+              recordingsSettled += 1;
+              continue;
+            }
+          }
           await ctx.enqueue("fetch", {
             url: document.url,
             meetingId: result.meetingId,
@@ -533,6 +552,7 @@ export function createIngestionHandlers(
           // Descriptive, in neither SUCCESS_KEYS nor FAILURE_KEYS: not asking
           // again for a settled transcript is the policy working, not a gap.
           transcripts_settled: transcriptsSettled,
+          recordings_settled: recordingsSettled,
         },
       };
     },
@@ -680,6 +700,36 @@ export function createIngestionHandlers(
         }
       }
 
+      // The recording index, written here for the second of the two reasons the
+      // block above is written here. Player pages do not collapse onto one
+      // artifact the way the caption stub does — each names its own media id —
+      // but an unchanged re-fetch still leaves `isNew` false and enqueues no
+      // `parse` job, so a parse-side write could never bump `last_checked_at`.
+      // "We looked again and it still says 2h 56m" needs a writer on every pass.
+      //
+      // Nothing here reaches the media. It cannot: `archive-video.granicus.com`
+      // is not in the adapter's `allowedOrigins` and refuses this project's user
+      // agent anyway. What is recorded is what the custodian's own page states.
+      if (ref.kind === "recording" && meetingDocumentId !== null) {
+        const reading = readRecording(fetched.bytes);
+        await recordMeetingRecording(db, {
+          meetingDocumentId,
+          clipId,
+          reading,
+          observedSha256: fetched.sha256,
+          observedAt: fetched.fetchedAt,
+        });
+        if (reading.state === "available") {
+          counts.recordings_available = 1;
+        } else {
+          // Unlike an absent transcript, this is a failure and is counted as one.
+          // An absence is the custodian's record; a page we could not read is
+          // ours, and `failuresIn` and `classifyRun` both have to see it.
+          counts.recordings_unreadable = 1;
+          counts.failed = (counts.failed ?? 0) + 1;
+        }
+      }
+
       if (isNew) {
         // The ref's own metadata travels on, so a stage that reads stored bytes
         // still knows what record they are. It carries no URL and cannot be
@@ -748,6 +798,23 @@ export function createIngestionHandlers(
             transcript_cues_written: written.cuesIndexed,
           },
         };
+      }
+
+      if (ctx.target.documentType === "recording") {
+        // **A player page is never indexed into `artifact_texts`.**
+        //
+        // It is 76 KB of HTML that is almost entirely stylesheet, jQuery and
+        // player configuration; `extractDocumentText` would read it happily and
+        // put that into the corpus `/api/search` reads, so a reader searching for
+        // a phrase said at a meeting would get hits on `flowplayer` and
+        // `durationInputInSecs`. The document's substance — the media id and the
+        // recording's length — is already in `meeting_recordings`, written at
+        // fetch time and addressable there.
+        //
+        // The bytes are still stored, still content-addressed and still citable,
+        // which is what makes the duration checkable. Not indexing is a statement
+        // about search, not about provenance.
+        return { counts: { recordings_not_indexed: 1 } };
       }
 
       const meetingId = ctx.target.meetingId;

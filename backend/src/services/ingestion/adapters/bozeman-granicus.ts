@@ -318,10 +318,14 @@ export function classifyGranicusDocument(
  * Counted over the stored fixture on 2026-08-14: 1,152 `tr.listingRow` rows,
  * **1,135 of them carry a clip id**. Every archived meeting has a recording.
  *
- * `classifyGranicusDocument` is deliberately left unchanged. A player page is
- * still not a file and must still classify as `null` — nothing may enqueue
- * `MediaPlayer.php` as a document. What the adapter emits is the derived
- * captions URL, which is a file.
+ * `classifyGranicusDocument` is deliberately left unchanged, and stays that way
+ * even now that the player page is fetched. Classification answers "what kind of
+ * file is at this href?", and the answer for `MediaPlayer.php` is still `null` —
+ * it is a page, not a file, and a `javascript:` href is not an address. What the
+ * adapter emits are two URLs *derived from the clip id*: the captions file, and
+ * the player page itself as a `recording` document. Deriving them keeps the rule
+ * that a link is classified by what it points at, and keeps the regression guard
+ * on `classifyGranicusDocument` meaningful.
  */
 export const GRANICUS_CLIP_LINK = /MediaPlayer\.php\?[^'"]*?\bclip_id=(\d+)/i;
 
@@ -343,7 +347,17 @@ export function granicusCaptionsUrl(clipId: string): string {
   return `${BOZEMAN_ORIGIN}/videos/${clipId}/captions.vtt`;
 }
 
-/** The custodian's own address for the recording. Recorded, never fetched. */
+/**
+ * The custodian's own page for the recording.
+ *
+ * Fetched — the page, never the media. It 302s to `/player/clip/{id}` on the same
+ * origin and states the recording's media id and its length, which is what
+ * `meeting_recordings` holds. The media it points at is on
+ * `archive-video.granicus.com`, which answered a browser string with `200` and
+ * this project's honest user agent with `403` when probed on 2026-08-15, so that
+ * host is not in `allowedOrigins` and never will be: reaching it means claiming to
+ * be a browser.
+ */
 export function granicusPlayerUrl(clipId: string): string {
   return `${BOZEMAN_ORIGIN}/MediaPlayer.php?view_id=${BOZEMAN_VIEW_ID}&clip_id=${clipId}`;
 }
@@ -694,6 +708,32 @@ export function createBozemanGranicusAdapter(
         meetingExternalId: externalId,
         expectedContentType: 'text/vtt',
         metadata: { clipId: row.clipId, mediaPlayerUrl: granicusPlayerUrl(row.clipId) },
+      });
+
+      // The player page, as a document in its own right.
+      //
+      // This is what is left of the audio-transcription spec after its own open
+      // question was probed on 2026-08-15. The recording is not fetchable by
+      // acceptable means — `archive-video.granicus.com` answers a Chrome user
+      // agent with `200 content-length: 6008707697` and answers this project's
+      // honest one, and curl's default, with `403` — so nothing is transcribed
+      // and the media host stays off `allowedOrigins`. The page, on the other
+      // hand, is on the same origin and under the same disclosed exception as
+      // the agenda beside it, and it states two facts nothing else in this
+      // project knows: which recording this meeting has, and how long it is.
+      //
+      // That is what lets the site say a 2h 56m recording of the 2013-09-23
+      // meeting exists and has no transcript — the sentence that makes a
+      // records request worth making, rather than a silence that reads like a
+      // meeting nobody recorded.
+      refs.push({
+        sourceKey: BOZEMAN_ADAPTER_KEY,
+        kind: 'recording',
+        title: clamp(`Recording index (clip ${row.clipId})`, VARCHAR_255),
+        url: granicusPlayerUrl(row.clipId),
+        meetingExternalId: externalId,
+        expectedContentType: 'text/html',
+        metadata: { clipId: row.clipId },
       });
     }
     return refs;

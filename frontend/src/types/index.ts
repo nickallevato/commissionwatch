@@ -1879,3 +1879,54 @@ export interface PlaceLinkQueueResponse {
    */
   counts: { held: number; approved: number; rejected: number };
 }
+
+/* ------------------------------------------------- the roster roll (admin) */
+
+/**
+ * The per-body roster roll — `GET /api/admin/roster`.
+ *
+ * The operator half of `RosterProvenance` above. That one is the distribution
+ * `/api/metrics` publishes and it names nothing; this one names the body and
+ * the officeholders the roster does not account for, because the operator is
+ * the person who has to go and source them. It is only ever fetched from a
+ * screen behind `requireOperator`, and the endpoint 401s without a session.
+ */
+export type RosterCoverageState = "accounted" | "partial" | "none" | "unmeasured";
+
+/** Whether the seats counted for a body can prove where they came from. */
+export type RosterProvenanceState = "unsourced" | "partial" | "sourced";
+
+export interface RosterRollSource {
+  adapter_key: string;
+  enabled: boolean;
+}
+
+export interface RosterRollRow {
+  jurisdiction_id: string;
+  jurisdiction_name: string;
+  /** Member rows whose term covers `as_of`. */
+  seats_sourced: number;
+  /** Of those, the rows carrying a source URL, a fetched-at and an artifact sha. */
+  seats_traceable: number;
+  /** Distinct officeholders the stored claims name. A lower bound. */
+  seats_implied: number;
+  /** Names the record prints that no roster row accounts for. */
+  unmatched: string[];
+  provenance: RosterProvenanceState;
+  state: RosterCoverageState;
+  /** `jurisdictions.website_url`. Null means the record holds none. */
+  website_url: string | null;
+  sources: RosterRollSource[];
+}
+
+export interface RosterRoll {
+  as_of: string;
+  data: RosterRollRow[];
+  totals: {
+    seats_sourced: number;
+    seats_traceable: number;
+    seats_implied: number;
+    unmatched: number;
+  };
+  provenance: RosterProvenance;
+}

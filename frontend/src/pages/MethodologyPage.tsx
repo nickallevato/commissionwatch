@@ -139,7 +139,7 @@ const STAGES: readonly Stage[] = [
   {
     step: "04",
     name: "Parse",
-    body: "Agendas, minutes and vote tables are read out of the stored copy into structured records: meetings, agenda items, members, votes. Caption files the custodian publishes for a recording are read into timed cues the same way.",
+    body: "Agendas, minutes and vote tables are read out of the stored copy into structured records: meetings, agenda items, members, votes. Caption files the custodian publishes for a recording are read into timed cues the same way. From a recording's player page we read only two things — which recording a meeting has, and how long it runs.",
   },
   {
     step: "05",
@@ -341,8 +341,9 @@ export function MethodologyPage() {
               </strong>
               . Everything on this site derives from documents those bodies
               published themselves — agendas, minutes, the vote records inside
-              them, and the caption files their video systems publish alongside
-              a recording.
+              them, the caption files their video systems publish alongside a
+              recording, and each recording&rsquo;s own player page, which is
+              where its length comes from.
             </Prose>
             <Prose>
               There is no other kind of input. No tips are published as fact, no
@@ -380,7 +381,7 @@ export function MethodologyPage() {
               than left to be discovered.
             </Prose>
             <Prose>
-              Bozeman&rsquo;s agendas and minutes are published through a vendor,
+              Bozeman&rsquo;s public record is published through a vendor,
               Granicus, at{" "}
               <a
                 className="underline underline-offset-2"
@@ -401,6 +402,38 @@ export function MethodologyPage() {
               search-engine crawlers, and a city&rsquo;s legal obligation to
               publish its records does not transfer to its hosting
               vendor&rsquo;s convention.
+            </Prose>
+            <Prose>
+              Four classes of material are taken from that host, and naming them
+              is part of the exception rather than a description of it. They are{" "}
+              <strong className="font-semibold text-ink">agendas</strong>,{" "}
+              <strong className="font-semibold text-ink">minutes</strong>,{" "}
+              <strong className="font-semibold text-ink">
+                the caption files the city&rsquo;s video system publishes
+              </strong>{" "}
+              for a meeting recording, and{" "}
+              <strong className="font-semibold text-ink">
+                the video player page
+              </strong>{" "}
+              for each recording, which states how long that recording is. Meeting
+              packets are on a separate host and are not fetched by default; one
+              of them runs to 439 pages. If this project ever begins taking a
+              fifth kind of document, this sentence changes first.
+            </Prose>
+            <Prose>
+              <strong className="font-semibold text-ink">
+                The recordings themselves are not fetched, and cannot be.
+              </strong>{" "}
+              The audio and video sit on a content delivery network that answers
+              a request claiming to be a web browser and refuses this
+              project&rsquo;s own user agent — checked on 15 August 2026, where
+              the same file returned 6 GB of video to a browser string and an
+              error to us. The city&rsquo;s own download link leads to the same
+              refusal. Getting past it would mean pretending to be software we are
+              not, so we do not: what this site records is that a recording of a
+              given length exists, where the city publishes it, and whether a
+              transcript of it exists. The route to the recording itself is a
+              public-records request.
             </Prose>
             <Prose>
               The conditions that fetching runs under are not informal. One

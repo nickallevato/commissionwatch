@@ -58,6 +58,15 @@ export type DocumentKind =
   // corroborating artifact for what was said and never an originating one for who
   // said it — see `migrations/090_create_transcript_cues.ts`.
   | 'transcript'
+  // The custodian's video-player page for the meeting recording, fetched from
+  // `MediaPlayer.php?view_id=1&clip_id=N`. It is a *document about* a recording
+  // rather than the recording: the media itself sits on a CDN that answers a
+  // browser string with 200 and this project's honest user agent with 403
+  // (probed 2026-08-15), and presenting a user agent we are not is the access
+  // control this project does not defeat. The page states the recording's media
+  // id and its length, which is what `meeting_recordings` records. It is never
+  // indexed into `artifact_texts` — see the `parse` handler.
+  | 'recording'
   | 'other';
 
 /**
@@ -72,6 +81,7 @@ export const DOCUMENT_KINDS: readonly DocumentKind[] = Object.freeze([
   'ordinance',
   'attachment',
   'transcript',
+  'recording',
   'other',
 ]);
 

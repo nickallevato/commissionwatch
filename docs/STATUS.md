@@ -260,10 +260,31 @@ found it.
   `jurisdictions`, not merely the fixture's. The first version served the per-body roll and leaked
   those names on a public, id-less endpoint — an aggregate names nobody, but a per-body list tells a
   stranger which counties we hold withheld records for, which is the enumeration the 404-not-403
-  design exists to prevent. The per-body roll belongs behind `requireOperator` in the console, where
-  naming a body is the point; that route is not built.
-  `traceable` is `0` for every body and will stay `0` until the provenance columns land — the shape
-  of the number is what is publishable today, not the number.
+  design exists to prevent. **The per-body roll now exists, behind `requireOperator`** —
+  `GET /api/admin/roster` and `/admin/roster` in the console, where naming a body is the entire
+  point. Worst-first, unmatched names printed as the minutes print them, the three ordered steps
+  stated with the loader command verbatim.
+
+  **Migration 103 added the provenance columns** — `source_url`, `fetched_at`, `artifact_sha256` on
+  `members`, all nullable, **nothing backfilled**, because every existing row is genuinely unsourced.
+  `members_provenance_check` makes provenance all-or-nothing: a row with a URL and no hash reads as
+  sourced in every listing and proves nothing. `seats_traceable` is counted off real columns now, and
+  `rosterProvenance.traceable` counts only fully-sourced bodies — half a sourced roster is not one.
+
+  `npm run roster:load` is the writer, dry-run by default. The operator fetches the page and keeps
+  the bytes; the sha written on every row is the sha of *those* bytes. It refuses a name that does
+  not appear in the fetched bytes — tags stripped, punctuation flattened, **no similarity scoring and
+  no override flag** — plus unreadable bytes, a future `fetched_at`, a non-http source, a bad term
+  date and a duplicate seat, collecting every refusal into one error rather than stopping at the
+  first.
+
+  **`traceable` is still 0, and step 2 is where it is stuck.** Probed 2026-08-15, honest user agent,
+  no evasion: `bozemanmt.gov` answers **403 from Akamai at the root**, not merely on deep links, so
+  Bozeman's roster is *not accessible by acceptable means* and the answer is a records request.
+  `gallatinmt.gov/directory.aspx` returns 200 and names the county commissioners — the loader would
+  accept it — but it **carries no term dates**, and `members.term_start` is NOT NULL, so a load from
+  it would have to invent one. CERS has no officials endpoint at the guessed path. Nothing was
+  loaded.
 - **The roster is unsourced.** `members` carries no `source_url`, `fetched_at` or `artifact_sha256`,
   so a row naming a real commissioner is indistinguishable from one somebody typed. `/metrics`
   publishes `roster_sourced: false` and the page says so in the reader's words. This gates the claim
@@ -315,6 +336,46 @@ found it.
 
   `listUnextractedMeetings` is deliberately **not** on the public path — it returns meeting ids and
   shas, and an unread backlog is mostly unpublished meetings.
+- **There is no meeting audio to transcribe, for either jurisdiction, and that is now measured
+  rather than assumed.** Probed 2026-08-15.
+
+  Bozeman's player page publishes the media URL. `archive-video.granicus.com/…mp4` answers **403
+  from CloudFront** to an honest, contactable user agent and **200 from AmazonS3** to a browser
+  string. The custodian's *own* `DownloadFile.php` link — which answers our UA on the tenant host —
+  302s onto that CDN and inherits the 403. `podcast.php` returns a valid RSS channel with
+  `<gran:podCastEnabled/>` and **zero items**; `ASX.php` yields only an `rtmp://` reference to the
+  same media. The only route to the audio is presenting a user agent we are not, which is
+  fingerprint spoofing, which is the hard line. **Stopped.** A test asserts the media hosts never
+  enter `allowedOrigins`. (Even open, it would be 6.0 GB × 1,135 ≈ 6.8 TB.)
+
+  Gallatin re-probed the same day: `media.avcaptureall.cloud` still returns the same 15,256-byte
+  Blazor shell with `http=200` for *every* path including `/robots.txt`, and the shell loads an AWS
+  WAF `challenge.js` and defines `getAwsWafToken`. Unchanged, and still a records request.
+
+  **So the audio-transcription spec's headline claim — that this "unlocks the 2013–2020 Bozeman
+  archive" — is false.** That archive is precisely what sits behind the 403. No transcription
+  pipeline was built: it would have had zero input.
+
+  What the probe *did* justify is migration 102 `meeting_recordings` and the coverage report. The
+  tenant host answers our honest UA under the exception already disclosed, and its player page
+  states two facts nothing here knew: **which recording a meeting has, and how long it is.** Clip
+  1301 (2013, empty caption stub) reports a **2h 56m recording that exists and cannot be searched**.
+  That sentence is what makes a records request worth making, and it is now a row rather than an
+  anecdote. `parse` deliberately refuses to index the player page into `artifact_texts` — 76 KB of
+  jQuery would poison the search corpus.
+
+  The duration is corroborated, not merely parsed: clip 2325's page says 1678s and its caption file —
+  different endpoint, different format, separate request — ends its last cue at 1676.633s. The page
+  is byte-stable across fetches, which is what makes `observed_sha256` reproducible, and
+  `npm run recordings:coverage -- --verify N` re-derives every published field from the stored bytes.
+
+- **The Methodology disclosure was overdue and is now correct.** It said "Bozeman's agendas and
+  minutes" while captions for 1,135 meetings were already stored. It names four classes now —
+  agendas, minutes, the caption files, the recording's player page — and states plainly that the
+  recordings themselves are refused, why, and that the route is a records request. The vendor-robots
+  exception is valid only while disclosed, so this was a live breach of our own published policy,
+  not a documentation gap.
+
 - **The map is empty until an operator reviews links.** The extractor and the geocoder run, the
   review path and its console exist, and nothing has been approved — so `/api/places/near` correctly
   answers 200 with nothing in it. That is the wall working, not a fault, and the reader map now says

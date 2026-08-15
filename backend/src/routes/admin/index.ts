@@ -6,6 +6,7 @@ import pressroomRouter from './pressroom';
 import reviewRouter from './review';
 import claimsRouter from './claims';
 import placeLinksRouter from './place-links';
+import rosterRouter from './roster';
 import { requireOperator } from '../../middleware/requireOperator';
 
 const router = Router();
@@ -31,6 +32,11 @@ router.use('/claims', claimsRouter);
 // The place-link review path. A link is what puts a decision on the map, so an
 // unreviewed one is a coordinate we inferred and have not stood behind yet.
 router.use('/place-links', placeLinksRouter);
+// The per-body roster roll. `/api/metrics` publishes the same facts with every
+// body name stripped out, because that endpoint is public and id-less; this one
+// names the body and the unmatched officeholders, which is what makes it
+// actionable and what makes it an operator surface.
+router.use('/roster', rosterRouter);
 
 // A guarded catch-all. Without it an unknown admin path 404s before the guard
 // runs, which confirms to an unauthenticated caller which routes exist.
