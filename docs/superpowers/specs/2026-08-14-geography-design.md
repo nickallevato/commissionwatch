@@ -60,7 +60,56 @@ aggregation is what turns public records into surveillance.
 
 ## The data model
 
-### a. PostGIS, and the deployment consequence
+### a. Probed 2026-08-15: PostGIS is absent, and half the feature does not need it
+
+**Evidence, not reasoning.** Against the deployed image (`pgvector/pgvector:pg16`, the same tag in
+`docker-compose.yml` and `deploy/docker-compose.shared.yml`):
+
+```
+select count(*) from pg_available_extensions where name like 'postgis%';   -- 0
+select name from pg_available_extensions
+ where name in ('vector','postgis','pg_trgm','cube','earthdistance');
+ -- cube, earthdistance, pg_trgm, vector
+```
+
+So PostGIS is not merely un-installed, it is **unavailable** — `CREATE EXTENSION postgis` fails and
+a migration containing it would fail *on deploy*, since migrations run automatically. That is a
+production outage delivered by a feature branch, and it is the reason this probe was worth running
+before writing the migration rather than after.
+
+But `cube` and `earthdistance` are there, and they answer the query this feature exists for:
+
+```
+create extension cube; create extension earthdistance;
+select round(earth_distance(ll_to_earth(45.6796,-111.0386),
+                            ll_to_earth(45.6841,-111.0386))::numeric);   -- 501
+select round(earth_distance(ll_to_earth(45.6796,-111.0386),
+                            ll_to_earth(45.7246,-111.0386))::numeric);   -- 5009
+create index p_geo on p using gist (ll_to_earth(lat, lon));              -- CREATE INDEX
+```
+
+501 metres and 5,009 metres against two points a known distance apart, and **the radius query is
+indexable** with a GiST index on `ll_to_earth`. Nothing here needs a new image.
+
+### The consequence: two stages, and the valuable one ships first
+
+**Stage 1 — points, today.** `places` stores `lat`/`lon` as `float8` with a GiST index on
+`ll_to_earth(lat, lon)`. That serves the "what is happening near me" query, `/feed.xml?near=…`, and
+the whole point-and-radius half of the design — including the subscription this spec calls the most
+compelling in the roadmap, *"anything within 500 metres of this address"*. It requires **no
+deployment change at all**, which means it is not gated on an operator window.
+
+**Stage 2 — polygons, when the image changes.** Parcel boundaries, district containment, and
+`geometry(Geometry, 4326)` genuinely need PostGIS: `earthdistance` does points and distances and
+nothing else. Stage 2 is where "which district contains this parcel" lives, and it stays blocked on
+`pgvector/pgvector:pg16` being replaced with an image carrying both extensions — which is an
+operator-sequenced change, ordered *before* the migration, never with it.
+
+The `precision` column already carries this split honestly: a stage-1 `place` is `exact`, `block` or
+`centroid`, and `parcel` becomes available only in stage 2. A reader is never shown a polygon we do
+not have.
+
+### b. PostGIS, and the deployment consequence (stage 2 only)
 
 The database is PostgreSQL 16 with pgvector. PostGIS is a **separate extension and a different
 image**, so this is not a migration-only change — `deploy/`'s compose file and the database image
@@ -72,7 +121,7 @@ Alternatives considered and rejected: storing GeoJSON in `jsonb` with no spatial
 rendering and fails for the only queries that matter ("what is within 500m of this point", "which
 district contains this parcel"), and would be rewritten within a month. Use the real thing.
 
-### b. `places` — the general geographic object
+### c. `places` — the general geographic object
 
 Migration `079_create_places.ts`:
 
@@ -106,7 +155,7 @@ precisely than the source supports.** This is the single most common way civic m
 the same instinct as `artifacts.sha256` — re-importing the county parcel layer must update, not
 duplicate.
 
-### c. `place_links` — the association layer
+### d. `place_links` — the association layer
 
 The general-purpose part. Any record object can be tied to any place, with a stated basis:
 
@@ -138,7 +187,7 @@ dataset, and the match itself is recorded. `inferred` means neither, and an `inf
 **never public** — it exists only as a lead in the operator console. The CHECK constraint enforces
 that anything public carries a citation.
 
-### d. Boundaries
+### e. Boundaries
 
 Districts, wards, TIF districts, zoning designations and city limits are `places` of kind
 `district`/`boundary`, imported from the jurisdiction's own published GIS. They are **time-bounded**
