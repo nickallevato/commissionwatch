@@ -52,6 +52,12 @@ export type DocumentKind =
   | 'resolution'
   | 'ordinance'
   | 'attachment'
+  // The custodian's caption file for the meeting recording. WebVTT, fetched from
+  // `videos/{clip_id}/captions.vtt`. It needs no migration: `document_type` is a
+  // free varchar (005) with no enum and no check constraint. A transcript is a
+  // corroborating artifact for what was said and never an originating one for who
+  // said it — see `migrations/090_create_transcript_cues.ts`.
+  | 'transcript'
   | 'other';
 
 /**
@@ -65,6 +71,7 @@ export const DOCUMENT_KINDS: readonly DocumentKind[] = Object.freeze([
   'resolution',
   'ordinance',
   'attachment',
+  'transcript',
   'other',
 ]);
 

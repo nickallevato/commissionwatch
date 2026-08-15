@@ -593,7 +593,15 @@ describe("the meeting page", () => {
       again.claims.map((claim) => claim.anchor),
     );
     assert.equal(shown.claims[0].anchor, `claim-${first}`);
-    assert.equal(shown.claims[0].source_path, `/source/${fixture.artifactSha}#offset-${OFFSET_ONE}`);
+    // `?offset=`, not `#offset-`. This asserted the fragment form until
+    // 2026-08-15, and a fragment never leaves the browser — the server picks
+    // the window, so the link would have opened the head of the document
+    // whatever it cited. `len` rides along because the API returns no quote
+    // length and the viewer needs it to mark where the quote ends.
+    assert.match(
+      shown.claims[0].source_path,
+      new RegExp(`^/source/${fixture.artifactSha}\\?offset=${OFFSET_ONE}&len=\\d+$`),
+    );
   });
 });
 
@@ -613,7 +621,11 @@ describe("the review screen's API", () => {
     assert.equal(res.body.render.approvable, true);
     assert.equal(res.body.render.version, RENDER_VERSION);
     assert.equal(res.body.citation.artifact_stored, true);
-    assert.equal(res.body.citation.viewer_path, `/source/${fixture.artifactSha}#offset-${OFFSET_ONE}`);
+    assert.match(
+      res.body.citation.viewer_path,
+      new RegExp(`^/source/${fixture.artifactSha}\\?offset=${OFFSET_ONE}&len=\\d+$`),
+      "the viewer reads the offset from the query string; a fragment never reaches it",
+    );
 
     const context = res.body.citation.context;
     assert.ok(context, "the screen shows the quote with no context around it");
@@ -714,5 +726,68 @@ describe("publishing a meeting announces it", () => {
 
     assert.equal((await eventsFor(first)).length, 1);
     assert.equal((await eventsFor(second)).length, 1);
+  });
+});
+
+
+/**
+ * Publishing announced a meeting; unpublishing said nothing to anyone.
+ *
+ * That asymmetry is the dangerous direction: an operator who publishes in error
+ * and withdraws had a site that stopped showing the record while every consumer
+ * already told still believed it. A publication wall with an un-instrumented
+ * back door is worse than no wall, because people trust it.
+ */
+describe("unpublishing a meeting revokes what publishing announced", () => {
+  it("revokes the meeting's events when it is withdrawn", async () => {
+    const { createMeeting, createSource, cleanupByPrefix, signInOperator } = await import(
+      "./helpers/pressroom"
+    );
+    const request = (await import("supertest")).default;
+    const app = (await import("../src/app")).default;
+
+    const prefix = "unpublish-revoke-test";
+    const email = "unpublish-revoke@example.invalid";
+    await cleanupByPrefix(prefix);
+    const fixture = await createSource(prefix, { enabled: false });
+    const meetingId = await createMeeting(fixture.commissionId, {
+      publishedAt: null,
+      date: "2026-06-03",
+    });
+    const cookie = await signInOperator(email, "Unpublish Operator");
+
+    try {
+      await request(app)
+        .post(`/api/admin/pressroom/meetings/${meetingId}/publish`)
+        .set("Cookie", cookie)
+        .send({ reason: "Agenda and minutes verified against the stored PDF." })
+        .expect(200);
+
+      const announced = await db("events")
+        .where({ subject_kind: "meeting", subject_id: meetingId })
+        .whereNull("revoked_at")
+        .count<{ n: string }[]>({ n: "id" });
+      assert.ok(Number(announced[0].n) >= 1, "publishing must announce the meeting");
+
+      await request(app)
+        .post(`/api/admin/pressroom/meetings/${meetingId}/unpublish`)
+        .set("Cookie", cookie)
+        .send({ reason: "Published in error; the minutes belong to a different meeting." })
+        .expect(200);
+
+      const live = await db("events")
+        .where({ subject_kind: "meeting", subject_id: meetingId })
+        .whereNull("revoked_at")
+        .whereNot("event_type", "like", "%.retracted")
+        .count<{ n: string }[]>({ n: "id" });
+      assert.equal(
+        Number(live[0].n),
+        0,
+        "withdrawing the meeting must leave no un-revoked announcement standing",
+      );
+    } finally {
+      await cleanupByPrefix(prefix);
+      await db("operators").where({ email }).del();
+    }
   });
 });

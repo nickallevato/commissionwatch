@@ -20,7 +20,9 @@ import publicRecordsRouter from "./routes/public-records";
 import correctionsRouter from "./routes/corrections";
 import dataRouter from "./routes/data";
 import metricsRouter from "./routes/metrics";
+import discordRouter from "./routes/discord";
 import sourceRouter from "./routes/source";
+import transcriptsRouter from "./routes/transcripts";
 import feedRouter from "./routes/feed";
 import sitemapRouter from "./routes/sitemap";
 import calendarRouter from "./routes/calendar";
@@ -138,6 +140,10 @@ app.use("/api/metrics", metricsRouter);
 // The other end of every citation: a stored document at its content address.
 // Public, and walled to documents on a published meeting.
 app.use("/api/source", sourceRouter);
+// Transcript coverage: how much of the archive has captions, how much the
+// custodian published nothing for, and how much we could not fetch. Those are
+// three different facts and the page has to be able to say which.
+app.use("/api/transcripts", transcriptsRouter);
 app.use("/api/calendar", calendarRouter);
 app.use("/api/ingestion", ingestionRouter);
 // The legacy email-only subscription and notification routers, now operator-
@@ -153,6 +159,10 @@ app.use("/api/notifications", notificationsRouter);
 app.use("/api/alerts", alertsRouter);
 // Twilio posts form-encoded, not JSON, so this router needs its own parser.
 app.use("/api/sms", express.urlencoded({ extended: false }), smsRouter);
+// BEFORE the admin router, which ends in a guarded catch-all 404 — anything
+// mounted at /api/admin/* after it is unreachable. The router applies
+// requireOperator itself, so the placement is safe as well as necessary.
+app.use("/api/admin/discord", discordRouter);
 app.use("/api/admin", adminRouter);
 
 app.use(errorHandler);

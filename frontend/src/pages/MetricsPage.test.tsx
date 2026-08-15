@@ -70,6 +70,40 @@ describe("MetricsPage", () => {
     expect(screen.queryByText(/most recently published/i)).not.toBeInTheDocument();
   });
 
+  /**
+   * `rosterCoverage` shipped as an exported function nothing called. This is the
+   * end of the chain that makes it visible, and the disclosure below is the
+   * point of the section — a project that cannot source its own roster should
+   * say so on the page where it publishes its numbers.
+   */
+  it("shows the roster gap and calls it a ceiling on what can be published", async () => {
+    renderWithProviders(<MetricsPage />);
+    expect(await screen.findByText(/officials we cannot match/i)).toBeInTheDocument();
+    expect(screen.getByText(/ceiling on what we can publish/i)).toBeInTheDocument();
+  });
+
+  it("discloses that the roster is not sourced, in the reader's terms", async () => {
+    renderWithProviders(<MetricsPage />);
+    expect(
+      await screen.findByText(/our roster of officials is not yet sourced/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/working list rather than a published record/i)).toBeInTheDocument();
+  });
+
+  it("drops the disclosure once a roster can be sourced", async () => {
+    server.use(
+      http.get("/api/metrics", () =>
+        HttpResponse.json({ ...metrics, quality: { ...metrics.quality, roster_sourced: true } }),
+      ),
+    );
+    renderWithProviders(<MetricsPage />);
+
+    await screen.findByText(/officials we cannot match/i);
+    expect(
+      screen.queryByText(/our roster of officials is not yet sourced/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("distinguishes a load failure from an empty archive", async () => {
     server.use(http.get("/api/metrics", () => new HttpResponse(null, { status: 500 })));
     renderWithProviders(<MetricsPage />);

@@ -3,10 +3,20 @@ import type { AdapterRegistry } from "./adapters/registry";
 import { asDocumentKind } from "./adapters/types";
 import type { DocumentRef, MeetingRef, SourceAdapter } from "./adapters/types";
 import { snapshotFromDrafts } from "../agenda-diff";
+import { HttpStatusError } from "./adapters/http";
 import { extractAgendaItems, type FieldConfidenceMap } from "./agenda-items";
+import { recordArtifactText } from "./artifact-text";
 import { isCampaignFinanceKind, recordCampaignFinance } from "./campaign-finance";
 import { extractDocumentText } from "./document-text";
 import { UnsupportedDocumentError } from "./pdf-text";
+import {
+  findMeetingDocumentId,
+  readTranscript,
+  recordTranscriptProjection,
+  recordTranscriptStatus,
+  transcriptFetchSettled,
+} from "./transcripts";
+import { parseWebVttCues } from "./webvtt";
 import type { ArtifactRef, HandlerRegistry, StageResult } from "./worker";
 
 /**
@@ -361,35 +371,13 @@ export async function recordVersionSnapshot(
 }
 
 /**
- * Holds the text this parse extracted, so it can be searched.
+ * Re-exported from `./artifact-text`, which is where it now lives.
  *
- * P6. The extraction has run since P1 and its output was thrown away the moment
- * agenda items were read out of it — which left the *body* of every document
- * unsearchable, and the body is where most terms appear. One row per artifact,
- * replaced on re-parse rather than accumulated: an artifact is content
- * addressed, so a second extraction of the same bytes is a better reading of the
- * same document, not a second document.
- *
- * It writes what was extracted and nothing else. No summary, no normalisation
- * beyond the line joining the extractor already did — the searchable text and
- * the text a reader would find in the stored bytes have to be the same thing.
+ * It moved so `ingestion/transcripts.ts` can use the one text-indexing path
+ * without the two modules importing each other. Existing callers — and
+ * `backfill-artifact-text.ts` is one — keep importing it from here.
  */
-export async function recordArtifactText(
-  db: Knex,
-  artifactId: string,
-  text: string,
-): Promise<number> {
-  await db("artifact_texts")
-    .insert({
-      artifact_id: artifactId,
-      text,
-      char_count: text.length,
-      extracted_at: db.fn.now(),
-    })
-    .onConflict("artifact_id")
-    .merge(["text", "char_count", "extracted_at", "updated_at"]);
-  return text.length;
-}
+export { recordArtifactText };
 
 /**
  * Replaces a meeting's agenda items with `drafts`. Idempotent on ordinal.
@@ -457,6 +445,7 @@ export function createIngestionHandlers(
       let inserted = 0;
       let documents = 0;
       let unattributed = 0;
+      let transcriptsSettled = 0;
 
       for (const ref of meetings) {
         const commissionId = commissions.byBodyKey.get(ref.bodyKey);
@@ -484,6 +473,23 @@ export function createIngestionHandlers(
           }
           if (document.kind === "minutes" && urls.minutes_url === undefined) {
             urls.minutes_url = document.url;
+          }
+          if (document.kind === "transcript") {
+            // Granicus sends no ETag, no Last-Modified and no Content-Length on
+            // the captions endpoint, so `fetchDocument`'s conditional request can
+            // never receive a 304 and every re-check is a full download at ten
+            // seconds a request. This is the only place in the pipeline that can
+            // decide not to ask, because it is the first stage with a database
+            // connection. See `transcriptFetchSettled` for what settled means and
+            // why `absent` is not permanent.
+            const documentId = await findMeetingDocumentId(db, result.meetingId, document.url);
+            if (
+              documentId !== null &&
+              (await transcriptFetchSettled(db, documentId, ref.date, new Date()))
+            ) {
+              transcriptsSettled += 1;
+              continue;
+            }
           }
           await ctx.enqueue("fetch", {
             url: document.url,
@@ -524,6 +530,9 @@ export function createIngestionHandlers(
           documents_seen: documents,
           meetings_unattributed: unattributed,
           standalone_documents_seen: standalone,
+          // Descriptive, in neither SUCCESS_KEYS nor FAILURE_KEYS: not asking
+          // again for a settled transcript is the policy working, not a gap.
+          transcripts_settled: transcriptsSettled,
         },
       };
     },
@@ -531,7 +540,37 @@ export function createIngestionHandlers(
     async fetch(ctx): Promise<StageResult> {
       const source = await resolveSource(db, registry, ctx.runId);
       const ref = parseDocumentRefMetadata(ctx.target.metadata);
-      const fetched = await source.adapter.fetchDocument(ref);
+      const isTranscript = ref.kind === "transcript";
+      const clipId = ref.metadata?.clipId ?? "";
+      const meetingId = ctx.target.meetingId;
+
+      let fetched;
+      try {
+        fetched = await source.adapter.fetchDocument(ref);
+      } catch (error) {
+        // An unknown clip id on this host answers **500**, not 404 — probed
+        // 2026-08-14, clip 999999, 2,512 bytes of Slim framework HTML. Retrying it
+        // three times at ten seconds apart buys nothing, so the answer is recorded
+        // and the job completes. `failed` is incremented alongside the descriptive
+        // count because failing to obtain a public record is a real failure and
+        // both `failuresIn` and `classifyRun` have to see it.
+        if (isTranscript && error instanceof HttpStatusError && meetingId !== undefined) {
+          const documentId = await findMeetingDocumentId(db, meetingId, ctx.target.url);
+          if (documentId !== null) {
+            await recordTranscriptStatus(db, {
+              meetingDocumentId: documentId,
+              clipId,
+              state: "unavailable",
+              observedSha256: null,
+              cueCount: null,
+              lastError: `HTTP ${error.status} from ${error.url}`,
+              observedAt: new Date(),
+            });
+            return { counts: { transcripts_unavailable: 1, failed: 1 } };
+          }
+        }
+        throw error;
+      }
 
       const storageKey = artifactStorageKey(fetched.sha256);
       await artifacts.write(storageKey, fetched.bytes, fetched.contentType);
@@ -581,15 +620,13 @@ export function createIngestionHandlers(
       // Version history is a consequence of the fetch path. The document is
       // located by the URL this job was told to fetch, which is the same key
       // `upsertMeetingDocument` wrote under.
-      const meetingId = ctx.target.meetingId;
+      let meetingDocumentId: string | null = null;
       if (meetingId !== undefined) {
-        const document: unknown = await db("meeting_documents")
-          .where({ meeting_id: meetingId, url: ctx.target.url })
-          .first("id");
-        if (isRecord(document)) {
+        meetingDocumentId = await findMeetingDocumentId(db, meetingId, ctx.target.url);
+        if (meetingDocumentId !== null) {
           const version = await recordDocumentVersion(
             db,
-            requireString(document.id, "meeting_documents.id"),
+            meetingDocumentId,
             artifactId,
             fetched.fetchedAt,
           );
@@ -602,6 +639,44 @@ export function createIngestionHandlers(
           logger.warn(
             `fetch: no meeting_documents row for ${ctx.target.url} on meeting ${meetingId}`,
           );
+        }
+      }
+
+      // THE LOAD-BEARING LINE OF THIS FEATURE: **outside the `isNew` branch.**
+      //
+      // Every empty caption file Bozeman serves is the same eight bytes,
+      // `WEBVTT\n\n`, and therefore the same sha256 — reproducible by anyone with
+      // `printf 'WEBVTT\n\n' | sha256sum`. `artifacts.sha256` is uniquely indexed,
+      // so from the second absence onward `isNew` is false, no `parse` job is
+      // enqueued, and `artifacts.source_url` names a different meeting's clip. If
+      // the state were written by `parse`, or written only when the artifact was
+      // new, a thousand distinct absences would be represented by one row naming
+      // one of them, and the site would be unable to say that this meeting has no
+      // published transcript. Recording it here, per meeting document, on every
+      // pass, is the difference between the feature working and appearing to.
+      if (isTranscript && meetingDocumentId !== null) {
+        const reading = readTranscript(fetched.bytes, fetched.contentType);
+        await recordTranscriptStatus(db, {
+          meetingDocumentId,
+          clipId,
+          state: reading.state,
+          observedSha256: fetched.sha256,
+          cueCount: reading.cues === null ? null : reading.cues.length,
+          lastError: reading.lastError,
+          observedAt: fetched.fetchedAt,
+        });
+        if (reading.state === "published") {
+          counts.transcripts_published = 1;
+        } else if (reading.state === "absent") {
+          // Descriptive only, in neither SUCCESS_KEYS nor FAILURE_KEYS. **An
+          // absence is not a failure.** The custodian served a well-formed file
+          // saying there is nothing here, and 8 of 8 sampled clips from 2013-2020
+          // say exactly that. Counting it as a failure would make an era of the
+          // city's own practice read as a broken fetcher.
+          counts.transcripts_absent = 1;
+        } else {
+          counts.transcripts_unavailable = 1;
+          counts.failed = (counts.failed ?? 0) + 1;
         }
       }
 
@@ -642,6 +717,36 @@ export function createIngestionHandlers(
             },
             ctx.content,
           ),
+        };
+      }
+
+      if (ctx.target.documentType === "transcript") {
+        // A caption file is neither PDF nor HTML, so it routes before
+        // `extractDocumentText` — which would raise `UnsupportedDocumentError` and
+        // file a real transcript as `parse_unsupported`. It also needs the cue
+        // timings written in the same transaction as the text they index, which is
+        // why it does not simply become a third case inside that extractor.
+        //
+        // `parseWebVttCues` throws with the offending line number rather than
+        // skipping what it cannot read, and that throw lands in
+        // `ingestion_jobs.last_error` with nothing written to `artifact_texts` or
+        // `transcript_cues`. A parser that dropped a bad cue would produce a
+        // transcript with a hole in it that reads exactly like a transcript
+        // without one.
+        const cues = parseWebVttCues(ctx.content);
+        if (cues.length === 0) {
+          // The empty stub. `transcript_status` already recorded `absent` at fetch
+          // time; there is nothing here to index, and an empty `artifact_texts`
+          // row would be a searchable document containing no words.
+          return { counts: { transcripts_empty: 1 } };
+        }
+        const written = await recordTranscriptProjection(db, ctx.artifact.id, cues);
+        return {
+          counts: {
+            documents_parsed: 1,
+            artifact_text_chars: written.charsIndexed,
+            transcript_cues_written: written.cuesIndexed,
+          },
         };
       }
 

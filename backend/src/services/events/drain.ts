@@ -128,6 +128,7 @@ function asSubjectKind(value: unknown): EventSubjectKind {
     case "claim":
     case "document":
     case "ops":
+    case "dispute":
       return value;
     default:
       throw new TypeError(`events.subject_kind: unknown kind ${String(value)}`);

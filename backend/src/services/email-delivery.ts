@@ -1,4 +1,5 @@
 import type { Knex } from "knex";
+import { isSuppressed } from "./email-suppression";
 
 interface NotificationWithContext {
   id: string;
@@ -47,7 +48,7 @@ export interface DigestResult {
 
 export type SendOutcome =
   | { delivered: true; providerId: string }
-  | { delivered: false; reason: "dry_run" | "no_provider_id" };
+  | { delivered: false; reason: "dry_run" | "no_provider_id" | "suppressed" };
 
 export class EmailDeliveryService {
   private resend: ResendClient | null = null;
@@ -226,6 +227,19 @@ export class EmailDeliveryService {
    * how the lie got in.
    */
   private async sendEmail(to: string, subject: string, html: string): Promise<SendOutcome> {
+    // The suppression check is **here**, at the one place every message passes
+    // through, rather than at each caller. A caller that forgets is the whole
+    // failure mode: one complaint damages deliverability for every future
+    // recipient, and the address most at risk is a dispute contact — typed into
+    // a public form by a stranger who may not be its owner.
+    //
+    // Checked before the provider is even resolved, so a suppressed address is
+    // not written to in a dry run either. A dry-run log line naming someone who
+    // asked us to stop is still a record of us preparing to contact them.
+    if (await isSuppressed(this.db, to)) {
+      return { delivered: false, reason: "suppressed" };
+    }
+
     const resend = await this.client();
     if (!resend) {
       console.log(`EmailDeliveryService [dry-run]: to=${to} subject="${subject}"`);
@@ -244,9 +258,15 @@ export class EmailDeliveryService {
   }
 
   /** What a send resolved to. `email_status` is derived from this, never assumed. */
-  private statusFor(outcome: SendOutcome): "sent" | "dry_run" | "failed" {
+  private statusFor(outcome: SendOutcome): "sent" | "dry_run" | "skipped" | "failed" {
     if (outcome.delivered) return "sent";
-    return outcome.reason === "dry_run" ? "dry_run" : "failed";
+    if (outcome.reason === "dry_run") return "dry_run";
+    // `skipped`, not `failed`. Nothing went wrong: we were told not to write to
+    // this address and we did not. Recording it as a failure would put it in a
+    // retry queue, which is the one thing that must never happen to a
+    // suppression.
+    if (outcome.reason === "suppressed") return "skipped";
+    return "failed";
   }
 
   private renderImmediateEmail(n: NotificationWithContext): string {

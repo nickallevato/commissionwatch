@@ -85,7 +85,115 @@ describe("SearchPage", () => {
     renderAt("/search?q=Sarah");
     const row = await screen.findByRole("article", { name: "Sarah Chen" });
     expect(within(row).getByText("Official")).toBeInTheDocument();
-    expect(within(row).getByRole("link")).toHaveAttribute("href", "/members");
+    // `/officials`, not `/members` — the latter became a 301 in the vocabulary
+    // rename, and a search result pointing at a redirect is a wasted hop.
+    expect(within(row).getByRole("link")).toHaveAttribute("href", "/officials");
+  });
+
+  /**
+   * Search grew `finding` and `matter` on the backend while the frontend union
+   * still listed four kinds. Both would have rendered with an `undefined` label
+   * and fallen through the link builder to the officials roster — a matter about
+   * Ordinance 2145 linking to a list of people. The compiler caught it once the
+   * union was corrected; these keep it caught.
+   */
+  it("labels and links a matter result", async () => {
+    server.use(
+      http.get("/api/search", () =>
+        HttpResponse.json({
+          data: [
+            {
+              kind: "matter",
+              id: "a0000000-0000-4000-8000-000000000001",
+              title: "Rezoning of 1234 Main St",
+              snippet: "Rezoning of 1234 Main St",
+              designator: "Ordinance 2145",
+              commission_name: "City Commission",
+              jurisdiction_name: "City of Bozeman",
+            },
+          ],
+          total: 1,
+          query: "2145",
+        }),
+      ),
+    );
+    renderAt("/search?q=2145");
+
+    const row = await screen.findByRole("article", { name: "Rezoning of 1234 Main St" });
+    expect(within(row).getByText("Matter")).toBeInTheDocument();
+    expect(within(row).getByRole("link")).toHaveAttribute(
+      "href",
+      "/matters/a0000000-0000-4000-8000-000000000001",
+    );
+    expect(within(row).getByText(/Ordinance 2145/)).toBeInTheDocument();
+  });
+
+  /**
+   * `meeting_id` is nullable for a records-derived finding, which is about an
+   * artifact rather than a meeting. The wrong branch here renders
+   * `/meetings/null`.
+   */
+  it("links a finding with no meeting at the findings page, not /meetings/null", async () => {
+    server.use(
+      http.get("/api/search", () =>
+        HttpResponse.json({
+          data: [
+            {
+              kind: "finding",
+              id: "60000000-0000-4000-8000-000000000009",
+              title: "Missing minutes",
+              snippet: "Minutes were not published",
+              flag_type: "missing_minutes",
+              severity: "medium",
+              meeting_id: null,
+            },
+          ],
+          total: 1,
+          query: "minutes",
+        }),
+      ),
+    );
+    renderAt("/search?q=minutes");
+
+    const row = await screen.findByRole("article", { name: "Missing minutes" });
+    expect(within(row).getByText("Finding")).toBeInTheDocument();
+    expect(within(row).getByRole("link")).toHaveAttribute("href", "/findings");
+    expect(row.textContent).not.toContain("null");
+  });
+
+  /**
+   * The query feed has no other discovery path. There is no account to hang a
+   * saved search on and no settings page by design, so if this link is not on
+   * the results page the channel is unreachable — and the whole argument for
+   * building it was that it needs no account and stores nothing about anyone.
+   */
+  it("offers the search itself as a subscription, carrying the query", async () => {
+    renderAt("/search?q=rezone");
+    const subscribe = await screen.findByRole("link", { name: /subscribe to this search/i });
+    expect(subscribe).toHaveAttribute("href", "/feed.xml?q=rezone");
+  });
+
+  it("escapes a query with characters that would break the URL", async () => {
+    renderAt("/search?q=" + encodeURIComponent('"capital plan" & budget'));
+    const subscribe = await screen.findByRole("link", { name: /subscribe to this search/i });
+    expect(subscribe).toHaveAttribute(
+      "href",
+      `/feed.xml?q=${encodeURIComponent('"capital plan" & budget')}`,
+    );
+  });
+
+  it("says the subscription keeps no record of the subscriber", async () => {
+    renderAt("/search?q=rezone");
+    expect(
+      await screen.findByText(/no record of who is subscribed/i),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no subscription before anything has been searched", () => {
+    renderAt("/search");
+    expect(
+      screen.queryByRole("link", { name: /subscribe to this search/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("counts the results in the search strap", async () => {

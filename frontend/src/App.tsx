@@ -8,6 +8,7 @@ import { MeetingDetailPage } from "./pages/MeetingDetailPage";
 import { OfficialsPage } from "./pages/OfficialsPage";
 import { OfficialPage } from "./pages/OfficialPage";
 import { SearchPage } from "./pages/SearchPage";
+import { SourcePage } from "./pages/SourcePage";
 import { VotesPage } from "./pages/VotesPage";
 import { ElectionsPage } from "./pages/ElectionsPage";
 import { FindingsPage } from "./pages/FindingsPage";
@@ -33,6 +34,7 @@ import { AdminSourceMeetingsPage } from "./pages/AdminSourceMeetingsPage";
 import { AdminRunDetailPage } from "./pages/AdminRunDetailPage";
 import { AdminMeetingDetailPage } from "./pages/AdminMeetingDetailPage";
 import { AdminReviewPage } from "./pages/AdminReviewPage";
+import { AdminClaimsPage } from "./pages/AdminClaimsPage";
 import { SubscribePage } from "./pages/SubscribePage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -68,6 +70,10 @@ export function App() {
             from the nav — the roster is the index of this page. */}
           <Route path="officials/:id" element={<OfficialPage />} />
           <Route path="search" element={<SearchPage />} />
+          {/* The address every citation points at. Reached from a citation
+            chip, never from the nav — a content address is not something a
+            reader browses to, it is something they arrive at holding. */}
+          <Route path="source/:sha256" element={<SourcePage />} />
           <Route path="votes" element={<VotesPage />} />
           <Route path="elections" element={<ElectionsPage />} />
           <Route path="findings" element={<FindingsPage />} />
@@ -160,6 +166,10 @@ export function App() {
           {/* B-a. The only screen from which a generated claim about a named
             person becomes public. */}
           <Route path="admin/review" element={<AdminReviewPage />} />
+          {/* The other queue whose rows name a person. A finding is an
+            inference about a pattern; a claim is a sentence quoting the
+            minutes, and they are decided differently. */}
+          <Route path="admin/claims" element={<AdminClaimsPage />} />
           <Route path="admin/meetings/:id" element={<AdminMeetingDetailPage />} />
         </Route>
 

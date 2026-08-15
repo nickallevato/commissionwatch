@@ -11,6 +11,7 @@ import { useMeetingAnomalies } from "@/hooks/useAnomalies";
 import { useMembers } from "@/hooks/useMembers";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AgendaDiffTimeline } from "@/components/AgendaDiffTimeline";
+import { MeetingClaims } from "@/components/MeetingClaims";
 import { flagTypeLabels } from "@/components/flag-labels";
 import { SeverityMark } from "@/components/AnomalyBadge";
 import { severityRank } from "@/components/severity";
@@ -546,6 +547,15 @@ export function MeetingDetailPage() {
           </p>
         )}
       </section>
+
+      {/* Claims -------------------------------------------------------- */}
+      {/* After the agenda, because a claim is a line out of the minutes of
+        what the agenda records the body doing — and *on this page at all*
+        because a claim is never its own page. See MeetingClaims. */}
+      <MeetingClaims
+        meetingId={meeting.id}
+        sourceLabel={`Minutes, ${bodyName}, ${formatMeetingDate(meeting.date)}`}
+      />
 
       {/* Document history ---------------------------------------------- */}
       <AgendaDiffTimeline

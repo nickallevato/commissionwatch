@@ -3,6 +3,7 @@ import db from "../config/database";
 import { requireOperator } from "../middleware/requireOperator";
 import { loadDocumentTimelines } from "../services/agenda-diff";
 import { detectAnomalies } from "../services/anomaly-detection";
+import { listPublicClaims } from "../services/review/claims";
 import {
   findPublishedMeeting,
   whereFindingPublic,
@@ -169,6 +170,41 @@ router.get("/:id/anomalies", async (req, res, next) => {
       .select("anomaly_flags.*")
       .orderBy("anomaly_flags.created_at");
     res.json({ data: anomalies, total: anomalies.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * What the minutes record a named person doing at this meeting.
+ *
+ * A sub-resource of the meeting and deliberately not a route of its own: a page
+ * whose entire content is one sentence about one named person is an accusation,
+ * and the same sentence inside the record it came from is a record. See
+ * `docs/superpowers/specs/2026-08-14-published-claim-design.md` §3.
+ *
+ * The meeting is checked first even though `whereClaimPublic` also requires a
+ * published meeting. Without it an unpublished meeting would answer 200 with an
+ * empty list, which tells a caller the id is real — and the whole reason this
+ * router answers 404 rather than 403 is that the withheld set must not be
+ * enumerable.
+ */
+router.get("/:id/claims", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!UUID_RE.test(id)) throw badRequest("Invalid meeting ID format");
+
+    const meeting = await findPublishedMeeting(db, id);
+    if (!meeting) {
+      res.status(404).json({ error: "Meeting not found", statusCode: 404 });
+      return;
+    }
+
+    // Tombstones and the awaiting-re-review count travel with the claims,
+    // because a page that showed only what currently renders would silently
+    // drop both a withdrawal a reader may have arrived from and the fact that
+    // something is being withheld pending re-review.
+    res.json(await listPublicClaims(db, id));
   } catch (err) {
     next(err);
   }

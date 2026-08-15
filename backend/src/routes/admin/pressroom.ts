@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type { Knex } from "knex";
 import db from "../../config/database";
-import { emitEvent } from "../../services/events";
+import { emitEvent, retractSubject } from "../../services/events";
 import type { IngestionQueue } from "../../services/ingestion/queue";
 import type { SourceScheduler } from "../../services/ingestion/scheduler";
 import {
@@ -556,6 +556,53 @@ router.post(
   },
 );
 
+/**
+ * The mirror image of `announcePublished`, and it was missing.
+ *
+ * Publishing a meeting announced it; unpublishing said nothing to anyone. The
+ * asymmetry is the dangerous direction: an operator who publishes in error and
+ * then withdraws had, until now, a site that stopped showing the record while
+ * every consumer that had already been told still believed it. A publication
+ * wall with an un-instrumented back door is worse than no wall, because people
+ * trust it.
+ *
+ * `retractSubject` is called **after** the unpublish and **inside** the same
+ * transaction. That ordering is the whole mechanism: it asserts the subject is
+ * no longer public, which is only true once the row above has been written.
+ *
+ * It reports what it could and could not recall, and this function does not
+ * pretend the difference away. An event still queued never sends — a real
+ * recall, and the common case, because the drain tick is seconds. One already
+ * dispatched is marked revoked and answered with a `meeting.retracted` event,
+ * because a Discord post is gone and an RSS item is in a reader's cache.
+ *
+ * A failure here does **not** fail the unpublish. The record is off the site,
+ * which is the part that matters; leaving the operator with a 500 and a meeting
+ * that is actually withdrawn would invite them to try again and doubt what they
+ * are looking at. It is logged, and the events stay revocable.
+ */
+async function announceWithdrawn(
+  trx: Knex.Transaction,
+  meetingId: string,
+  reason: string,
+): Promise<void> {
+  try {
+    await retractSubject(trx, {
+      subject_kind: "meeting",
+      subject_id: meetingId,
+      // `unpublishMeeting` already requires a reason and records it in the
+      // corrections log; carrying the same words onto the revocation keeps one
+      // explanation rather than two that can disagree.
+      reason: reason.trim() === "" ? "withdrawn by an operator" : reason,
+    });
+  } catch (error) {
+    console.error(
+      `pressroom: unpublished meeting ${meetingId} but could not revoke its events`,
+      error,
+    );
+  }
+}
+
 router.post(
   "/meetings/:id/unpublish",
   async (req: Request<{ id: string }, unknown, PublishBody>, res, next) => {
@@ -563,7 +610,11 @@ router.post(
       const { id } = req.params;
       if (!UUID_RE.test(id)) return badId(res, "meeting");
       const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
-      const result = await unpublishMeeting(db, id, reason, actorOf(req));
+      const result = await db.transaction(async (trx) => {
+        const unpublished = await unpublishMeeting(trx, id, reason, actorOf(req));
+        await announceWithdrawn(trx, id, reason);
+        return unpublished;
+      });
       res.json(result);
     } catch (err) {
       fail(res, err, next);

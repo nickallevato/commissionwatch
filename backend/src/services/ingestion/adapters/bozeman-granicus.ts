@@ -302,6 +302,52 @@ export function classifyGranicusDocument(
   return null;
 }
 
+/**
+ * The clip id in an archive row's video link, or null.
+ *
+ * **This exists because `classifyGranicusDocument` was never called with the
+ * player URL at all.** The archive writes the link as
+ * `<a href="javascript:void(0);" onClick="window.open('//bozeman.granicus.com/MediaPlayer.php?view_id=1&clip_id=2687', ...)">`,
+ * and `parseRow` iterates `a[href]` and reads the `href` — which is
+ * `javascript:void(0);`. `absolute()` builds a `javascript:` URL,
+ * `isAbsoluteHttpUrl` rejects it, and the link is dropped before classification
+ * ever runs. Fixing the classifier alone would have achieved exactly nothing;
+ * the extraction path had to read the `onclick` attribute instead. (cheerio
+ * lowercases attribute names, so the source's `onClick` is `onclick` here.)
+ *
+ * Counted over the stored fixture on 2026-08-14: 1,152 `tr.listingRow` rows,
+ * **1,135 of them carry a clip id**. Every archived meeting has a recording.
+ *
+ * `classifyGranicusDocument` is deliberately left unchanged. A player page is
+ * still not a file and must still classify as `null` — nothing may enqueue
+ * `MediaPlayer.php` as a document. What the adapter emits is the derived
+ * captions URL, which is a file.
+ */
+export const GRANICUS_CLIP_LINK = /MediaPlayer\.php\?[^'"]*?\bclip_id=(\d+)/i;
+
+export function extractGranicusClipId(row: cheerio.Cheerio<AnyNode>): string | null {
+  let clipId: string | null = null;
+  row.find('a[onclick]').each((_index, element) => {
+    if (clipId !== null) return;
+    const match = GRANICUS_CLIP_LINK.exec(
+      // cheerio's typings allow undefined; a link with no handler is not an error.
+      (element.type === 'tag' ? element.attribs.onclick : undefined) ?? '',
+    );
+    if (match !== null) clipId = match[1];
+  });
+  return clipId;
+}
+
+/** The captions file Granicus serves for a clip. `text/vtt`, or an empty stub. */
+export function granicusCaptionsUrl(clipId: string): string {
+  return `${BOZEMAN_ORIGIN}/videos/${clipId}/captions.vtt`;
+}
+
+/** The custodian's own address for the recording. Recorded, never fetched. */
+export function granicusPlayerUrl(clipId: string): string {
+  return `${BOZEMAN_ORIGIN}/MediaPlayer.php?view_id=${BOZEMAN_VIEW_ID}&clip_id=${clipId}`;
+}
+
 // ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
@@ -320,6 +366,12 @@ export interface GranicusRow {
    * time on a meeting would be a false claim about the record, and absent beats invented.
    */
   time: string | null;
+  /**
+   * The video clip's id, out of the row's `onclick` player link. Null when the row
+   * has no recording — 17 of the fixture's 1,152 rows. That is a fact about the
+   * archive, not an error.
+   */
+  clipId: string | null;
   documents: GranicusDocumentLink[];
 }
 
@@ -378,6 +430,7 @@ function parseRow($: cheerio.CheerioAPI, row: cheerio.Cheerio<AnyNode>): Granicu
     title: name === '' ? `Meeting ${when.date}` : name,
     date: when.date,
     time: when.time,
+    clipId: extractGranicusClipId(row),
     documents,
   };
 }
@@ -602,7 +655,7 @@ export function createBozemanGranicusAdapter(
     row: GranicusRow,
     externalId: string,
   ): DocumentRef[] {
-    return row.documents
+    const refs = row.documents
       .filter((document) => includePackets || document.kind !== 'packet')
       .map((document): DocumentRef => {
         const ref: DocumentRef = {
@@ -617,6 +670,33 @@ export function createBozemanGranicusAdapter(
         }
         return ref;
       });
+
+    // The captions file, derived from the row's clip id rather than found as a
+    // link — Granicus publishes no anchor to it. Probed 2026-08-14 across thirty
+    // clips: `videos/{clip_id}/captions.vtt` answers 200 `text/vtt` under the same
+    // posture as an agenda, on an origin already in `allowedOrigins` and already
+    // covered by the vendor-robots exception of 2026-08-04. **The Methodology page
+    // must name captions among the fetched kinds** — that exception is valid only
+    // while it is disclosed, and a disclosure listing agendas and minutes while we
+    // also take transcripts is a disclosure that has gone stale.
+    //
+    // The ref's `url` is the captions file and not the player, because the fetch
+    // stage locates the document row with `where({ meeting_id, url })` against a
+    // table unique on `(meeting_id, url)`. Emitting the player URL and rewriting it
+    // later would break that join. The player URL rides along in `metadata` so a
+    // reader has the custodian's own address for the recording.
+    if (row.clipId !== null) {
+      refs.push({
+        sourceKey: BOZEMAN_ADAPTER_KEY,
+        kind: 'transcript',
+        title: clamp(`Captions (clip ${row.clipId})`, VARCHAR_255),
+        url: granicusCaptionsUrl(row.clipId),
+        meetingExternalId: externalId,
+        expectedContentType: 'text/vtt',
+        metadata: { clipId: row.clipId, mediaPlayerUrl: granicusPlayerUrl(row.clipId) },
+      });
+    }
+    return refs;
   }
 
   return {
@@ -701,6 +781,15 @@ export function createBozemanGranicusAdapter(
           sourceUrl: BOZEMAN_ARCHIVE_URL,
           documents: toDocumentRefs(row, externalId),
         };
+        if (!fromUpcomingTable && row.clipId === null) {
+          // No recording, so no captions to seek. Logged rather than counted as a
+          // gap: a row without a clip is a fact about the archive. 17 of the
+          // fixture's 1,152 rows are like this.
+          logger.warn(
+            `[${BOZEMAN_ADAPTER_KEY}] archive row '${row.title}' on ${row.date} carries no ` +
+              'clip id; no transcript is sought for it.',
+          );
+        }
         // Only the Upcoming table states a scheduled start; the archive prints the video
         // clip's start, which is not the same fact. Absent beats invented.
         if (fromUpcomingTable && row.time !== null) ref.time = row.time;

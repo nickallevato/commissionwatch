@@ -235,8 +235,24 @@ export interface LatencyMetrics {
   last_published_at: string | null;
 }
 
+/**
+ * How well the record was *read*, as opposed to how much of it there is.
+ *
+ * `roster_sourced` is false and is meant to be shown as false: `members`
+ * carries no provenance columns, so no row can prove where it came from.
+ */
+export interface QualityMetrics {
+  vote_events_total: number;
+  vote_events_approved: number;
+  roster_unmatched: number;
+  roster_seats_sourced: number;
+  roster_seats_implied: number;
+  roster_sourced: boolean;
+}
+
 export interface Metrics {
   corpus: CorpusMetrics;
+  quality: QualityMetrics;
   review: ReviewMetrics;
   latency: LatencyMetrics;
   generated_at: string;
@@ -590,7 +606,13 @@ export interface ReviewQueueResponse {
  * the four record types answer different questions and a flat shape would make
  * every renderer guess which fields are meaningful.
  */
-export type SearchKind = "agenda_item" | "meeting" | "member" | "document";
+export type SearchKind =
+  | "agenda_item"
+  | "meeting"
+  | "member"
+  | "document"
+  | "finding"
+  | "matter";
 
 interface SearchResultBase {
   kind: SearchKind;
@@ -637,11 +659,36 @@ export interface DocumentSearchResult extends SearchResultBase {
   sha256: string;
 }
 
+/**
+ * A detected pattern, held for review and approved by a person.
+ *
+ * `meeting_id` is nullable, and that is the schema rather than a convenience: a
+ * records-derived finding is about an artifact and has no meeting. A link
+ * builder that assumes one produces `/meetings/null`.
+ */
+export interface FindingSearchResult extends SearchResultBase {
+  kind: "finding";
+  flag_type: string;
+  severity: string;
+  meeting_id: string | null;
+}
+
+/** A subject of decision, followed across the meetings that touched it. */
+export interface MatterSearchResult extends SearchResultBase {
+  kind: "matter";
+  /** `null` when the identity came from the title. Display, never the key. */
+  designator: string | null;
+  commission_name: string;
+  jurisdiction_name: string;
+}
+
 export type SearchResult =
   | AgendaItemSearchResult
   | MeetingSearchResult
   | MemberSearchResult
-  | DocumentSearchResult;
+  | DocumentSearchResult
+  | FindingSearchResult
+  | MatterSearchResult;
 
 /** `/api/search` answers `{ data, total, query }` — not the bare list envelope. */
 export interface SearchResponse {
@@ -1101,4 +1148,195 @@ export interface MeetingParseStatus {
   outstanding: number;
   failed: number;
   last_error: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// The source viewer — `GET /api/source/:sha256`
+// ---------------------------------------------------------------------------
+
+/**
+ * A window onto a stored document, at its content address.
+ *
+ * Mirrors `SourceWindow` in `backend/src/services/source-viewer.ts` field for
+ * field. Two of them are easy to misread and the backend's header says why:
+ *
+ * - `source_url` is **where we fetched it**, not the address. The county
+ *   reorganises its site; the bytes do not. Rendering it as the citation would
+ *   make every citation rot on their schedule.
+ * - `text` is a slice. `window_start` is its offset in the whole document, so
+ *   an in-document position becomes an in-window one by subtracting it, and
+ *   `truncated` must be said out loud — a reader who thinks a 2,000-character
+ *   window is the document has been misled by omission.
+ *
+ * The text was extracted from third-party PDFs and county HTML. It is rendered
+ * as React text nodes and never as markup.
+ */
+export interface SourceWindow {
+  sha256: string;
+  content_type: string | null;
+  byte_size: number;
+  source_url: string | null;
+  fetched_at: string | null;
+  char_count: number;
+  text: string;
+  window_start: number;
+  window_end: number;
+  truncated: boolean;
+  source_label: string;
+}
+
+// ---------------------------------------------------------------------------
+// Claims — `GET /api/admin/claims/*` and `GET /api/meetings/:id/claims`
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors `backend/src/services/review/claims.ts` field for field. Two halves,
+ * and they are not interchangeable: everything above `PublicClaimCard` is what
+ * an operator sees while deciding, and everything below it is what a reader
+ * sees afterwards. The operator's half carries the triple, the status and the
+ * refusals; the reader's half carries a sentence and a quote and nothing else,
+ * because a reader is not being asked to make a decision.
+ */
+
+/** `minute_claims.status`, minus the states the queue does not filter on. */
+export type ClaimQueueStatus = "held" | "approved" | "rejected";
+
+/**
+ * The ±500 characters an operator reads the quote inside.
+ *
+ * `quote_start`/`quote_end` index `text`, not the document — the window has
+ * already been sliced. `offset_matches_stored` false means the span below was
+ * located by searching rather than by trusting `quote_offset`, and the screen
+ * says so rather than implying a precision it does not have.
+ */
+export interface ClaimQuoteContext {
+  text: string;
+  quote_start: number;
+  quote_end: number;
+  window_offset: number;
+  offset_matches_stored: boolean;
+}
+
+export interface ClaimCitation {
+  artifact_sha256: string;
+  quote_offset: number;
+  quote: string;
+  /** Where we got the bytes. Null when no artifact holds this address. */
+  source_url: string | null;
+  /** Whether the cited bytes are stored. False blocks approval. */
+  artifact_stored: boolean;
+  viewer_path: string;
+  context: ClaimQuoteContext | null;
+}
+
+/**
+ * The pin, as the backend reports it. `awaiting_re_review` means the sentence
+ * this build renders is not the sentence that was approved, so nothing renders
+ * — not the stored text either.
+ */
+export type ClaimRenderState =
+  | { state: "renderable"; text: string }
+  | { state: "awaiting_re_review"; reason: string };
+
+export interface ClaimReviewItem {
+  claim: {
+    id: string;
+    meeting_id: string;
+    subject_name: string;
+    member_id: string | null;
+    action: string;
+    matter: string | null;
+    status: string;
+    model: string;
+    prompt_version: string;
+    reviewed_by: string | null;
+    review_reason: string | null;
+    reviewed_at: string | null;
+    approved_by: string | null;
+    approved_at: string | null;
+    rendered_text: string | null;
+    render_sha256: string | null;
+    render_version: string | null;
+    retracted_at: string | null;
+    retracted_reason: string | null;
+    created_at: string;
+    /** Derived from the review window. Never a stored column. */
+    overdue: boolean;
+  };
+  /**
+   * The exact sentence that would publish, rendered by the backend code the
+   * public page uses. The console renders `render.text` and never assembles a
+   * sentence from the triple — approval pins these bytes, and a screen that
+   * showed its own version of them would be asking for an approval of
+   * something else.
+   */
+  render: {
+    text: string | null;
+    sha256: string | null;
+    version: string;
+    motive_terms: string[];
+    approvable: boolean;
+    blocked_reason: string | null;
+    pin: ClaimRenderState | null;
+  };
+  citation: ClaimCitation;
+  context: {
+    meeting_date: string | null;
+    meeting_published_at: string | null;
+    commission_name: string | null;
+    jurisdiction_name: string | null;
+  };
+}
+
+export interface ClaimQueueResponse {
+  data: ClaimReviewItem[];
+  total: number;
+  counts: {
+    held: number;
+    approved: number;
+    rejected: number;
+    retracted: number;
+    overdue: number;
+  };
+}
+
+/** One published claim. Six parts and no seventh. */
+export interface PublicClaimCard {
+  id: string;
+  /** `claim-{id}`. Stable across re-renders because the id is. */
+  anchor: string;
+  text: string;
+  quote: string;
+  artifact_sha256: string;
+  quote_offset: number;
+  source_path: string;
+  approved_at: string | null;
+  model: string;
+  prompt_version: string;
+}
+
+/**
+ * A withdrawn claim, at the anchor it was published at.
+ *
+ * It renders. The sentence is in caches and feeds, and a reader arriving from
+ * one needs a page saying *that sentence was wrong* rather than a page showing
+ * nothing while the cached version stays the only version they ever see.
+ */
+export interface PublicClaimTombstone {
+  id: string;
+  anchor: string;
+  retracted_at: string;
+  retracted_reason: string;
+  previous_text: string | null;
+}
+
+export interface PublicClaims {
+  claims: PublicClaimCard[];
+  tombstones: PublicClaimTombstone[];
+  /**
+   * Approved claims whose pin no longer holds — a count, not the claims. The
+   * page says one is being withheld and shows nothing, because the whole point
+   * of the pin is that this text does not go out.
+   */
+  awaiting_re_review: number;
 }

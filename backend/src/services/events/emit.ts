@@ -18,8 +18,8 @@ import { findPublicFinding, findPublishedMeeting, whereClaimPublic } from "../pu
  * `publication.ts` — cannot produce a public event. It costs one indexed
  * primary-key lookup per publish, and publishes are rare.
  *
- * Two kinds of subject sit outside that rule, and both are a *different* check
- * rather than an exemption from checking:
+ * Three kinds of subject sit outside that rule, and all three are a *different*
+ * check rather than an exemption from checking:
  *
  *  - **`ops`.** A sweep failing or a source going stale is a fact about the
  *    machinery, not about a record, so there is no publication state to read.
@@ -30,6 +30,13 @@ import { findPublicFinding, findPublishedMeeting, whereClaimPublic } from "../pu
  *    something is no longer public, so the publication check is inverted: the
  *    subject is *required* to be non-public. Emitting a retraction for a
  *    still-public subject would tell readers a falsehood, so it throws.
+ *  - **`dispute`.** The inverse again, and for a stronger reason than a
+ *    retraction's. Migration 039's CHECK permits exactly one `review_state`, so
+ *    a dispute is *never* public and an event that required its subject to be
+ *    public could never be written at all. The check that replaces it is not
+ *    "skip it": the dispute must exist, and it must still be non-public. A
+ *    dispute event announces a reply owed to one person, never a record, and
+ *    `resolveRoutes` refuses to hand it to anything but a `direct` channel.
  *
  * `emitEvent` takes `Knex | Knex.Transaction` and callers **must** pass the
  * transaction that performed the publish. An event committed while its publish
@@ -39,12 +46,29 @@ import { findPublicFinding, findPublishedMeeting, whereClaimPublic } from "../pu
 /** Anything a knex query or transaction can run against. */
 export type EventExecutor = Knex | Knex.Transaction;
 
-export const EVENT_SUBJECT_KINDS = ["meeting", "finding", "claim", "document", "ops"] as const;
+export const EVENT_SUBJECT_KINDS = [
+  "meeting",
+  "finding",
+  "claim",
+  "document",
+  "ops",
+  "dispute",
+] as const;
 
 export type EventSubjectKind = (typeof EVENT_SUBJECT_KINDS)[number];
 
 /** Subject kinds that name a record, and therefore have a publication state. */
 export type RecordSubjectKind = Exclude<EventSubjectKind, "ops">;
+
+/**
+ * Subject kinds a public consumer may be served.
+ *
+ * `ops` is about the machinery and `dispute` is a private communication from a
+ * member of the public. Neither has ever been published and neither may be.
+ * `whereEventPublic` in `./index.ts` is where that is enforced; this type is so
+ * a consumer cannot even name the kinds it must not show.
+ */
+export type PublicSubjectKind = Exclude<EventSubjectKind, "ops" | "dispute">;
 
 export const EVENT_SEVERITIES = ["info", "low", "medium", "high", "critical"] as const;
 
@@ -158,6 +182,27 @@ async function documentIsPublic(db: EventExecutor, subjectId: string): Promise<b
 }
 
 /**
+ * Where a dispute stands, in the three states the emitter has to tell apart.
+ *
+ * A boolean would collapse "there is no such dispute" into "it is not public",
+ * and for an inverted check those are opposite answers: the first must throw,
+ * the second is the only case that may proceed. `record_disputes.review_state`
+ * has one legal value today (migration 039), so `public` is unreachable — and it
+ * is queried rather than assumed, because the day somebody widens that CHECK is
+ * the day this must start refusing.
+ */
+export type DisputePublicationState = "missing" | "held" | "public";
+
+export async function disputePublicationState(
+  db: EventExecutor,
+  subjectId: string,
+): Promise<DisputePublicationState> {
+  const row: unknown = await db("record_disputes").where({ id: subjectId }).first("review_state");
+  if (!isRecord(row)) return "missing";
+  return row.review_state === "held" ? "held" : "public";
+}
+
+/**
  * Is this subject visible to the public *right now*?
  *
  * Exported because the retraction path and the review queue both need to ask
@@ -178,6 +223,8 @@ export async function subjectIsPublic(
       return claimIsPublic(db, subjectId);
     case "document":
       return documentIsPublic(db, subjectId);
+    case "dispute":
+      return (await disputePublicationState(db, subjectId)) === "public";
   }
 }
 
@@ -225,7 +272,23 @@ export async function emitEvent(db: EventExecutor, input: EventInput): Promise<E
     throw new EventInputError(`unknown subject_kind '${input.subject_kind}'`);
   }
 
-  if (input.subject_kind !== "ops") {
+  if (input.subject_kind === "dispute") {
+    const subjectId = requireSubjectId(input);
+    const state = await disputePublicationState(db, subjectId);
+    if (state === "missing") {
+      throw new EventPublicationError(
+        `refusing to emit ${input.event_type} for dispute ${subjectId}: there is no such dispute. ` +
+          `A reply is owed to a person who wrote to us, so the row they wrote must exist first.`,
+      );
+    }
+    if (state === "public") {
+      throw new EventPublicationError(
+        `refusing to emit ${input.event_type} for dispute ${subjectId}: its review_state is no ` +
+          `longer 'held'. Migration 039 permits one value; a dispute that reads as public is a ` +
+          `schema change nobody told this emitter about.`,
+      );
+    }
+  } else if (input.subject_kind !== "ops") {
     const subjectId = requireSubjectId(input);
     const isPublic = await subjectIsPublic(db, input.subject_kind, subjectId);
 

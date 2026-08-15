@@ -76,6 +76,12 @@ describe("published meetings and the public API", () => {
       // not covering the wall, it is padding the list that describes it.
       `/api/meetings/${unpublishedId}/votes`,
       `/api/meetings/${unpublishedId}/anomalies`,
+      // Claims are the highest-stakes thing this router serves: generated
+      // sentences naming living people. `whereClaimPublic` already requires a
+      // published meeting, so this path is walled twice — and it is on this
+      // list because the point of the list is that nobody has to remember which
+      // paths are walled where.
+      `/api/meetings/${unpublishedId}/claims`,
       `/api/meetings/${unpublishedId}/agenda-items`,
       `/api/meetings/${unpublishedId}/documents`,
       // P5's agenda diff is the most quotable thing this project produces, so

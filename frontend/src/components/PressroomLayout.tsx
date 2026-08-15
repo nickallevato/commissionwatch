@@ -64,6 +64,11 @@ const RAIL: readonly RailGroup[] = [
         note: "A run is reached from its source row — there is no list of every run ever.",
       },
       { label: "Queue", to: "/admin/review" },
+      // A second queue rather than a tab of the first: a finding is an
+      // inference about a pattern and a claim is a quotation of the minutes,
+      // and the evidence an operator needs to decide them is not the same
+      // evidence.
+      { label: "Claims", to: "/admin/claims" },
     ],
   },
   {

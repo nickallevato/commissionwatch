@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMatters } from "@/hooks/useMatters";
+import { Absence } from "@/components/ui/Absence";
 import type { Matter, MatterState } from "@/types";
 
 /**
@@ -137,19 +138,15 @@ export function MattersPage() {
       {isLoading ? (
         <p className="mt-8 text-sm text-ink-soft">Loading matters…</p>
       ) : isError ? (
-        /* Named as a failure of ours rather than as an empty record. A
-           transparency site that renders "none" when it means "we could not
-           ask" is making the strongest possible claim on the weakest evidence. */
-        <p className="mt-8 text-sm text-ink-soft">
-          The matter list could not be loaded. This is a failure on our side, not
-          a statement that the record is empty.
-        </p>
+        /* A failure of ours, not an empty record — the distinction is the whole
+           reason `<Absence>` exists. See its header. */
+        <Absence reason="request-failed" subject="Matters" />
       ) : (matters ?? []).length === 0 ? (
-        <p className="mt-8 max-w-prose text-sm leading-relaxed text-ink-soft">
-          {state
-            ? `No matters are currently ${STATE_LABELS[state].toLowerCase()}.`
-            : "No matters have been assembled from the published agendas yet."}
-        </p>
+        state ? (
+          <Absence reason="none-exist" subject={`matters currently ${STATE_LABELS[state].toLowerCase()}`} />
+        ) : (
+          <Absence reason="not-yet-ingested" subject="matters" />
+        )
       ) : (
         <ul className="mt-2">
           {(matters ?? []).map((matter) => (

@@ -361,6 +361,27 @@ function claimQuery(db: Knex): Knex.QueryBuilder {
     .leftJoin("jurisdictions", "jurisdictions.id", "commissions.jurisdiction_id");
 }
 
+
+/**
+ * The address of a quote in the artifact viewer.
+ *
+ * `?offset=`, **not** `#offset-`. This built a fragment until 2026-08-15, and a
+ * fragment never leaves the browser — the server is what picks the window, so
+ * every one of these links would have opened a three-hundred-page packet at
+ * character zero regardless of what it cited. The frontend's
+ * `components/ui/citation-source.ts` builds the same query form; the two agree
+ * because a citation that opens the wrong page is worse than one that does not
+ * open at all, since the reader has no way to tell.
+ *
+ * `len` carries the quote's length so the viewer can mark where it *ends*. The
+ * API returns no quote length, and without this the page can find the start and
+ * nothing else.
+ */
+function viewerPath(sha256: string, offset: number, quoteLength: number): string {
+  const params = new URLSearchParams({ offset: String(offset), len: String(quoteLength) });
+  return `/source/${sha256}?${params.toString()}`;
+}
+
 /**
  * The bytes behind the citation, and the window an operator reads it in.
  *
@@ -379,7 +400,7 @@ async function loadCitation(
     quote: claim.quote,
     source_url: null,
     artifact_stored: false,
-    viewer_path: `/source/${claim.artifact_sha256}#offset-${claim.quote_offset}`,
+    viewer_path: viewerPath(claim.artifact_sha256, claim.quote_offset, claim.quote.length),
     context: null,
   };
 
@@ -1043,7 +1064,7 @@ export async function listPublicClaims(db: Knex, meetingId: string): Promise<Pub
       quote: text(row.quote),
       artifact_sha256: sha,
       quote_offset: offset,
-      source_path: `/source/${sha}#offset-${offset}`,
+      source_path: viewerPath(sha, offset, text(row.quote).length),
       approved_at: asIsoOrNull(row.approved_at),
       model: text(row.model),
       prompt_version: text(row.prompt_version),

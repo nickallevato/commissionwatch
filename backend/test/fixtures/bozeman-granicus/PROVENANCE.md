@@ -114,3 +114,35 @@ The spike was accurate about access and wrong about several counts. Corrected th
   logged, never guessed at.
 - **Agenda packets are not fetched by default.** One verified packet from this capture's
   page is 28.4 MB / 439 pages, and 724 rows carry one.
+
+## `captions-clip2325.vtt` — captured 2026-08-15
+
+One request, honest user agent, no evasion:
+
+```
+$ curl -sS -A 'CommissionWatch/1.0 (+https://commissionwatch.bmux.sh/about; civic transparency research)' \
+    -L 'https://bozeman.granicus.com/videos/2325/captions.vtt'
+http=200 size=26458 type=text/vtt;charset=UTF-8
+sha256 5afecbc5bb50f938aa3cc4b57b1bd3fcdfd54672963b9d6828cf86246a700429
+```
+
+Clip 2325 is the City Commission meeting of 2024-07-17 and is the **smallest non-empty**
+caption file in the 2026-08-14 probe sample — 349 cues, 26 KB, against a 480 KB maximum.
+Chosen for that reason: the fixture has to be a real file the city served, and a fixture
+nobody wants to store is a fixture that gets replaced by a hand-written one.
+
+It confirms the design spec's evidence still held on 2026-08-15: the byte size is exactly
+the 26,458 recorded on 2026-08-14, the file uses no cue identifiers, no `NOTE`/`STYLE`/
+`REGION` blocks, no cue settings and no inline tags, its timestamps are all long-form
+`HH:MM:SS.mmm`, and its first cue starts at `00:01:01.633` — media time, not a clock.
+
+**The empty stub is not stored as a fixture and must not be.** It is eight bytes,
+`WEBVTT\n\n`, and the tests build it with a one-line `printf`-equivalent so the reader can
+check the hash themselves:
+
+```
+$ printf 'WEBVTT\n\n' | sha256sum
+8eb5aec53542eaedb7502b22fb677161abba1e265b1338f1af1369a1f689837c
+```
+
+That single shared hash is why `transcript_status` exists — see `migrations/089`.

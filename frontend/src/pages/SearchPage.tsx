@@ -44,11 +44,23 @@ function formatDate(value: string): string {
   return `${MONTHS[Number(month) - 1]} ${Number(day)}, ${year}`;
 }
 
+/**
+ * `Record<SearchResult["kind"], string>` rather than a partial map, so widening
+ * the union breaks here rather than rendering `undefined` as a label.
+ *
+ * That is not hypothetical: search grew `finding` and `matter` on the backend
+ * while these four sat unchanged, and the two new kinds would have arrived with
+ * no label and fallen through `hrefOf` to the officials roster — a matter about
+ * Ordinance 2145 linking to a list of people. The compiler found all three
+ * places the moment the union was corrected.
+ */
 const KIND_LABEL: Record<SearchResult["kind"], string> = {
   agenda_item: "Agenda item",
   meeting: "Meeting",
   member: "Official",
   document: "Document",
+  finding: "Finding",
+  matter: "Matter",
 };
 
 /** Where a result leads, or `null` for a record with no page of its own. */
@@ -62,7 +74,18 @@ function hrefOf(result: SearchResult): string | null {
       // There is no per-official page yet. The roster is the honest destination;
       // linking at a route that does not exist would render a 404 inside the
       // site chrome and read as a broken record rather than a missing page.
-      return "/members";
+      //
+      // `/officials`, not `/members` — the latter is a 301 since the vocabulary
+      // rename, and pointing a search result at a redirect costs the reader a
+      // hop and a crawler a fetch for nothing.
+      return "/officials";
+    case "matter":
+      return `/matters/${result.id}`;
+    case "finding":
+      // A records-derived finding has no meeting — `meeting_id` is nullable and
+      // this is the branch that respects it. Linking `/meetings/null` is the
+      // failure a non-null assertion would have produced.
+      return result.meeting_id === null ? "/findings" : `/meetings/${result.meeting_id}`;
   }
 }
 
@@ -79,6 +102,16 @@ function datelineOf(result: SearchResult): string {
       return result.jurisdiction_name;
     case "document":
       return `${result.commission_name} · ${formatDate(result.meeting_date)}`;
+    case "finding":
+      // Severity and type, not a date: a finding's dateline is what kind of
+      // thing it is, and the flag type is stored snake_case.
+      return `${result.severity} · ${result.flag_type.replace(/_/g, " ")}`;
+    case "matter":
+      // The designator is what a reader recognises — "Ordinance 2145" is how
+      // the matter is referred to in the room — so it leads when there is one.
+      return result.designator
+        ? `${result.designator} · ${result.commission_name}`
+        : `${result.commission_name} · ${result.jurisdiction_name}`;
   }
 }
 
@@ -195,6 +228,30 @@ export function SearchPage() {
           </p>
         )}
       </form>
+
+      {/* The query is the subscription.
+        
+        This is the only place a reader learns that, and without it the query
+        feed is a channel nobody can find: there is no account to attach a saved
+        search to and no settings page to put one on, by design. The URL *is*
+        the subscription — it holds nothing about who subscribed, there is
+        nothing to leak and nothing to unsubscribe from, and it costs us no
+        record of who is watching which official.
+        
+        A plain <a>, not a Link: /feed.xml is served by the backend and is not a
+        route in this app, so client-side navigation would 404 inside the SPA. */}
+      {query !== "" && (
+        <p className="mt-3 text-xs text-muted">
+          <a
+            href={`/feed.xml?q=${encodeURIComponent(query)}`}
+            className="underline underline-offset-2 hover:text-ink"
+          >
+            Subscribe to this search
+          </a>{" "}
+          — a feed of anything new that matches. No account, and we keep no
+          record of who is subscribed.
+        </p>
+      )}
 
       {query === "" ? (
         <p className="border-b border-rule py-12 text-center text-sm text-muted">

@@ -10,6 +10,7 @@ import type {
   Matter,
   MatterAppearance,
   Metrics,
+  SourceWindow,
 } from "@/types";
 
 /**
@@ -595,6 +596,17 @@ export const metrics: Metrics = {
     votes: 96,
     matters: 19,
   },
+  quality: {
+    vote_events_total: 4,
+    vote_events_approved: 1,
+    // Deliberately non-zero: the unmatched roster gap is the number this
+    // section exists to show, and a fixture of 0 would let the page render an
+    // empty state that never appears in production.
+    roster_unmatched: 3,
+    roster_seats_sourced: 5,
+    roster_seats_implied: 8,
+    roster_sourced: false,
+  },
   review: {
     findings_total: 14,
     findings_published: 9,
@@ -609,4 +621,65 @@ export const metrics: Metrics = {
     last_published_at: "2024-12-05T17:02:00Z",
   },
   generated_at: "2024-12-06T09:00:00Z",
+};
+
+/**
+ * Stored documents, keyed by content address, for `GET /api/source/:sha256`.
+ *
+ * Two of them because the page has two shapes to get right and only one of them
+ * is the easy case:
+ *
+ * - `SOURCE_SHA_WHOLE` fits in a window, so `truncated` is false and the reader
+ *   is looking at the entire extracted text.
+ * - `SOURCE_SHA_WINDOWED` is a slice out of the middle of a long document, so
+ *   `window_start` is non-zero — which is the case where an in-document offset
+ *   and an in-window position differ, and the one a page gets wrong by
+ *   forgetting to subtract.
+ *
+ * The hashes are 64 lowercase hex characters because the route rejects anything
+ * else with a 400, and the text is invented, like every other fixture here.
+ */
+export const SOURCE_SHA_WHOLE = "a1b2c3d4".repeat(8);
+export const SOURCE_SHA_WINDOWED = "d4c3b2a1".repeat(8);
+
+const WHOLE_TEXT =
+  "Minutes of the regular meeting. The Commission convened at 6:00 p.m. " +
+  "Commissioner Sample voted no on the motion to adopt Ordinance 2145. " +
+  "The motion carried four to one. The Commission adjourned at 8:14 p.m.";
+
+const WINDOWED_TEXT =
+  "…and the applicant was invited to respond. Commissioner Sample voted no " +
+  "on the motion to adopt Ordinance 2145, stating that the traffic study had " +
+  "not been received. The chair called the roll.";
+
+export const sourceWindows: Record<string, SourceWindow> = {
+  [SOURCE_SHA_WHOLE]: {
+    sha256: SOURCE_SHA_WHOLE,
+    content_type: "application/pdf",
+    byte_size: 148_233,
+    source_url: "https://example.invalid/minutes-0312.pdf",
+    fetched_at: "2026-03-13T17:02:00.000Z",
+    char_count: WHOLE_TEXT.length,
+    text: WHOLE_TEXT,
+    window_start: 0,
+    window_end: WHOLE_TEXT.length,
+    truncated: false,
+    source_label: "Minutes, Bozeman City Commission, 2026-03-12",
+  },
+  [SOURCE_SHA_WINDOWED]: {
+    sha256: SOURCE_SHA_WINDOWED,
+    content_type: "text/html",
+    byte_size: 982_401,
+    // A stored artifact may hold no fetch URL — a record handed over on a
+    // public-records request has no address to link. The page says so rather
+    // than rendering an empty cell.
+    source_url: null,
+    fetched_at: "2026-03-14T09:30:00.000Z",
+    char_count: 41_820,
+    text: WINDOWED_TEXT,
+    window_start: 12_000,
+    window_end: 12_000 + WINDOWED_TEXT.length,
+    truncated: true,
+    source_label: "Agenda packet, Gallatin County Commission, 2026-03-14",
+  },
 };

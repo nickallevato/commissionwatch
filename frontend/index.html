@@ -6,6 +6,25 @@
     <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#FFFDF8" />
     <title>CommissionWatch</title>
+    <!--
+      Feed auto-discovery. This is how a browser extension, a reader, and a
+      crawler learn the feed exists without being told the path — a feed nobody
+      can find is a channel that does not exist. Both formats are advertised
+      because readers differ in which they prefer, and the backend serves both
+      from the same events.
+    -->
+    <link
+      rel="alternate"
+      type="application/atom+xml"
+      title="CommissionWatch — the published record"
+      href="/feed.xml"
+    />
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="CommissionWatch — the published record"
+      href="/feed.rss"
+    />
   </head>
   <body class="bg-paper text-ink">
     <div id="root"></div>

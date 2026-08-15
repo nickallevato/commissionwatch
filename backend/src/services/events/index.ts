@@ -1,10 +1,11 @@
 import type { Knex } from "knex";
-import type { EventSubjectKind } from "./emit";
+import type { PublicSubjectKind } from "./emit";
 
 export {
   emitEvent,
   retractSubject,
   subjectIsPublic,
+  disputePublicationState,
   defaultEventDedupeKey,
   EventInputError,
   EventPublicationError,
@@ -14,8 +15,10 @@ export {
   type EmitResult,
   type EventExecutor,
   type EventInput,
+  type DisputePublicationState,
   type EventSeverity,
   type EventSubjectKind,
+  type PublicSubjectKind,
   type RecordSubjectKind,
   type RetractionInput,
   type RetractionResult,
@@ -41,28 +44,37 @@ export {
  * `emitEvent` guarantees that a `meeting`, `finding`, `claim` or `document`
  * event exists only for something already public, which is what lets a consumer
  * read `events` instead of re-deriving `publication.ts`'s two-part condition.
- * Two things that guarantee does *not* cover, and both live here:
+ * Three things that guarantee does *not* cover, and all three live here:
  *
  *  - **`ops` events.** A failed sweep or a stale source is a fact about the
  *    machinery. It has no publication state, so it was never checked against
  *    one, and it must never reach a reader. Anything serving the public web
- *    filters `subject_kind <> 'ops'` — through this function, not by retyping
- *    the predicate, which is the mistake the whole spine exists to stop.
+ *    filters the kind out — through this function, not by retyping the
+ *    predicate, which is the mistake the whole spine exists to stop.
+ *  - **`dispute` events.** The inverse of a publication check ran on these:
+ *    they exist *because* the subject is not public and never will be
+ *    (migration 039). A dispute event is a reply owed to one person. Serving one
+ *    to a reader would publish a contest the schema forbids publishing, so it is
+ *    filtered here as well as being refused a broadcast route in
+ *    `delivery/channels.ts`. Two independent mechanisms, because this is the
+ *    highest-consequence leak in the feature.
  *  - **Revoked events.** An operator who unpublished a record has said the
  *    announcement is no longer true. A public reader must not still be served it.
  *
  * Deliberately *not* a database view: the operator console reads the same table
- * and must see ops events and revocations, because that is its job.
+ * and must see ops events, disputes and revocations, because that is its job.
  */
+export const NON_PUBLIC_SUBJECT_KINDS: readonly string[] = ["ops", "dispute"];
+
 export function whereEventPublic<T extends Knex.QueryBuilder>(query: T, table = "events"): T {
-  query.whereNot(`${table}.subject_kind`, "ops").whereNull(`${table}.revoked_at`);
+  query.whereNotIn(`${table}.subject_kind`, NON_PUBLIC_SUBJECT_KINDS).whereNull(`${table}.revoked_at`);
   return query;
 }
 
 export interface PublicEventRow {
   id: string;
   event_type: string;
-  subject_kind: Exclude<EventSubjectKind, "ops">;
+  subject_kind: PublicSubjectKind;
   subject_id: string;
   jurisdiction_id: string | null;
   severity: string | null;
@@ -71,7 +83,7 @@ export interface PublicEventRow {
 
 export interface PublicEventFilters {
   jurisdiction_id?: string;
-  subject_kind?: Exclude<EventSubjectKind, "ops">;
+  subject_kind?: PublicSubjectKind;
   limit?: number;
 }
 

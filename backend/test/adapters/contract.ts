@@ -13,6 +13,7 @@
 import { before as beforeAll, describe, it } from 'node:test';
 import { expect } from '../helpers/expect';
 import {
+  DOCUMENT_KINDS,
   ISO_DATE_PATTERN,
   LOCAL_TIME_PATTERN,
   MIN_POLITENESS_DELAY_MS,
@@ -51,15 +52,16 @@ import { assertValidAdapter, createAdapterRegistry } from '../../src/services/in
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const MEETING_STATUSES = ['scheduled', 'completed', 'cancelled'] as const;
-const DOCUMENT_KINDS = [
-  'agenda',
-  'minutes',
-  'packet',
-  'resolution',
-  'ordinance',
-  'attachment',
-  'other',
-] as const;
+
+/**
+ * Imported, not retyped.
+ *
+ * This list used to be a local copy of the union in `adapters/types.ts`, and the
+ * two drifted the moment `transcript` was added: every Bozeman transcript ref was
+ * a well-formed ref that the contract suite called an unknown kind. A contract
+ * that restates what it is checking is a contract that will eventually check a
+ * different thing.
+ */
 
 export interface AdapterContractFixtures {
   /** The `since` handed to `discoverMeetings`. Must precede the fixture meetings. */

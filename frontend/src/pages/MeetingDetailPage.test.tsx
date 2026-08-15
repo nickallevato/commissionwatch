@@ -15,6 +15,7 @@ import type {
   Member,
   MeetingDocument,
   MeetingStatus,
+  PublicClaims,
   Vote,
   VoteValue,
 } from "@/types";
@@ -255,6 +256,8 @@ interface Scenario {
   votes?: Vote[];
   anomalies?: AnomalyFlag[];
   members?: Member[];
+  /** Three fields, not a list — see `PublicClaims`. */
+  claims?: PublicClaims;
 }
 
 /** Every endpoint the page fans out to, so no test leans on a shared fixture. */
@@ -266,9 +269,11 @@ function install(scenario: Scenario = {}) {
     votes = [],
     anomalies = [],
     members = roster,
+    claims = { claims: [], tombstones: [], awaiting_re_review: 0 },
   } = scenario;
 
   server.use(
+    http.get("/api/meetings/:id/claims", () => HttpResponse.json(claims)),
     http.get("/api/meetings/:id", () =>
       meeting
         ? HttpResponse.json(meeting)
@@ -765,5 +770,131 @@ describe("MeetingDetailPage", () => {
       expect(screen.getByText("One anomaly on this record")).toBeInTheDocument();
       expect(statValue("Flags")).toBe("1");
     });
+  });
+});
+
+/**
+ * The claim cards.
+ *
+ * A claim is the highest-stakes thing this site publishes: one sentence naming
+ * a living person, quoting the line of the minutes that says it. These tests
+ * guard the three ways the surface can fail quietly.
+ *
+ * **The sentence is the API's.** `text` is the string an operator approved and
+ * the backend re-renders and hash-checks on every read. A page that rebuilt it
+ * from a subject and an action would publish text nobody approved, which is why
+ * the fixture below carries a `text` that no template over its own fields could
+ * produce.
+ *
+ * **A tombstone renders.** Showing a withdrawn sentence is not an oversight and
+ * is argued in published-claim §7: it is in caches and feeds, and a reader
+ * arriving from one needs a page saying *that sentence was wrong* rather than a
+ * page showing nothing.
+ *
+ * **A withheld claim is stated.** `awaiting_re_review` is a deliberate refusal
+ * to publish. Dropped silently it reads as an empty record.
+ */
+describe("MeetingDetailPage · claims", () => {
+  const CLAIM_ID = "8f1d0c66-9999-4a00-9000-000000000001";
+  const SHA = "b".repeat(64);
+
+  function makeClaim(): PublicClaims["claims"][number] {
+    return {
+      id: CLAIM_ID,
+      anchor: `claim-${CLAIM_ID}`,
+      // Deliberately not derivable from any field on this object: the page
+      // must print what the API sent, not assemble its own sentence.
+      text: "Avery Sample — voted no on Ordinance 2145, second reading",
+      quote:
+        "Commissioner Sample voted no on the motion to adopt Ordinance 2145.",
+      artifact_sha256: SHA,
+      quote_offset: 4096,
+      source_path: `/source/${SHA}#offset-4096`,
+      approved_at: "2026-08-14T17:00:00.000Z",
+      model: "test-extractor",
+      prompt_version: "claim-extract@2",
+    };
+  }
+
+  it("renders the approved sentence, its quote and its anchor", async () => {
+    install({ claims: { claims: [makeClaim()], tombstones: [], awaiting_re_review: 0 } });
+    renderPage();
+
+    const heading = await screen.findByText(
+      "Avery Sample — voted no on Ordinance 2145, second reading",
+    );
+    // The anchor is the address. A claim is never its own page, so this is the
+    // only thing a link to one can point at.
+    expect(heading.closest("article")).toHaveAttribute("id", `claim-${CLAIM_ID}`);
+    expect(
+      screen.getByText(
+        /Commissioner Sample voted no on the motion to adopt Ordinance 2145\./,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Approved for publication by an operator on/),
+    ).toBeInTheDocument();
+  });
+
+  it("prints the API's sentence rather than one built from the claim's parts", async () => {
+    const claim = makeClaim();
+    install({ claims: { claims: [claim], tombstones: [], awaiting_re_review: 0 } });
+    renderPage();
+
+    const heading = await screen.findByText(claim.text);
+    // Exact, not substring: a page that rendered "Avery Sample — voted no on
+    // Ordinance 2145" from a triple would satisfy a `toContain` against the
+    // longer approved string.
+    expect(heading.textContent).toBe(claim.text);
+  });
+
+  it("says a meeting's claims have not been reviewed rather than showing nothing", async () => {
+    install();
+    renderPage();
+
+    expect(
+      await screen.findByText(/No claims from this record have been reviewed yet\./),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a tombstone with the withdrawn text, the date and the reason", async () => {
+    install({
+      claims: {
+        claims: [],
+        tombstones: [
+          {
+            id: CLAIM_ID,
+            anchor: `claim-${CLAIM_ID}`,
+            retracted_at: "2026-08-20T12:00:00.000Z",
+            retracted_reason:
+              "the minutes were reissued and the vote is recorded differently",
+            previous_text:
+              "Avery Sample — voted no on Ordinance 2145, second reading",
+          },
+        ],
+        awaiting_re_review: 0,
+      },
+    });
+    renderPage();
+
+    const stone = await screen.findByTestId(`tombstone-${CLAIM_ID}`);
+    expect(stone).toHaveAttribute("id", `claim-${CLAIM_ID}`);
+    expect(stone.textContent).toContain("This claim was withdrawn on August 20, 2026");
+    expect(stone.textContent).toContain(
+      "It previously read: “Avery Sample — voted no on Ordinance 2145, second reading”",
+    );
+    expect(stone.textContent).toContain(
+      "Reason: the minutes were reissued and the vote is recorded differently",
+    );
+  });
+
+  it("states that a claim is withheld pending re-review", async () => {
+    install({ claims: { claims: [], tombstones: [], awaiting_re_review: 1 } });
+    renderPage();
+
+    const line = await screen.findByTestId("claims-withheld");
+    expect(line.textContent).toContain(
+      "One claim from this meeting is awaiting re-review and is not shown.",
+    );
   });
 });

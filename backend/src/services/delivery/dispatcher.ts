@@ -3,6 +3,7 @@ import type { Knex } from "knex";
 import {
   decryptChannelConfig,
   resolveRoutes,
+  type ChannelOwnerKind,
   type ChannelType,
   type ResolvedRoute,
 } from "./channels";
@@ -85,9 +86,41 @@ export interface FlushResult {
   error?: string;
 }
 
+/**
+ * What a direct send resolved to.
+ *
+ * `skipped` is not a failure and must never be retried: it is what a suppressed
+ * address, an unparseable contact, or a dry run produces. Only `failed` carries
+ * a retry, and only when the deliverer says the cause was transient.
+ */
+export interface DirectDeliveryOutcome {
+  status: "sent" | "skipped" | "failed";
+  detail?: string;
+  retryable?: boolean;
+}
+
+/**
+ * A transport for events that go to one recipient, resolved at send time.
+ *
+ * The dispatcher deliberately knows nothing about what the recipient is. It
+ * hands over the event type and the stored payload — which carries
+ * `subject_kind` and `subject_id` from the drain — and the deliverer looks up
+ * its own destination. That is what keeps `delivery_channels` free of the
+ * address: there is no row to store it on, because the dispatcher never sees it.
+ */
+export interface DirectDeliverer {
+  deliver(eventType: string, payload: StoredPayload): Promise<DirectDeliveryOutcome>;
+}
+
 export interface DispatcherOptions {
   discord?: DiscordClient;
   sms?: TwilioClient;
+  /**
+   * Sender for `owner_kind = 'direct'` channels. Absent, such a delivery is
+   * recorded `skipped` with the reason on it rather than silently dropped —
+   * a person waiting on a reply is the last thing that may go missing quietly.
+   */
+  direct?: DirectDeliverer;
   /** Window that same-type events collapse into one message. */
   batchWindowMs?: number;
   /** When false, nothing sends until flushAll() is called. Used by tests. */
@@ -224,6 +257,7 @@ interface Batch extends BatchKey {
 export class DeliveryDispatcher {
   private readonly discord: DiscordClient;
   private readonly sms: TwilioClient;
+  private readonly direct: DirectDeliverer | undefined;
   private readonly batchWindowMs: number;
   private readonly autoFlush: boolean;
   private readonly maxAttempts: number;
@@ -240,6 +274,7 @@ export class DeliveryDispatcher {
   ) {
     this.discord = options.discord ?? new DiscordClient();
     this.sms = options.sms ?? new TwilioClient();
+    this.direct = options.direct;
     this.batchWindowMs = options.batchWindowMs ?? 2000;
     this.autoFlush = options.autoFlush ?? true;
     this.maxAttempts = options.maxAttempts ?? 5;
@@ -444,6 +479,18 @@ export class DeliveryDispatcher {
     }
 
     if (channelType !== "discord") {
+      // A direct channel is the one destination the dispatcher cannot read off
+      // the channel row, so it asks before falling through to "no transport".
+      // The lookup sits inside this branch rather than at the top of the
+      // function so the Discord path, which is the hot one, keeps its query
+      // count.
+      const owner = await this.db("delivery_channels")
+        .where({ id: channelId })
+        .first<{ owner_kind: ChannelOwnerKind } | undefined>("owner_kind");
+      if (owner?.owner_kind === "direct") {
+        return this.sendDirectBatch(eventType, deliveryIds, base);
+      }
+
       // Email keeps its own established path — the legacy EmailDeliveryService
       // is its only sender, which is what makes B-e's back-fill of
       // alert_subscriptions onto delivery_channels incapable of double-sending.
@@ -505,6 +552,83 @@ export class DeliveryDispatcher {
   }
 
   /**
+   * A direct send, and the one place in this file that refuses to batch.
+   *
+   * Everywhere else, collapsing same-type events into one message is the point:
+   * a sweep that flags forty anomalies should page an operator once. Here it
+   * would be a disclosure. Two disputes arriving inside one batch window belong
+   * to two different people, and one message carrying both would tell each of
+   * them that the other exists — which is a fact about someone else's contest
+   * that this project has no business handing to a stranger. So each delivery
+   * row is sent on its own, and the loop below is deliberate rather than lazy.
+   */
+  private async sendDirectBatch(
+    eventType: string,
+    deliveryIds: string[],
+    base: FlushResult,
+  ): Promise<FlushResult> {
+    const deliverer = this.direct;
+    if (deliverer === undefined) {
+      const reason = "no direct deliverer is configured on this dispatcher";
+      await this.db("deliveries").whereIn("id", deliveryIds).update({ status: "skipped", last_error: reason });
+      return { ...base, status: "skipped", error: reason };
+    }
+
+    const rows = await this.db("deliveries")
+      .whereIn("id", deliveryIds)
+      .where("status", "pending")
+      .orderBy("created_at", "asc")
+      .select<Array<Pick<DeliveryRow, "id" | "payload" | "attempts">>>("id", "payload", "attempts");
+
+    if (rows.length === 0) return { ...base, delivery_ids: [], status: "sent" };
+
+    let sent = 0;
+    let retrying = 0;
+    let failed = 0;
+    let lastError: string | undefined;
+
+    for (const row of rows) {
+      let outcome: DirectDeliveryOutcome;
+      try {
+        outcome = await deliverer.deliver(eventType, row.payload);
+      } catch (err) {
+        outcome = {
+          status: "failed",
+          detail: err instanceof Error ? err.message : "unknown direct delivery error",
+          retryable: true,
+        };
+      }
+
+      if (outcome.status === "sent") {
+        sent++;
+        await this.db("deliveries")
+          .where({ id: row.id })
+          .update({ status: "sent", sent_at: this.now(), last_error: null });
+        continue;
+      }
+
+      if (outcome.status === "skipped") {
+        // Nothing went wrong. A suppressed address, an unparseable contact or a
+        // dry run all land here, and none of them may enter a retry queue.
+        await this.db("deliveries")
+          .where({ id: row.id })
+          .update({ status: "skipped", last_error: outcome.detail ?? "not sent" });
+        continue;
+      }
+
+      lastError = outcome.detail ?? "direct delivery failed";
+      const status = await this.recordFailure([row], lastError, outcome.retryable ?? false);
+      if (status === "retrying") retrying++;
+      else failed++;
+    }
+
+    const status: FlushResult["status"] =
+      sent > 0 ? "sent" : retrying > 0 ? "retrying" : failed > 0 ? "failed" : "skipped";
+
+    return { ...base, delivery_ids: rows.map((row) => row.id), status, error: lastError };
+  }
+
+  /**
    * SMS. Two things make this unlike every other transport, and neither is a
    * property of the client:
    *
@@ -527,7 +651,7 @@ export class DeliveryDispatcher {
       .first<
         | {
             config_encrypted: Buffer;
-            owner_kind: "operator" | "subscriber";
+            owner_kind: ChannelOwnerKind;
             verified: boolean;
           }
         | undefined

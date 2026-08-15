@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { Absence } from "@/components/ui/Absence";
 import { useMetrics } from "@/hooks/useMetrics";
 
 /**
@@ -68,10 +69,7 @@ export function MetricsPage() {
       {isLoading ? (
         <p className="mt-8 text-sm text-ink-soft">Loading…</p>
       ) : isError || !metrics ? (
-        <p className="mt-8 max-w-prose text-sm leading-relaxed text-ink-soft">
-          These figures could not be loaded. That is a failure on our side, not a
-          statement that the archive is empty.
-        </p>
+        <Absence reason="request-failed" subject="These figures" />
       ) : (
         <>
           <section className="mt-10" aria-labelledby="corpus">
@@ -134,6 +132,44 @@ export function MetricsPage() {
                 The corrections log
               </Link>
             </p>
+          </section>
+
+          <section className="mt-12" aria-labelledby="quality">
+            <h2 id="quality" className="font-display text-xl tracking-headline">
+              How well we read it
+            </h2>
+            <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
+              Collecting a document is not the same as understanding it. These
+              are the figures that say how much of what we read we can actually
+              stand behind.
+            </p>
+            <dl className="mt-4 grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+              <Figure
+                label="Officials we cannot match"
+                value={metrics.quality.roster_unmatched}
+                note="People the minutes name who have no roster entry here. Every one is a true statement our checks will reject, so this number is a ceiling on what we can publish."
+              />
+              <Figure
+                label="Seats on the roster"
+                value={metrics.quality.roster_seats_sourced}
+                of={metrics.quality.roster_seats_implied}
+                note="Against the number of distinct officeholders the records mention."
+              />
+              <Figure
+                label="Recorded vote tallies"
+                value={metrics.quality.vote_events_approved}
+                of={metrics.quality.vote_events_total}
+              />
+            </dl>
+            {metrics.quality.roster_sourced ? null : (
+              <p className="mt-4 max-w-prose border-l-2 border-accent pl-4 text-sm leading-relaxed text-ink-soft">
+                <strong>Our roster of officials is not yet sourced.</strong> We
+                hold names and terms, but not a document to point at for them —
+                so a roster entry here cannot currently be traced the way every
+                other claim on this site can. Until it can, we treat the roster
+                as a working list rather than a published record.
+              </p>
+            )}
           </section>
 
           <section className="mt-12" aria-labelledby="latency">

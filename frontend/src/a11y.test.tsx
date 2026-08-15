@@ -77,6 +77,12 @@ const PUBLIC_ROUTES = [
   "/bot",
   "/data",
   "/subscribe",
+  // `/source/:sha256`, at a hash the default MSW handler answers for. A bare
+  // `/source/<sha>` with no `?offset=` is a real request — it is what a reader
+  // gets by editing the URL, or by following a citation whose offset was
+  // stripped — and it renders the whole document window with no highlight, so
+  // there is nothing about it that needs a query string to be scannable.
+  `/source/${"a1b2c3d4".repeat(8)}`,
   // The `*` route. A 404 is a page a reader genuinely lands on, and it is the
   // one most likely to be built without care.
   "/no-such-page",

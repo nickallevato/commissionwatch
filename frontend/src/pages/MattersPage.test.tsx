@@ -82,7 +82,10 @@ describe("MattersPage", () => {
 
     // `state` is derived by the API at read time; a browser-side filter would
     // be filtering on a value the browser cannot recompute.
-    await screen.findByText(/no matters are currently decided/i);
+    // Copy now comes from `<Absence>`, which states an empty *record* rather
+    // than an empty page — the component exists to keep that distinction from
+    // drifting per page.
+    await screen.findByText(/the record shows no matters currently decided/i);
     expect(seen).toContain("decided");
   });
 
@@ -103,7 +106,7 @@ describe("MattersPage", () => {
     server.use(http.get("/api/matters", () => HttpResponse.json({ data: [], total: 0 })));
     renderWithProviders(<MattersPage />);
 
-    expect(await screen.findByText(/no matters have been assembled/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no sweep has collected matters yet/i)).toBeInTheDocument();
     expect(screen.queryByText(/failure on our side/i)).not.toBeInTheDocument();
   });
 });

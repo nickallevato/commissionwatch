@@ -11,6 +11,7 @@ import {
   matters,
   matterAppearances,
   metrics,
+  sourceWindows,
 } from "./data";
 
 /** Newest first — matches `.orderBy("created_at", "desc")` on /votes and /anomalies. */
@@ -137,7 +138,45 @@ export const handlers = [
     return list(docs);
   }),
 
+  /**
+   * `GET /api/meetings/:id/claims` — the reader's claim cards.
+   *
+   * Empty by default, which is the honest state of a database whose claims
+   * have all been extracted and none approved. Not a `{ data, total }`
+   * envelope: the route answers with three fields, and a page that dropped
+   * `tombstones` or `awaiting_re_review` would be silently unpublishing a
+   * correction. The suites that care supply their own fixtures.
+   */
+  http.get("/api/meetings/:id/claims", () =>
+    HttpResponse.json({ claims: [], tombstones: [], awaiting_re_review: 0 }),
+  ),
+
   http.get("/api/metrics", () => HttpResponse.json(metrics)),
+
+  /**
+   * `GET /api/source/:sha256` — the other end of every citation.
+   *
+   * The window is served as the fixture stores it rather than recomputed from
+   * `?offset=`. Re-implementing `readSourceWindow`'s clamping here would mean
+   * two windowing rules that can disagree; the backend's is asserted against a
+   * real database in `source-viewer.test.ts`, and what this handler is for is
+   * the page's arithmetic — `offset - window_start` — and its provenance block.
+   *
+   * An unknown hash 404s with no distinction between "no such artifact" and
+   * "withheld", because that is what the route does and for the reason its
+   * header gives.
+   */
+  http.get("/api/source/:sha256", ({ params }) => {
+    const sha = typeof params.sha256 === "string" ? params.sha256 : "";
+    const window = sourceWindows[sha];
+    if (!window) {
+      return HttpResponse.json(
+        { error: "Source not found", statusCode: 404 },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(window);
+  }),
 
   http.get("/api/matters", ({ request }) => {
     const state = new URL(request.url).searchParams.get("state");
