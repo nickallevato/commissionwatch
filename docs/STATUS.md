@@ -2355,13 +2355,34 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    2026-08-09; neither is switched on in production. `npm run sweep -- --adapter gallatin-civicplus
    --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
    same time, or accept that the backup has not left the instance.
-1b. **Fix the two chunks per document that return no content.** ~20% of every set of minutes is
-   currently never read. `OpenRouter returned no message content` means `readMessageText` found no
-   string in `choices[0].message.content` — a *different* fault from the truncation already fixed,
-   where content is absent entirely rather than cut short. Start by widening the error to report
-   `finish_reason` and whether a `reasoning` field was populated; that diagnostic is what solved
-   the last two extraction mysteries in minutes. Until it is fixed every run is honestly but
-   permanently `partial`.
+1b. **Fix the repetition loop that truncates a fifth of every document.** ~20% of every set of
+   minutes is currently never read, and as of **2026-08-15 that share is measured rather than
+   estimated**: 5 of 24 chunks unread (20.8%), and **every one of them `truncated-reply` — 100%,
+   n=5**. Zero refusals, zero `upstream-error`, zero `no-choices`, zero `empty-content`, zero
+   `reasoning-only`.
+
+   **This entry previously said the opposite, and it was wrong.** It described
+   `OpenRouter returned no message content` — `readMessageText` finding no string in
+   `choices[0].message.content` — as the ~20%. That branch fired **zero times** in the measurement.
+   The old text is kept here in summary rather than deleted because it read as the top extraction
+   task for weeks and would send the next reader down a path the data has closed.
+
+   The real fault is one layer down: a reply that arrived, was cut off, and had claims salvaged from
+   the part before the cut. And the tallies say what cut it off — the truncating documents emitted
+   **86–127 "claims" from 3.5k–6.5k characters** of a record containing a handful of votes, with
+   rejection counts of `unknown-action: 103` and `not-an-official: 113`. That is a repetition loop,
+   not a dense record.
+
+   **Do not raise the token ceiling** — already raised twice on the old reading (2048 → 3000 → 8000),
+   and the error text no longer advises it. **Do not split chunks** — size does not predict
+   truncation (a 3,724-character document produced 22 claims and no truncation; a 5,536-character one
+   produced 127 and truncated), and splitting a chunk that loops gives two chunks that loop.
+   Read the raw reply bytes before designing the fix: whether the model is restating one vote in n
+   phrasings or enumerating a roster block has different answers, and only the bytes distinguish them.
+   Tracked as **F2** in `docs/superpowers/plans/2026-08-15-release-0.4.0.md`.
+
+   Re-measure with `npm run extraction:distribution`; `npm run extraction:backfill -- --dry-run` is
+   the operator path. Extraction stays unscheduled until the share moves.
 1c. **Build the claims review screen.** `minute_claims.status`, `reviewed_by`, `review_reason` and
    `reviewed_at` all exist and nothing writes them, so an operator cannot approve a claim from the
    console at all — the only door is `GET/POST /api/admin/pressroom/meetings/:id/…`. The screen
