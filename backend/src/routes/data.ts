@@ -4,6 +4,16 @@ import { EXPORT_DATASETS, findDataset, readBatch, type ExportDataset } from "../
 import { buildOcdExport } from "../services/export/ocd";
 import { csvRow, projectRow } from "../services/export/serialize";
 import { buildManifest, DATA_LICENSE, DATA_ATTRIBUTION_HEADER } from "../services/export/manifest";
+import {
+  ARCHIVE_DAY_RE,
+  archivedDatasetDefinition,
+  listSnapshots,
+  readArchivedDataset,
+  snapshotDataset,
+  snapshotDatasets,
+  snapshotOn,
+} from "../services/export/archive";
+import { featureEnabled } from "../services/features/registry";
 
 /**
  * `/api/data` — the bulk export. Public, unauthenticated, no key, no signup.
@@ -96,6 +106,194 @@ router.get("/", async (_req, res, next) => {
  * dataset named `ocd` and 404. Express matches in declaration order, and this
  * is the same class of precedence trap `frontend/nginx.conf` documents twice.
  */
+/* ---------------------------------------------------------------------------
+   The dated archive — F7, behind `dated_export_archive`, default off
+   --------------------------------------------------------------------------- */
+
+/**
+ * Declared **before** `/:file`, for the reason `/ocd.json` gives: that handler
+ * splits on the last dot and would resolve `archive` to a dataset named
+ * `archive` and 404.
+ *
+ * Off, both archive paths answer **404** — not 503 and not "disabled" — because
+ * "this site has no dated archive" is the true statement while the flag is off,
+ * and it is the same choice `/mcp` makes. Resolved per request through the
+ * registry's cached read, so an operator turning it on does not need a redeploy.
+ */
+function archiveOff(res: Response): boolean {
+  if (featureEnabled("dated_export_archive")) return false;
+  res.status(404).json({
+    error: "No such endpoint",
+    statusCode: 404,
+  });
+  return true;
+}
+
+/**
+ * What the archive can and cannot answer.
+ *
+ * The boundary is published rather than left to be discovered by a 404: a reader
+ * asking for a date before the first snapshot is told that nothing was recorded
+ * then, which is a different fact from the site having said nothing.
+ */
+router.get("/archive", async (_req, res, next) => {
+  if (archiveOff(res)) return;
+  try {
+    const snapshots = await listSnapshots(db);
+    const earliest = snapshots[snapshots.length - 1];
+    res.set("Cache-Control", CACHE_CONTROL);
+    res.json({
+      description:
+        "Point-in-time exports, addressed by UTC date. Each one is the set of rows the export " +
+        "held when the snapshot was taken, filtered through today's publication rule — so it is " +
+        "the rows that were published then and are still published now.",
+      // The honest limits, on the response rather than in a document.
+      answerable_from: earliest === undefined ? null : earliest.taken_at.toISOString(),
+      forward_only:
+        "Publication state is a single mutable column and withdrawing a record clears it, so what " +
+        "was public on a date before the first snapshot cannot be reconstructed from the record. " +
+        "This archive answers from the first snapshot onward and does not guess before it.",
+      retraction:
+        "A record withdrawn since a snapshot was taken is absent from that snapshot's export too. " +
+        "The archive re-reads through the same publication wall as /api/data; it does not serve " +
+        "stored copies. `withheld_since` on each dataset counts what has gone.",
+      snapshots: snapshots.map((snapshot) => ({
+        date: snapshot.taken_at.toISOString().slice(0, 10),
+        taken_at: snapshot.taken_at.toISOString(),
+        note: snapshot.note,
+      })),
+      datasets: EXPORT_DATASETS.map((dataset) => dataset.name),
+      formats: ["json", "csv"],
+      path: "/api/data/archive/{date}/{dataset}.{json|csv}",
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/archive/:day", async (req, res, next) => {
+  if (archiveOff(res)) return;
+  try {
+    const { day } = req.params;
+    if (!ARCHIVE_DAY_RE.test(day)) {
+      res.status(400).json({ error: "date must be YYYY-MM-DD", statusCode: 400 });
+      return;
+    }
+    const snapshot = await snapshotOn(db, day);
+    if (snapshot === null) {
+      // Not "there is nothing", which would be a claim about the record.
+      res.status(404).json({
+        error: `No snapshot had been taken on or before ${day}, so what this site published that ` +
+          "day was never recorded and cannot be reconstructed.",
+        statusCode: 404,
+      });
+      return;
+    }
+    const recorded = await snapshotDatasets(db, snapshot.id);
+    res.set("Cache-Control", CACHE_CONTROL);
+    res.json({
+      requested_date: day,
+      taken_at: snapshot.taken_at.toISOString(),
+      note: snapshot.note,
+      datasets: recorded.map((entry) => ({
+        dataset: entry.dataset,
+        row_count: entry.row_count,
+        sha256: entry.sha256,
+        // Inert rather than an error: a snapshot naming a dataset this build no
+        // longer ships is what a rollback leaves behind.
+        available: archivedDatasetDefinition(entry.dataset) !== null,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/archive/:day/:file", async (req, res, next) => {
+  if (archiveOff(res)) return;
+  try {
+    const { day, file } = req.params;
+    const dot = file.lastIndexOf(".");
+    const name = dot === -1 ? file : file.slice(0, dot);
+    const format = dot === -1 ? "" : file.slice(dot + 1);
+
+    if (!ARCHIVE_DAY_RE.test(day)) {
+      res.status(400).json({ error: "date must be YYYY-MM-DD", statusCode: 400 });
+      return;
+    }
+    const definition = archivedDatasetDefinition(name);
+    if (definition === null || (format !== "json" && format !== "csv")) {
+      res.status(404).json({
+        error: "No such dataset",
+        datasets: EXPORT_DATASETS.map((entry) => entry.name),
+        formats: ["json", "csv"],
+        statusCode: 404,
+      });
+      return;
+    }
+
+    const snapshot = await snapshotOn(db, day);
+    if (snapshot === null) {
+      res.status(404).json({
+        error: `No snapshot had been taken on or before ${day}.`,
+        statusCode: 404,
+      });
+      return;
+    }
+    const recorded = await snapshotDataset(db, snapshot.id, name);
+    if (recorded === null) {
+      res.status(404).json({
+        error: `The snapshot of ${snapshot.taken_at.toISOString().slice(0, 10)} did not record ${name}.`,
+        statusCode: 404,
+      });
+      return;
+    }
+
+    const archived = await readArchivedDataset(db, definition, recorded);
+
+    res.set("Cache-Control", CACHE_CONTROL);
+    res.set("X-License", DATA_LICENSE.dataset.name);
+    res.set("X-Attribution", DATA_ATTRIBUTION_HEADER);
+    res.set(
+      "Content-Disposition",
+      `inline; filename="commissionwatch-${name}-${day}.${format}"`,
+    );
+
+    if (format === "csv") {
+      res.type("text/csv; charset=utf-8");
+      await write(res, `${definition.columns.join(",")}\r\n`);
+      for (const row of archived.rows) await write(res, csvRow(definition.columns, row));
+      res.end();
+      return;
+    }
+
+    res.type("application/json; charset=utf-8");
+    res.json({
+      dataset: name,
+      requested_date: day,
+      taken_at: snapshot.taken_at.toISOString(),
+      license: DATA_LICENSE.dataset.name,
+      attribution: DATA_LICENSE.dataset.attribution,
+      provenance: definition.provenance,
+      // The claim, stated on the file rather than in a document somebody may not
+      // have read: this is not the bytes we served that day.
+      served_through_todays_wall:
+        "These are the rows this dataset held on that date and which remain published today. " +
+        "Records withdrawn since are absent.",
+      rows_recorded: archived.recorded,
+      rows_served: archived.served,
+      withheld_since: archived.withheld_since,
+      sha256_then: archived.sha256_then,
+      sha256_now: archived.sha256_now,
+      unchanged: archived.sha256_then === archived.sha256_now,
+      columns: definition.columns,
+      rows: archived.rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get("/ocd.json", async (_req, res, next) => {
   try {
     const ocd = await buildOcdExport(db);
