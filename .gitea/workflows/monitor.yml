@@ -96,17 +96,40 @@ jobs:
       # hoped for, and pinning the image pins the Node version.
       #
       # The webhook arrives in the environment, never in the argument list.
+      # WHAT SHOULD BE LIVE, read on the runner and handed to the probe.
+      #
+      # `github.sha` is the commit this workflow was dispatched at, so on a
+      # `main` dispatch it is the head of origin/main. Its commit time comes
+      # from the checkout, because the probe runs in a stock node:22 container
+      # where git is not guaranteed — and a check that quietly loses its clock
+      # would report drift it cannot age.
+      #
+      # If either is empty the release-drift check reports BLOCKED, not PASS.
+      # There is no fallback value for "what should be deployed": one taken from
+      # the site itself would compare a value against itself and pass forever.
+      - name: Resolve the expected head
+        id: expected
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "time=$(git log -1 --format=%cI ${{ github.sha }} 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+
       - name: Probe the live site
         shell: bash
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           MONITOR_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MONITOR_EXPECTED_SHA: ${{ steps.expected.outputs.sha }}
+          MONITOR_EXPECTED_SHA_TIME: ${{ steps.expected.outputs.time }}
         run: |
           set -euo pipefail
           docker run --rm \
             -v "$(pwd):/workspace" -w /workspace \
             -e DISCORD_WEBHOOK_URL \
             -e MONITOR_RUN_URL \
+            -e MONITOR_EXPECTED_SHA \
+            -e MONITOR_EXPECTED_SHA_TIME \
             node:22-bookworm \
             node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
               backend/src/scripts/external-monitor.ts --run

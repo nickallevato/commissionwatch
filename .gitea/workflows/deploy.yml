@@ -493,18 +493,36 @@ jobs:
       # is recorded. A deploy is not a substitute for a periodic probe and is
       # not offered as one; it is the trigger that exists today, aimed at the
       # failure that actually happened.
+      #
+      # MONITOR_EXPECTED_SHA is this pipeline's own commit: after deploy-aws has
+      # reported success, the site must be serving it. The allowance is dropped
+      # to zero here on purpose — the minutes of drift that are normal between a
+      # push and a finished build have already elapsed by this point in the run,
+      # so anything other than this commit being live is a release that did not
+      # land, not one in flight. The periodic monitor keeps the 30-minute
+      # default, where in-flight is the common case.
       - name: Probe the deployment with the external monitor
         shell: bash
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           MONITOR_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MONITOR_EXPECTED_SHA: ${{ github.sha }}
+          MONITOR_MAX_DRIFT_MINUTES: "0"
         run: |
           set -o pipefail
           {
+            # The commit time comes from the checkout: the probe runs in a stock
+            # node:22 container where git is not guaranteed. Empty makes the
+            # release-drift check report BLOCKED, never PASS.
+            MONITOR_EXPECTED_SHA_TIME="$(git log -1 --format=%cI ${{ github.sha }} 2>/dev/null || true)"
+            export MONITOR_EXPECTED_SHA_TIME
             docker run --rm \
               -v "$(pwd):/workspace" -w /workspace \
               -e DISCORD_WEBHOOK_URL \
               -e MONITOR_RUN_URL \
+              -e MONITOR_EXPECTED_SHA \
+              -e MONITOR_EXPECTED_SHA_TIME \
+              -e MONITOR_MAX_DRIFT_MINUTES \
               node:22-bookworm \
               node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
                 backend/src/scripts/external-monitor.ts --run

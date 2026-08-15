@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import {
   buildAlertMessage,
   DISCORD_CONTENT_LIMIT,
+  DEFAULT_MAX_DRIFT_MINUTES,
   evaluateHealth,
+  evaluateReleaseDrift,
   evaluateSource,
   evaluateSources,
   evaluateVersion,
+  readReleaseExpectation,
   summarise,
   type CheckOutcome,
   type ProbeResult,
@@ -314,6 +317,198 @@ describe("external monitor — the sources feed", () => {
   });
 });
 
+/**
+ * Release drift — the 2026-08-14 incident, made detectable.
+ *
+ * The deploy host filled its disk, `deploy-aws` failed twice, every check job
+ * stayed green, and production kept serving the previous good sha and answering
+ * `/api/health` 200. Nothing alerted, because everything watching asked whether
+ * the site was up. The tests below are written against that shape: a perfectly
+ * healthy site that is running the wrong commit.
+ */
+describe("external monitor — release drift", () => {
+  /** 90 minutes before NOW: well past any allowance. */
+  const OLD_COMMIT = "2026-08-10T02:30:00.000Z";
+  /** Five minutes before NOW: an arm64 build has not even finished yet. */
+  const FRESH_COMMIT = "2026-08-10T03:55:00.000Z";
+
+  function expectation(overrides: Record<string, string | undefined> = {}) {
+    return readReleaseExpectation({
+      MONITOR_EXPECTED_SHA: OTHER_SHA,
+      MONITOR_EXPECTED_SHA_TIME: OLD_COMMIT,
+      ...overrides,
+    });
+  }
+
+  it("fails when the live sha is not the expected head, and names both shas", () => {
+    const outcome = evaluateReleaseDrift(expectation(), response(200, versionBody("backend", SHA)), NOW);
+
+    assert.equal(outcome.state, "fail");
+    // Both, in full. The first question after this alert is which commit is
+    // actually serving, and an abbreviation is not an answer you can `git show`.
+    assert.ok(outcome.detail.includes(SHA), `expected the live sha in: ${outcome.detail}`);
+    assert.ok(outcome.detail.includes(OTHER_SHA), `expected the head sha in: ${outcome.detail}`);
+    assert.match(outcome.detail, /has not landed/);
+    assert.match(outcome.detail, /90 min ago/);
+    assert.match(outcome.detail, /30-min allowance/);
+    // The incident's lesson, in the message itself.
+    assert.match(outcome.detail, /healthy and still be/);
+  });
+
+  it("passes when the live sha is the expected head", () => {
+    const outcome = evaluateReleaseDrift(
+      expectation({ MONITOR_EXPECTED_SHA: SHA }),
+      response(200, versionBody("backend", SHA)),
+      NOW,
+    );
+
+    assert.equal(outcome.state, "pass");
+    assert.ok(outcome.detail.includes(SHA));
+    assert.match(outcome.detail, /is the expected head/);
+  });
+
+  it("passes when the operator supplies an abbreviated sha for the same commit", () => {
+    const outcome = evaluateReleaseDrift(
+      expectation({ MONITOR_EXPECTED_SHA: SHA.slice(0, 8) }),
+      response(200, versionBody("backend", SHA)),
+      NOW,
+    );
+
+    assert.equal(outcome.state, "pass");
+  });
+
+  it("warns without failing while a deploy is still plausibly in flight", () => {
+    const outcome = evaluateReleaseDrift(
+      expectation({ MONITOR_EXPECTED_SHA_TIME: FRESH_COMMIT }),
+      response(200, versionBody("backend", SHA)),
+      NOW,
+    );
+
+    assert.equal(outcome.state, "warn");
+    assert.match(outcome.detail, /still in flight/);
+    assert.equal(summarise([outcome]).failed, false);
+  });
+
+  it("honours a configured allowance", () => {
+    const outcome = evaluateReleaseDrift(
+      expectation({ MONITOR_EXPECTED_SHA_TIME: FRESH_COMMIT, MONITOR_MAX_DRIFT_MINUTES: "2" }),
+      response(200, versionBody("backend", SHA)),
+      NOW,
+    );
+
+    assert.equal(outcome.state, "fail");
+    assert.match(outcome.detail, /2-min allowance/);
+  });
+
+  /**
+   * The guard that matters.
+   *
+   * "The shas differ" and "the version endpoint could not be read" are
+   * different events. Reporting them the same way is the exact error pattern
+   * this project exists to refuse — an unreadable source rendering as a
+   * confident claim. Every branch below must be `blocked`, must say so, and
+   * must never say the release drifted.
+   */
+  describe("cannot determine ≠ drift", () => {
+    const cases: Array<[string, ProbeResult, RegExp]> = [
+      ["the endpoint never answered", unreachable("connect ECONNREFUSED 10.0.0.1:443"), /ECONNREFUSED/],
+      ["the endpoint answered 502", response(502, "<html>bad gateway</html>"), /HTTP 502/],
+      ["the body is not JSON", response(200, "<!doctype html><title>oops</title>"), /not JSON/],
+      ["the body is JSON but not an object", response(200, "[1,2,3]"), /not a JSON object/],
+      ["the payload carries no sha", response(200, JSON.stringify({ service: "backend" })), /no `sha` string/],
+      ["the sha is empty", response(200, versionBody("backend", "   ")), /no `sha` string/],
+      // An unstamped image serves "unknown" on purpose. Two absences that
+      // happen to be equal are not a verified deploy.
+      ["the image carries no build stamp", response(200, versionBody("backend", "unknown")), /no build stamp/],
+    ];
+
+    for (const [label, probe, reason] of cases) {
+      it(`is blocked, not a drift failure, when ${label}`, () => {
+        const outcome = evaluateReleaseDrift(expectation(), probe, NOW);
+
+        assert.equal(outcome.state, "blocked");
+        assert.match(outcome.detail, reason);
+        assert.match(outcome.detail, /drift is unknown/);
+        assert.match(outcome.detail, /not a pass/);
+        // Never the drift wording, and never a live sha it did not read.
+        assert.doesNotMatch(outcome.detail, /has not landed/);
+        assert.ok(!outcome.detail.includes(SHA), `invented a live sha in: ${outcome.detail}`);
+        // It still says what it was looking for, so the reader can act.
+        assert.ok(outcome.detail.includes(OTHER_SHA));
+      });
+    }
+
+    it("is blocked when no expected head was supplied at all", () => {
+      const outcome = evaluateReleaseDrift(
+        readReleaseExpectation({}),
+        response(200, versionBody("backend", SHA)),
+        NOW,
+      );
+
+      assert.equal(outcome.state, "blocked");
+      assert.match(outcome.detail, /MONITOR_EXPECTED_SHA is not set/);
+      assert.match(outcome.detail, /not a pass/i);
+    });
+
+    it("is blocked rather than defaulting when the expected head is not a sha", () => {
+      const outcome = evaluateReleaseDrift(
+        readReleaseExpectation({ MONITOR_EXPECTED_SHA: "refs/heads/main" }),
+        response(200, versionBody("backend", SHA)),
+        NOW,
+      );
+
+      assert.equal(outcome.state, "blocked");
+      assert.match(outcome.detail, /not a commit sha/);
+    });
+
+    it("is blocked rather than silently using the default allowance when the allowance is garbage", () => {
+      const outcome = evaluateReleaseDrift(
+        expectation({ MONITOR_MAX_DRIFT_MINUTES: "half an hour" }),
+        response(200, versionBody("backend", SHA)),
+        NOW,
+      );
+
+      assert.equal(outcome.state, "blocked");
+      assert.match(outcome.detail, /MONITOR_MAX_DRIFT_MINUTES/);
+    });
+
+    it("is blocked, with both shas, when the shas differ but the drift cannot be aged", () => {
+      for (const time of [undefined, "yesterday-ish"]) {
+        const outcome = evaluateReleaseDrift(
+          expectation({ MONITOR_EXPECTED_SHA_TIME: time }),
+          response(200, versionBody("backend", SHA)),
+          NOW,
+        );
+
+        assert.equal(outcome.state, "blocked");
+        assert.ok(outcome.detail.includes(SHA));
+        assert.ok(outcome.detail.includes(OTHER_SHA));
+        assert.match(outcome.detail, /MONITOR_EXPECTED_SHA_TIME/);
+        assert.match(outcome.detail, /not a pass/i);
+      }
+    });
+  });
+
+  it("reads the environment with a measured default allowance", () => {
+    const parsed = readReleaseExpectation({ MONITOR_EXPECTED_SHA: SHA });
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.ok && parsed.maxDriftMinutes, DEFAULT_MAX_DRIFT_MINUTES);
+    assert.equal(parsed.ok && parsed.committedAt, null);
+  });
+
+  it("counts a blocked check separately from a pass, and does not fail the run on it", () => {
+    const summary = summarise([
+      { name: "health", state: "pass", detail: "200, database connected" },
+      evaluateReleaseDrift(expectation(), unreachable("socket hang up"), NOW),
+    ]);
+
+    assert.equal(summary.failed, false);
+    assert.equal(summary.blocked.length, 1);
+    assert.equal(summary.warnings.length, 0);
+    assert.match(summary.lines[1], /^BLOCKED {2}release-drift: /);
+  });
+});
+
 describe("external monitor — the alert", () => {
   const context = {
     baseUrl: "https://commissionwatch.bmux.sh",
@@ -328,6 +523,17 @@ describe("external monitor — the alert", () => {
     assert.match(message, /cannot be trusted to report its own outage/);
     assert.match(message, /HTTP 502/);
     assert.match(message, /runs\/1/);
+  });
+
+  it("labels a blocked check as undetermined rather than listing it as a finding", () => {
+    const summary = summarise([
+      { name: "health", state: "fail", detail: "HTTP 502" },
+      { name: "release-drift", state: "blocked", detail: "the live sha could not be read — not a pass" },
+    ]);
+    const message = buildAlertMessage(summary, context);
+
+    assert.match(message, /1 failing check/);
+    assert.match(message, /\(blocked — could not be determined\) release-drift/);
   });
 
   it("truncates visibly rather than being rejected by Discord", () => {

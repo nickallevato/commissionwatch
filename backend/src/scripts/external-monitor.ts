@@ -73,7 +73,21 @@ export interface ProbeResult {
   attempts: number;
 }
 
-export type CheckState = "pass" | "warn" | "fail";
+/**
+ * `blocked` is not `pass`.
+ *
+ * A check that could not determine its answer — because the thing it needed to
+ * read was unreadable, or because the operator never told it what to expect —
+ * says so in its own word. Collapsing that into `pass` is the error pattern
+ * this project keeps finding in other people's systems: an unreadable source
+ * rendering as a confident claim. Collapsing it into `fail` is nearly as bad,
+ * because then "we cannot see" and "we looked, and it is wrong" wake somebody
+ * up with the same sentence.
+ *
+ * Like `warn`, it does not fail the run — the same convention
+ * `deploy/monitor-trigger.sh` already follows when the run list will not load.
+ */
+export type CheckState = "pass" | "warn" | "blocked" | "fail";
 
 /** One judgement, in the words that will be read by whoever is woken up. */
 export interface CheckOutcome {
@@ -212,7 +226,229 @@ function short(sha: string): string {
   return sha.length > 7 ? sha.slice(0, 7) : sha;
 }
 
-/* ── Probe 3: ingestion staleness ───────────────────────────────────── */
+/* ── Probe 3: release drift ─────────────────────────────────────────── */
+
+/**
+ * Default allowance between a commit existing and that commit being live.
+ *
+ * Measured, not guessed. Three consecutive green pipelines on 2026-08-15 (runs
+ * 28767, 28778, 28992) took 11.3, 11.7 and 12.5 minutes from the first check
+ * job starting to `deploy-aws` finishing — the arm64 buildx step alone is
+ * 7–8 minutes of that. Thirty minutes is roughly 2.4× the slowest observed
+ * end-to-end run, which leaves room for a queued runner and a retried push
+ * without firing on a deploy that is merely in progress.
+ *
+ * That headroom is the whole point: a check that goes red on every push is a
+ * check people mute, and a muted check is how the 2026-08-14 disk-full incident
+ * ran two failed deploys against a green site with nobody noticing.
+ *
+ * Thirty minutes is also comfortably inside what a real drift looks like. On
+ * 2026-08-15 production served `72c10b0` for about four hours while the head of
+ * main moved several commits ahead, and `monitor.yml` reported success on every
+ * fifteen-minute tick through the whole window — a green signal an operator
+ * would reasonably point at to conclude everything was fine. Any allowance from
+ * a few minutes to a couple of hours would have caught that; thirty is chosen
+ * to be far enough above a normal build to be quiet and far enough below a
+ * genuine stall to be useful. `MONITOR_MAX_DRIFT_MINUTES` overrides it —
+ * `deploy.yml` sets `0`, because by the time that pipeline probes, the build
+ * time has already elapsed.
+ */
+export const DEFAULT_MAX_DRIFT_MINUTES = 30;
+
+/** Where the expected head comes from, once the environment has been read. */
+export type ReleaseExpectation =
+  | { ok: true; sha: string; committedAt: string | null; maxDriftMinutes: number }
+  | { ok: false; reason: string };
+
+/** A full or abbreviated commit sha, and nothing else. */
+function isCommitSha(value: string): boolean {
+  return /^[0-9a-f]{7,40}$/i.test(value);
+}
+
+/**
+ * Read the expected head from the environment.
+ *
+ * **`MONITOR_EXPECTED_SHA` is supplied by whatever drives the monitor**, which
+ * in practice is the Gitea Actions runner passing `${{ github.sha }}` — the
+ * commit the workflow itself was dispatched at, so on a `main` dispatch it is
+ * the head of `origin/main`. It deliberately does not come from:
+ *
+ * - **a `git` invocation here.** The evaluation runs inside a stock `node:22`
+ *   container with the workspace mounted; git is not guaranteed in it, and a
+ *   check whose answer depends on a binary that may be absent degrades quietly.
+ * - **the Gitea API.** That would need a token, a network path to Gitea, and an
+ *   npm-free HTTP client — three new ways for the monitor to go red for reasons
+ *   that have nothing to do with the site.
+ * - **anything the deployed site itself serves.** That is the degradation that
+ *   matters: an "expected" sha sourced from `/api/version`, or from a
+ *   `BUILD_SHA` inherited by this process, would compare a value against itself
+ *   and pass forever. The expected head must come from the source of truth for
+ *   what *should* be deployed, never from the thing being judged.
+ *
+ * Missing or malformed input is a `blocked` check, never a default. There is no
+ * safe fallback value for "what should be live".
+ */
+export function readReleaseExpectation(env: Record<string, string | undefined>): ReleaseExpectation {
+  const rawSha = (env.MONITOR_EXPECTED_SHA ?? "").trim();
+  if (rawSha === "") {
+    return {
+      ok: false,
+      reason:
+        "MONITOR_EXPECTED_SHA is not set, so there is nothing to compare the live sha against — this check did not run",
+    };
+  }
+  if (!isCommitSha(rawSha)) {
+    return { ok: false, reason: `MONITOR_EXPECTED_SHA is not a commit sha: ${JSON.stringify(rawSha)}` };
+  }
+
+  const rawMinutes = (env.MONITOR_MAX_DRIFT_MINUTES ?? "").trim();
+  let maxDriftMinutes = DEFAULT_MAX_DRIFT_MINUTES;
+  if (rawMinutes !== "") {
+    const parsed = Number(rawMinutes);
+    // A garbage allowance silently falling back to the default is a threshold
+    // nobody set being reported as one somebody did.
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return {
+        ok: false,
+        reason: `MONITOR_MAX_DRIFT_MINUTES is not a non-negative number: ${JSON.stringify(rawMinutes)}`,
+      };
+    }
+    maxDriftMinutes = parsed;
+  }
+
+  const rawCommittedAt = (env.MONITOR_EXPECTED_SHA_TIME ?? "").trim();
+  return {
+    ok: true,
+    sha: rawSha,
+    committedAt: rawCommittedAt === "" ? null : rawCommittedAt,
+    maxDriftMinutes,
+  };
+}
+
+/**
+ * True when two shas name the same commit, allowing one to be an abbreviation.
+ *
+ * The image is stamped with the full sha by `deploy.yml`, but an operator
+ * running this by hand may well pass a short one, and `isCommitSha` already
+ * refuses anything shorter than seven characters — the length below which
+ * abbreviations start colliding in a repository this size.
+ */
+function shaMatches(a: string, b: string): boolean {
+  const left = a.toLowerCase();
+  const right = b.toLowerCase();
+  const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
+  return longer.startsWith(shorter);
+}
+
+/**
+ * Is the commit that should be live actually live, and if not, for how long?
+ *
+ * **The finding this exists for:** on 2026-08-14 the deploy host filled its
+ * disk. `deploy-aws` failed twice, every check job stayed green, and production
+ * went on serving the previous good sha and answering `/api/health` 200 —
+ * because the image pull failed before any container was replaced, which is the
+ * pipeline behaving correctly. Nothing alerted, because everything that was
+ * watching asked whether the site was *up*. It was. The release had simply
+ * stopped landing, and the first symptom was a human noticing.
+ *
+ * A green check suite plus a healthy site does not mean the release deployed.
+ * This is the check that says so, and it needs no AWS credentials and no host
+ * access — which is why it is the one that can exist.
+ *
+ * The four verdicts, and what each refuses to claim:
+ *
+ * - **`pass`** — the live sha is the expected head. The only case where the
+ *   answer is "the release landed".
+ * - **`warn`** — they differ, but the expected head is younger than the
+ *   allowance. Drift is *normal* for the minutes between a push and a finished
+ *   arm64 build. This is reported and does not fail the run.
+ * - **`fail`** — they differ and the expected head has been waiting longer than
+ *   the allowance. The release stopped landing. Both shas are in the message,
+ *   because the first question anyone asks is which commit is actually serving.
+ * - **`blocked`** — the comparison could not be made: no expected head was
+ *   supplied, or `/api/version` could not be read, or it returned no usable
+ *   sha, or its age cannot be computed. These are **not** the same event as
+ *   drift and are never reported as one. An unreadable version endpoint already
+ *   fails the `version` check on its own; having this check also shout "drift"
+ *   about it would be inventing a fact from an absence.
+ */
+export function evaluateReleaseDrift(
+  expectation: ReleaseExpectation,
+  api: ProbeResult,
+  now: Date,
+): CheckOutcome {
+  const name = "release-drift";
+
+  if (!expectation.ok) {
+    return { name, state: "blocked", detail: `${expectation.reason}. Not a pass` };
+  }
+
+  const live = readSha(api, "/api/version");
+  if (!live.ok) {
+    return {
+      name,
+      state: "blocked",
+      detail:
+        `the live sha could not be read, so drift is unknown — not a pass. ` +
+        `${live.detail}. Expected head ${short(expectation.sha)} (${expectation.sha})`,
+    };
+  }
+
+  if (shaMatches(live.sha, expectation.sha)) {
+    return {
+      name,
+      state: "pass",
+      detail: `live sha ${short(live.sha)} is the expected head ${short(expectation.sha)} (${expectation.sha})`,
+    };
+  }
+
+  const both =
+    `live ${short(live.sha)} (${live.sha}) ` +
+    `vs expected head ${short(expectation.sha)} (${expectation.sha})`;
+
+  if (expectation.committedAt === null) {
+    return {
+      name,
+      state: "blocked",
+      detail:
+        `the live sha is not the expected head — ${both} — but MONITOR_EXPECTED_SHA_TIME is not set, ` +
+        `so whether this is a deploy in flight or a release that stopped landing cannot be told. Not a pass`,
+    };
+  }
+
+  const committedAt = new Date(expectation.committedAt);
+  if (Number.isNaN(committedAt.getTime())) {
+    return {
+      name,
+      state: "blocked",
+      detail:
+        `the live sha is not the expected head — ${both} — but MONITOR_EXPECTED_SHA_TIME is not a date: ` +
+        `${JSON.stringify(expectation.committedAt)}, so the age of the drift cannot be computed. Not a pass`,
+    };
+  }
+
+  const minutes = Math.round(((now.getTime() - committedAt.getTime()) / 60_000) * 10) / 10;
+  if (minutes > expectation.maxDriftMinutes) {
+    return {
+      name,
+      state: "fail",
+      detail:
+        `the release has not landed: ${both}. The expected head was committed ${minutes} min ago, ` +
+        `past the ${expectation.maxDriftMinutes}-min allowance. The site can be healthy and still be ` +
+        `serving an old commit — check the deploy job, not the site`,
+    };
+  }
+
+  return {
+    name,
+    state: "warn",
+    detail:
+      `${both}, committed ${minutes} min ago — within the ${expectation.maxDriftMinutes}-min allowance, ` +
+      `so a deploy is probably still in flight`,
+  };
+}
+
+/* ── Probe 4: ingestion staleness ───────────────────────────────────── */
 
 /** The fields of a `/api/ingestion/sources` row this monitor judges on. */
 export interface MonitoredSource {
@@ -364,19 +600,28 @@ export interface Summary {
   failed: boolean;
   failures: CheckOutcome[];
   warnings: CheckOutcome[];
+  blocked: CheckOutcome[];
   lines: string[];
 }
 
-const MARK: Record<CheckState, string> = { pass: "PASS", warn: "WARN", fail: "FAIL" };
+const MARK: Record<CheckState, string> = { pass: "PASS", warn: "WARN", blocked: "BLOCKED", fail: "FAIL" };
 
-/** The run's verdict. A warning is reported and does not fail the run. */
+/**
+ * The run's verdict.
+ *
+ * A warning is reported and does not fail the run. So is a blocked check — but
+ * it is counted and printed separately, because "we could not tell" is a
+ * different thing to hand somebody than "we looked and it is fine".
+ */
 export function summarise(outcomes: CheckOutcome[]): Summary {
   const failures = outcomes.filter((o) => o.state === "fail");
   const warnings = outcomes.filter((o) => o.state === "warn");
+  const blocked = outcomes.filter((o) => o.state === "blocked");
   return {
     failed: failures.length > 0,
     failures,
     warnings,
+    blocked,
     lines: outcomes.map((o) => `${MARK[o.state]}  ${o.name}: ${o.detail}`),
   };
 }
@@ -407,6 +652,9 @@ export function buildAlertMessage(summary: Summary, context: AlertContext): stri
   }
   for (const warning of summary.warnings) {
     parts.push(`• (warning) ${warning.name} — ${warning.detail}`);
+  }
+  for (const blocked of summary.blocked) {
+    parts.push(`• (blocked — could not be determined) ${blocked.name} — ${blocked.detail}`);
   }
   parts.push("");
   if (context.runUrl !== null) parts.push(`Run: ${context.runUrl}`);
@@ -514,6 +762,7 @@ export async function main(): Promise<number> {
   const outcomes: CheckOutcome[] = [
     evaluateHealth(health),
     evaluateVersion(apiVersion, webVersion),
+    evaluateReleaseDrift(readReleaseExpectation(process.env), apiVersion, now),
     ...evaluateSources(sources, now),
   ];
 
@@ -522,7 +771,9 @@ export async function main(): Promise<number> {
 
   if (!summary.failed) {
     console.log(
-      `\nAll checks passed (${summary.warnings.length} warning(s)). Nothing is posted on a green run.`,
+      `\nNo check failed (${summary.warnings.length} warning(s), ${summary.blocked.length} blocked — ` +
+        `blocked means the answer could not be determined, not that it was fine). ` +
+        `Nothing is posted on a green run.`,
     );
     return 0;
   }
