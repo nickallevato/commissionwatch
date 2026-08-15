@@ -5,6 +5,11 @@ Bozeman City Commission and Gallatin County, MT.
 
 ## Read this first
 
+**`CHANGELOG.md`** — what shipped, by release, with a **completeness factor** on every feature
+(shipped / shipped dark / operator-gated / blocked / refused). A feature listed without saying how
+finished it is reads as finished, which is the same failure this project exists to refuse about the
+public record.
+
 **`docs/STATUS.md`** — what is actually true right now: the live deployment, the gaps, the known
 defects, the operational traps, and the ordered next steps. Read it before starting work.
 
