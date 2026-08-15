@@ -33,6 +33,7 @@ import {
 import { mcpEnabled } from "../src/routes/mcp";
 import { EventDrain } from "../src/services/events/drain";
 import { PrerenderConsumer } from "../src/services/prerender/consumer";
+import { ExportSnapshotScheduler } from "../src/services/export/snapshot-scheduler";
 import { signInOperator } from "./helpers/pressroom";
 
 /**
@@ -552,10 +553,17 @@ describe("GET /api/admin/features", () => {
       enabled: false,
       logger: { warn: () => {}, error: () => {} },
     }).intervalMs;
+    // The archive's snapshot loop, added in 0.5.0. Same discipline: the number
+    // the console prints has to be the one a real instance runs on.
+    const snapshotInterval = new ExportSnapshotScheduler(db, {
+      enabled: false,
+      logger: { warn: () => {}, error: () => {} },
+    }).intervalMs;
 
     assert.deepEqual(res.body.cycleIntervalMs, {
       event_drain: drainInterval,
       prerender: prerenderInterval,
+      dated_export_archive: snapshotInterval,
     });
     // `mcp_server` resolves per request and has no loop of its own. Absent, not
     // zero: the console says "no loop" rather than implying instant.

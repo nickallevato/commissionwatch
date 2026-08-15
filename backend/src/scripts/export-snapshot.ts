@@ -24,9 +24,15 @@ import { listSnapshots, takeSnapshot } from "../services/export/archive";
  * needs to be able to start recording now. The same argument
  * `prerender-rebuild.ts` makes about `PRERENDER_ENABLED`.
  *
- * There is no scheduler behind this yet, and that is a real limit: the archive
- * is exactly as dense as an operator's habit of running it. A queue stage is the
- * right home for it and is not this task.
+ * There **is** a scheduler behind it now —
+ * `services/export/snapshot-scheduler.ts`, started by `src/index.ts`, which takes
+ * one snapshot per UTC day while `dated_export_archive` is on and records every
+ * skipped cycle in `export_snapshot_runs`. This command stays for the case above:
+ * recording before the flag goes on, and taking an extra snapshot with a `--note`
+ * around a deliberate change. Running it on a day the scheduler has already
+ * recorded is harmless — the scheduler's own next cycle sees the day is done and
+ * no-ops — but it does add a second snapshot for that day, and the archive
+ * resolves a date to the *latest* snapshot on or before it.
  */
 
 interface Args {

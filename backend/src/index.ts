@@ -12,6 +12,7 @@ import { EventDrain } from "./services/events/drain";
 import { PrerenderConsumer } from "./services/prerender/consumer";
 import { DisputeMailer, ensureDisputeReplyChannel } from "./services/dispute-notifications";
 import { FeatureRegistry, setFeatureRegistry } from "./services/features/registry";
+import { ExportSnapshotScheduler } from "./services/export/snapshot-scheduler";
 
 const PORT = process.env.PORT || 3001;
 
@@ -88,6 +89,30 @@ const eventDrain = new EventDrain(db, { dispatcher });
 // feature is on, which the console can now do without a redeploy.
 const prerender = new PrerenderConsumer(db);
 
+/**
+ * The dated export archive's scheduler, and the reason it lives here.
+ *
+ * The archive shipped with a writer nothing called: `npm run export:snapshot` is
+ * a command a human has to remember, so the archive would have held one
+ * snapshot — taken the day it was tested — and answered 404 for every other
+ * date. Publication state is a single mutable column, so a day nobody recorded
+ * can never be reconstructed; a missed day is missed permanently.
+ *
+ * It is a loop here rather than a stage in the ingestion queue because a
+ * snapshot is not per-document work and has no `ingestion_sources` row: the
+ * queue's stages carry a `run_id` and an artifact, and `SourceScheduler` takes
+ * its cadence from a source's `cron_expression` and locks per source id. Giving
+ * the archive a fake source row to hang a cron on would put a thing that is not
+ * an ingestion source into the table the public status page reads. What it
+ * actually is, is the same shape as the two loops above — a capability gated on a
+ * feature key, re-read per cycle — so it is built and started in the same place,
+ * for the same reasons, with the same failure behaviour.
+ *
+ * Off unless `dated_export_archive` is on, and every skipped cycle lands in
+ * `export_snapshot_runs` so a dark loop is visibly dark rather than silent.
+ */
+const exportSnapshots = new ExportSnapshotScheduler(db);
+
 const server = app.listen(PORT, () => {
   console.log(`CommissionWatch backend listening on port ${PORT}`);
   digestScheduler.start();
@@ -109,6 +134,11 @@ const server = app.listen(PORT, () => {
   // As above, and it throws rather than emitting localhost canonicals if
   // PUBLIC_BASE_URL is missing.
   prerender.start();
+
+  // And the third loop on that pattern. It arms its timer and takes nothing
+  // here: the first snapshot is the first tick, so a crash-looping container
+  // cannot turn a boot into a full read of every dataset.
+  exportSnapshots.start();
 
   // Without this row a dispute event resolves to nothing and the ledger stays
   // `queued` — the reply is composed, recorded, and never handed to anything.
@@ -135,6 +165,7 @@ function shutdown() {
   ingestion.locateWorker.stop();
   eventDrain.stop();
   prerender.stop();
+  exportSnapshots.stop();
   features.stop();
   server.close(() => {
     // `flushAll` sends whatever is buffered in the dispatcher's batching window
@@ -154,4 +185,14 @@ function shutdown() {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
-export { notificationService, emailService, digestScheduler, ingestion, dispatcher, eventDrain, prerender, features };
+export {
+  notificationService,
+  emailService,
+  digestScheduler,
+  ingestion,
+  dispatcher,
+  eventDrain,
+  prerender,
+  exportSnapshots,
+  features,
+};

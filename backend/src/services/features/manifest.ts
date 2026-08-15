@@ -155,10 +155,18 @@ export const FEATURES = [
     description:
       "`/api/data/archive` serves point-in-time exports addressed by date, built from the same " +
       "walled dataset builders as `/api/data` so there is exactly one publication wall in the " +
-      "export path. With this off, `/data` says the question is unanswerable rather than " +
-      "implying otherwise.",
+      "export path. It also starts the loop that **records** a snapshot once per UTC day — the " +
+      "archive can only ever answer for days somebody recorded, and a day nobody recorded cannot " +
+      "be reconstructed. With this off, `/data` says the question is unanswerable rather than " +
+      "implying otherwise, and every skipped cycle is written to `export_snapshot_runs` so a dark " +
+      "loop is visibly dark rather than silent.",
     risk: "publishes",
     legacyEnv: null,
+    // Deliberately null. The loop takes the *first* snapshot within an hour of
+    // being switched on, so nothing has to be run by hand to make the feature
+    // work — but it cannot record a day that has already passed, and the
+    // description says so. `npm run export:snapshot` remains available to an
+    // operator who wants to start recording before turning the archive on.
     requiresSeed: null,
   },
 ] as const satisfies readonly FeatureDefinition[];

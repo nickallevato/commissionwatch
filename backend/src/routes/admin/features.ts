@@ -14,6 +14,11 @@ import {
 } from "../../services/features/registry";
 import { DEFAULT_DRAIN_INTERVAL_MS } from "../../services/events/drain";
 import { DEFAULT_PRERENDER_INTERVAL_MS } from "../../services/prerender/consumer";
+import {
+  DEFAULT_SNAPSHOT_INTERVAL_MS,
+  listSnapshotRuns,
+  type SnapshotRun,
+} from "../../services/export/snapshot-scheduler";
 
 /**
  * `/api/admin/features` — the switch panel.
@@ -93,7 +98,51 @@ function registryFor(): FeatureRegistry {
 const CYCLE_INTERVAL_MS: Readonly<Record<string, number>> = {
   event_drain: DEFAULT_DRAIN_INTERVAL_MS,
   prerender: DEFAULT_PRERENDER_INTERVAL_MS,
+  dated_export_archive: DEFAULT_SNAPSHOT_INTERVAL_MS,
 };
+
+/**
+ * The dated archive's cycles, skips included, newest day first.
+ *
+ * Served **here** because this is the screen with that switch on it, and because
+ * the question it answers is a question about the switch: an operator who turns
+ * `dated_export_archive` on and sees no snapshot needs to be able to tell "the
+ * loop skipped every cycle because the flag was off" from "the loop is not
+ * running at all". Those two states look identical from `/api/data/archive`,
+ * which 404s while the flag is off and so cannot report on its own scheduler.
+ *
+ * It is the only loop in this product whose cycles leave a durable record, which
+ * is why no other key has an entry here. The drain and the consumer write their
+ * work — `deliveries`, files on disk — and a cycle of theirs that did nothing is
+ * visible as the absence of it. A snapshot loop that is off produces no absence
+ * anybody would notice until a reader asks for a date, by which time the day is
+ * unrecoverable: publication state is one mutable column, so a day nobody
+ * snapshotted can never be reconstructed. That asymmetry is the reason this
+ * ledger exists at all.
+ */
+const SNAPSHOT_RUN_DAYS = 30;
+
+interface SnapshotRunView {
+  day: string;
+  outcome: string;
+  cycles: number;
+  firstAt: string;
+  lastAt: string;
+  snapshotId: string | null;
+  detail: string | null;
+}
+
+function snapshotRunView(run: SnapshotRun): SnapshotRunView {
+  return {
+    day: run.run_day,
+    outcome: run.outcome,
+    cycles: run.cycles,
+    firstAt: run.first_at.toISOString(),
+    lastAt: run.last_at.toISOString(),
+    snapshotId: run.snapshot_id,
+    detail: run.detail,
+  };
+}
 
 /** The last change to a key, from the log rather than from the mirror on `features`. */
 interface AuditRow {
@@ -220,6 +269,9 @@ router.get("/", async (_req: Request, res, next) => {
       // constants instead of one somebody typed into the frontend.
       pollIntervalMs: featurePollIntervalMs(),
       cycleIntervalMs: CYCLE_INTERVAL_MS,
+      // Read after the flags, so a console load shows the switch and what the
+      // loop behind it has actually been doing in one answer.
+      snapshotRuns: (await listSnapshotRuns(db, SNAPSHOT_RUN_DAYS)).map(snapshotRunView),
     });
   } catch (err) {
     next(err);
