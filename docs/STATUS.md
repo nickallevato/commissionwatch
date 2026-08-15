@@ -259,10 +259,38 @@ found it.
 - **Nothing has run the backfill.** `npm run backfill:artifact-text` exists; until an operator runs
   it on the host, minutes stay unindexed for the *existing* archive — the code fix only catches new
   fetches. Start with `-- --dry-run`.
-- **The extraction failure distribution is unmeasured.** `failed_chunks` now carries a structured
-  reason (`truncated` / `refused` / `upstream-error` / `reasoning-only` / …). One SQL query answers
-  which dominates, and that answer decides whether the next work is chunk splitting, a prompt
-  change, or abandoning the free tier. Guessing wrong there costs a day.
+- **The extraction failure distribution is measured**, on 2026-08-15, and it says something
+  different from what the spec assumed. `extraction_runs` was *empty* — the distribution was not
+  unread, there was nothing to read — so it was produced by running the real extractor over the real
+  stored corpus: 10 documents, twice, 24 chunks, 20 finished runs.
+
+  **5 of 24 chunks unread (20.8%), and every one of them `truncated-reply`. 100%, n=5.** Zero
+  refusals, zero `upstream-error`, zero `no-choices`, zero `empty-content`, zero `reasoning-only`.
+  The spec's §1 is aimed at `readMessageText` returning null; that branch fired **zero times**. The
+  real 20% is one layer down — a reply that arrived, was cut off, and had claims salvaged from the
+  part before the cut.
+
+  **Chunk splitting is therefore not justified**, and was not built. Size does not predict it: a
+  3,724-character document produced 22 claims and no truncation, a 5,536-character one produced 127
+  and truncated, and in the only two-chunk document just chunk 0 truncated. The truncating documents
+  emitted 86–127 "claims" from 3.5k–6.5k characters of a record containing a handful of votes, with
+  rejection tallies of `unknown-action: 103` and `not-an-official: 113`. That is a repetition loop,
+  not a dense record, and splitting a chunk that loops gives two chunks that loop. The token ceiling
+  has already been raised twice on the other reading (2048 → 3000 → 8000); the error text no longer
+  advises raising it again.
+
+  **The defect the numbers exposed.** A one-chunk document — which most of the archive is — whose
+  only chunk truncated was classified `failed`, while holding verified, stored claims out of the
+  very bytes it was recorded as not having read. `stage.ts` throws on `failed`, so the queue retried
+  a *deterministic* outcome five times against a per-minute rate-limited free tier and failed the job
+  anyway, on four of ten documents. `classifyExtraction` now requires that every chunk failed **and**
+  none yielded a claim; legacy rows carry `recovered: null`, count as zero, and classify exactly as
+  before. Verified live: the identical situation now records `partial` with `recovered: 88`.
+
+  Still open: extraction is **not** scheduled automatically, because a fifth of chunks truncate.
+  `npm run extraction:backfill -- --dry-run` is the operator path, and
+  `npm run extraction:distribution` re-measures. The `/status` page does not yet show the backlog
+  depth; `extractionBacklog` is the query it should call.
 - **The map is empty until an operator reviews links.** The extractor and the geocoder run, the
   review path and its console exist, and nothing has been approved — so `/api/places/near` correctly
   answers 200 with nothing in it. That is the wall working, not a fault, and the reader map now says

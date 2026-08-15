@@ -28,7 +28,22 @@ const router = Router();
  * wrong freshness signal is worse than none.
  */
 
-/** Public routes with no id in them. Kept in the order a reader meets them. */
+/**
+ * Public routes with no id in them. Kept in the order a reader meets them.
+ *
+ * Three were missing when this was audited against `frontend/src/App.tsx`:
+ * `/map`, `/data-license` and `/corrections/dispute`. Each had shipped, each is
+ * linked from other pages, and none was ever offered to a crawler — a page
+ * absent from the sitemap is not hidden, but on a site whose whole traffic
+ * argument is that crawlers can find the record, it is a page that mostly is
+ * not found. `/corrections/dispute` is the one that matters most: it is the
+ * route by which somebody named in a record contests it.
+ *
+ * `sitemap.test.ts` now reads `App.tsx` and fails on any public route that is
+ * neither listed here nor named in its exclusion list with a reason, because a
+ * hand-kept list beside a growing router drifts by default rather than by
+ * accident.
+ */
 const STATIC_PATHS = [
   "/",
   "/meetings",
@@ -38,9 +53,12 @@ const STATIC_PATHS = [
   "/elections",
   "/findings",
   "/search",
+  "/map",
   "/calendar",
   "/data",
+  "/data-license",
   "/corrections",
+  "/corrections/dispute",
   "/public-records",
   "/status",
   "/metrics",

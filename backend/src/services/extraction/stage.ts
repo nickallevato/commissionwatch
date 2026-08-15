@@ -54,8 +54,17 @@ export interface ExtractHandlerDeps {
  *    artifact that is not a PDF, a scan with no text layer — none of those are
  *    fixed by trying again, and burning five attempts to discover that would
  *    hide the reason behind an "attempts exhausted" message.
- *  - A run where **every** chunk failed is thrown, so the queue retries it with
- *    backoff. That is the throttled case, and it is the one retrying does fix.
+ *  - A run where **every** chunk failed *and none of them yielded a claim* is
+ *    thrown, so the queue retries it with backoff. That is the throttled case,
+ *    and it is the one retrying does fix.
+ *
+ *    The second clause arrived with the first corpus measurement (2026-08-15).
+ *    Most of the archive is one chunk, every failure in the measured corpus was
+ *    a `truncated-reply`, and three of those had already salvaged 86 to 127
+ *    verified claims — so a one-chunk document classified `failed`, this line
+ *    threw, and the queue retried a deterministic outcome five times against a
+ *    per-minute rate-limited free tier before failing the job anyway. The
+ *    claims were stored the whole time. See `classifyExtraction`.
  *  - A partial run completes. Some of the document was read, the claims are
  *    stored, and `extraction_runs.failed_chunks` says what went unread. Failing
  *    the job would re-run the chunks that already worked.
@@ -97,6 +106,10 @@ export function createExtractHandler(
       counts: {
         extraction_claims_stored: result.stored,
         extraction_chunks_unread: summary.failed,
+        // Distinguishes "a third of the chunks went unread" from "a third were
+        // cut short after yielding most of what they held" on the run ledger
+        // the public status page reads.
+        extraction_claims_salvaged: summary.recovered,
       },
     };
   };

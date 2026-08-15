@@ -97,6 +97,7 @@ const failedChunk = (index: number, error: string): FailedChunk => ({
   index,
   error,
   reason: "request-failed",
+  recovered: 0,
   finish_reason: null,
   native_finish_reason: null,
 });
@@ -1317,9 +1318,9 @@ describe("counting what went unread, from the row alone", () => {
 
   it("answers 'what fraction went unread, and why' without a log", () => {
     const summary = summariseFailures(9, [
-      { index: 0, error: "e", reason: "truncated", finish_reason: "length", native_finish_reason: null },
-      { index: 1, error: "e", reason: "truncated", finish_reason: "length", native_finish_reason: null },
-      { index: 2, error: "e", reason: "refused", finish_reason: "content_filter", native_finish_reason: null },
+      { index: 0, error: "e", reason: "truncated", finish_reason: "length", native_finish_reason: null, recovered: 0 },
+      { index: 1, error: "e", reason: "truncated", finish_reason: "length", native_finish_reason: null, recovered: 0 },
+      { index: 2, error: "e", reason: "refused", finish_reason: "content_filter", native_finish_reason: null, recovered: 0 },
     ]);
     assert.equal(summary.failed, 3);
     assert.equal(summary.chunks, 9);
@@ -1354,6 +1355,7 @@ describe("counting what went unread, from the row alone", () => {
             reason: "refused",
             finish_reason: "content_filter",
             native_finish_reason: "SAFETY",
+            recovered: 0,
           },
           {
             index: 2,
@@ -1361,6 +1363,7 @@ describe("counting what went unread, from the row alone", () => {
             reason: "truncated",
             finish_reason: "length",
             native_finish_reason: null,
+            recovered: 0,
           },
         ],
       },

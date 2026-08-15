@@ -107,6 +107,22 @@ export interface FailedChunk {
   finish_reason: string | null;
   /** `choices[0].native_finish_reason` — provider-specific, often more precise. */
   native_finish_reason: string | null;
+  /**
+   * Claims salvaged from this chunk before it failed.
+   *
+   * Zero for every reason except `truncated-reply`, where a reply arrived, was
+   * cut off, and complete objects were recovered from what came before the cut.
+   * Null for rows written before this field existed.
+   *
+   * It is here because the first real measurement of the corpus (2026-08-15, 10
+   * stored minutes documents, 12 chunks) found **every** failed chunk was a
+   * `truncated-reply`, and three of the four had recovered dozens of claims. So
+   * the operative question about a failed chunk on this corpus is not "why did
+   * it fail" — that is answered and unanimous — it is "did we get anything
+   * anyway", and nothing recorded it. `failed_chunks` is jsonb, so widening it
+   * again needs no migration, exactly as the reason field did not.
+   */
+  recovered: number | null;
 }
 
 export interface ExtractionOutcome {
@@ -316,6 +332,7 @@ export async function extractClaims(
           reason: error.diagnosis.reason,
           finish_reason: error.diagnosis.finishReason,
           native_finish_reason: error.diagnosis.nativeFinishReason,
+          recovered: 0,
         });
         continue;
       }
@@ -325,6 +342,7 @@ export async function extractClaims(
         reason: "request-failed",
         finish_reason: null,
         native_finish_reason: null,
+        recovered: 0,
       });
       continue;
     }
@@ -342,6 +360,7 @@ export async function extractClaims(
         reason: "unreadable-reply",
         finish_reason: null,
         native_finish_reason: null,
+        recovered: 0,
       });
       continue;
     }
@@ -352,12 +371,24 @@ export async function extractClaims(
       // document was not examined.
       failedChunks.push({
         index,
+        // The old text ended "Raise the token ceiling." The first corpus
+        // measurement says that advice is wrong, so it is gone: the ceiling has
+        // been raised twice already (2048 → 3000 → 8000) and on 2026-08-15 four
+        // of twelve chunks still truncated — each after emitting eighty to a
+        // hundred and thirty "claims" from six thousand characters of minutes
+        // that contain a handful. That is a repetition loop, not a dense
+        // document, and a larger budget buys more repetition. The ratio is
+        // stated here so the next reader can tell the two apart on their own
+        // corpus rather than taking this note on trust.
         error:
           `Truncated reply from ${reply.servedModel}: recovered ${read.claims.length} complete ` +
-          "claim(s) before the cut, but the rest of this chunk was not read. Raise the token ceiling.",
+          `claim(s) from ${chunk.text.length} characters before the cut; the rest of this chunk ` +
+          "was not read. A claim count far above what the passage can support means the model " +
+          "looped, and a larger ceiling will not fix that.",
         reason: "truncated-reply",
         finish_reason: null,
         native_finish_reason: null,
+        recovered: read.claims.length,
       });
     }
     const claims = read.claims;

@@ -37,6 +37,15 @@ export interface ExtractionFailureSummary {
    * larger token ceiling.
    */
   refused: boolean;
+  /**
+   * Claims salvaged out of the chunks that failed.
+   *
+   * Non-zero means the unread fraction overstates the loss: a truncated reply
+   * was cut off *after* emitting complete, verifiable claims. Stated separately
+   * rather than folded into the fraction, because the tail of that chunk still
+   * went unread and rounding it away is the optimistic lie.
+   */
+  recovered: number;
 }
 
 export interface ExtractionRun {
@@ -126,8 +135,18 @@ export function asReason(value: unknown): ChunkFailureReason | null {
  * A run with failed chunks is `partial`, never `succeeded`, even when it stored
  * claims — some part of the document was never read, and a reviewer looking at
  * the claims list has no way to see that from the claims alone. If EVERY chunk
- * failed there is no evidence the document was read at all, so that is
- * `failed`, not `partial`.
+ * failed **and none of them yielded a claim**, there is no evidence the document
+ * was read at all, so that is `failed`, not `partial`.
+ *
+ * That second clause was added on 2026-08-15, after the corpus was measured for
+ * the first time. Every failed chunk in it was a `truncated-reply`, and a
+ * one-chunk document — which most of the archive is — therefore landed
+ * `failed` while holding verified, stored claims out of the very bytes it was
+ * said not to have read. Worse, `stage.ts` throws on `failed` so the queue
+ * retries: a deterministic truncation burned five attempts of a per-minute
+ * rate-limited free tier and ended `failed` anyway, on four of ten documents.
+ * The rule is unchanged in substance — "no evidence the document was read" —
+ * and salvaged claims are exactly that evidence.
  *
  * The diagnosis taxonomy did not change this rule, deliberately. A refusal is a
  * chunk that went unread exactly like a truncation or a 429 does, and the four
@@ -140,8 +159,25 @@ export function asReason(value: unknown): ChunkFailureReason | null {
 export function classifyExtraction(outcome: ExtractionOutcome): ExtractionRunStatus {
   const failed = outcome.failedChunks.length;
   if (failed === 0) return "succeeded";
-  if (outcome.chunks > 0 && failed >= outcome.chunks) return "failed";
+  if (outcome.chunks > 0 && failed >= outcome.chunks && recoveredFrom(outcome.failedChunks) === 0) {
+    return "failed";
+  }
   return "partial";
+}
+
+/**
+ * Claims salvaged out of chunks that failed.
+ *
+ * A `truncated-reply` is a reply that arrived, was cut off, and had complete
+ * claims recovered from the part before the cut. Those claims are verified
+ * against the document like any other and are stored — so a document they came
+ * from was demonstrably read in part, whatever the chunk tally says.
+ *
+ * Legacy rows carry `null` here and count as zero, which preserves the old
+ * classification for every run written before the field existed.
+ */
+export function recoveredFrom(failed: FailedChunk[]): number {
+  return failed.reduce((total, chunk) => total + (chunk.recovered ?? 0), 0);
 }
 
 export async function startRun(db: Knex, meetingId: string): Promise<string> {
@@ -219,6 +255,10 @@ export function toFailedChunk(value: unknown): FailedChunk | null {
     reason: asReason(value.reason),
     finish_reason: asText(value.finish_reason),
     native_finish_reason: asText(value.native_finish_reason),
+    recovered:
+      typeof value.recovered === "number" && Number.isFinite(value.recovered)
+        ? value.recovered
+        : null,
   };
 }
 
@@ -241,6 +281,7 @@ export function summariseFailures(chunks: number, failed: FailedChunk[]): Extrac
     unread_fraction: chunks > 0 ? Math.round((failed.length / chunks) * 1000) / 1000 : 0,
     by_reason,
     refused: failed.some((chunk) => chunk.reason === "refused"),
+    recovered: recoveredFrom(failed),
   };
 }
 

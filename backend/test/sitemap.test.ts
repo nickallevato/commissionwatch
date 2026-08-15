@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { renderSitemap, collectSitemapEntries } from "../src/routes/sitemap";
 import { cleanupByPrefix, createMeeting, createSource } from "./helpers/pressroom";
 
@@ -214,4 +216,57 @@ describe("sitemap · matters", () => {
  */
 after(async () => {
   await db.destroy();
+});
+
+/**
+ * The sitemap against the router that actually exists.
+ *
+ * `STATIC_PATHS` is a hand-kept list beside a growing `App.tsx`, which drifts by
+ * default rather than by accident. When this was written it had drifted by
+ * three: `/map`, `/data-license` and `/corrections/dispute` had all shipped,
+ * were all linked from other pages, and were offered to no crawler. The last is
+ * the route by which somebody named in a record contests it.
+ *
+ * The test reads the router rather than a copy of it. A route is either in the
+ * sitemap or in `NOT_IN_SITEMAP` with a reason somebody wrote down.
+ */
+describe("the sitemap keeps up with the router", () => {
+  /** Public, no-id routes deliberately absent, and why. */
+  const NOT_IN_SITEMAP: Readonly<Record<string, string>> = {
+    "/anomalies": "a permanent redirect to /findings; a sitemap lists destinations",
+    "/members": "a permanent redirect to /officials",
+  };
+
+  it("offers every public page, or says why not", async () => {
+    const app = readFileSync(join(__dirname, "..", "..", "frontend", "src", "App.tsx"), "utf8");
+
+    const routes = [...app.matchAll(/<Route\s+path="([^"]*)"/g)]
+      .map((match) => match[1])
+      .filter((path) => path !== "*")
+      // Ids are covered by the database-driven half of the sitemap, not here.
+      .filter((path) => !path.includes(":"))
+      // The console is not for readers and must never be advertised.
+      .filter((path) => !path.startsWith("admin"))
+      .map((path) => `/${path}`);
+
+    assert.ok(routes.length > 10, `expected the route table, parsed ${routes.length}`);
+
+    // The real output, not the constant behind it: `collectSitemapEntries` is
+    // what a crawler reads, and a static path that never reached it would pass
+    // an assertion made against the array it was declared in.
+    const offered = new Set((await collectSitemapEntries(db)).map((entry) => entry.path));
+    const missing = routes.filter((path) => !offered.has(path) && !NOT_IN_SITEMAP[path]);
+
+    assert.deepEqual(
+      missing,
+      [],
+      `these public pages are offered to no crawler and no reason is recorded: ${missing.join(", ")}`,
+    );
+  });
+
+  it("advertises no admin path, whatever the router grows", async () => {
+    const offered = (await collectSitemapEntries(db)).map((entry) => entry.path);
+    const admin = offered.filter((path) => path.startsWith("/admin"));
+    assert.deepEqual(admin, [], `the sitemap names admin routes: ${admin.join(", ")}`);
+  });
 });
