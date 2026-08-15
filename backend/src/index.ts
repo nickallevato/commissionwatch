@@ -11,6 +11,7 @@ import { DeliveryDispatcher } from "./services/delivery/dispatcher";
 import { EventDrain } from "./services/events/drain";
 import { PrerenderConsumer } from "./services/prerender/consumer";
 import { DisputeMailer, ensureDisputeReplyChannel } from "./services/dispute-notifications";
+import { FeatureRegistry, setFeatureRegistry } from "./services/features/registry";
 
 const PORT = process.env.PORT || 3001;
 
@@ -53,6 +54,30 @@ operatorAuthService()
 // they went through no consent flow and there is no address to store — and
 // because `services/disputes.ts` guaranteed for months that a dispute produced
 // "no email to anyone", which read from the disputant's side as silence.
+/**
+ * The feature registry, installed before anything reads a flag.
+ *
+ * Built here rather than inside `services/features/registry.ts` for the reason
+ * that file states: a service in this codebase takes its `Knex` from its caller,
+ * and importing `config/database` from the flag module would open a pool the
+ * moment anything imported a flag check — including a test with no database.
+ * `src/index.ts` is the one place that already owns the live handle.
+ *
+ * Installed **above** the drain and the consumer, because both read their switch
+ * in their constructor. Started immediately so the poller is armed and the first
+ * refresh is in flight; `start()` awaits nothing and throws nothing, so a backend
+ * that cannot reach Postgres still binds its port and resolves every key through
+ * env and default — which is off unless a legacy variable says otherwise.
+ *
+ * `stop()` is in `shutdown` with the other pollers. The interval is `unref`'d, so
+ * it would not by itself hold the loop open, but a timer still firing while the
+ * pool is being destroyed logs a refresh failure on the way out and that reads in
+ * the deploy log like a fault when it is a shutdown.
+ */
+const features = new FeatureRegistry(db);
+setFeatureRegistry(features);
+features.start();
+
 const dispatcher = new DeliveryDispatcher(db, { direct: new DisputeMailer(db) });
 const eventDrain = new EventDrain(db, { dispatcher });
 
@@ -106,6 +131,7 @@ function shutdown() {
   ingestion.locateWorker.stop();
   eventDrain.stop();
   prerender.stop();
+  features.stop();
   server.close(() => {
     // `flushAll` sends whatever is buffered in the dispatcher's batching window
     // and was written for exactly this moment. It had never been called by a
@@ -124,4 +150,4 @@ function shutdown() {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
-export { notificationService, emailService, digestScheduler, ingestion, dispatcher, eventDrain, prerender };
+export { notificationService, emailService, digestScheduler, ingestion, dispatcher, eventDrain, prerender, features };

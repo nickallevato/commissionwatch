@@ -7,6 +7,7 @@ import reviewRouter from './review';
 import claimsRouter from './claims';
 import placeLinksRouter from './place-links';
 import rosterRouter from './roster';
+import featuresRouter from './features';
 import { requireOperator } from '../../middleware/requireOperator';
 
 const router = Router();
@@ -37,6 +38,14 @@ router.use('/place-links', placeLinksRouter);
 // names the body and the unmatched officeholders, which is what makes it
 // actionable and what makes it an operator surface.
 router.use('/roster', rosterRouter);
+// The feature switches. Turning one on is how a capability that shipped dark
+// starts running, so it belongs behind this line for the same reason the review
+// queue does — and it writes an actor and a reason for every change, because
+// enabling the delivery pipeline is a larger act than approving one claim and
+// until now it left no trace at all. Nothing reachable here gates a wall: the
+// keys come from the compiled manifest, and `feature-registry-audit.test.ts`
+// holds that key set to capabilities rather than checks.
+router.use('/features', featuresRouter);
 
 // A guarded catch-all. Without it an unknown admin path 404s before the guard
 // runs, which confirms to an unauthenticated caller which routes exist.

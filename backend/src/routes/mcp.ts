@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import db from "../config/database";
 import { FixedWindowLimiter } from "../services/rate-limit";
+import { resolveFeature } from "../services/features/registry";
 import {
   handleMcpMessage,
   mcpDiscoveryDocument,
@@ -19,16 +20,17 @@ import {
  *
  * ## ⛔ OFF unless an operator turns it on
  *
- * `MCP_ENABLED` is read on every request and defaults to off, exactly like
- * `PRERENDER_ENABLED` and `EVENT_DRAIN_ENABLED`. Unset, both paths answer **404**
- * — not 503 and not "disabled", because "this site has no MCP endpoint" is the
+ * The `mcp_server` feature is resolved on every request and defaults to off,
+ * exactly like `prerender` and `event_drain`. Off, both paths answer **404** —
+ * not 503 and not "disabled", because "this site has no MCP endpoint" is the
  * true statement and a disabled-but-present endpoint is a surface somebody will
  * probe. Deploying this changes nothing an internet request can observe, which
  * is the point of shipping it dark and is verifiable in one curl.
  *
  * Read per request rather than captured at import so a test can flip it, and so
- * an operator's answer to "is it on?" is the environment rather than the uptime
- * of the process.
+ * an operator's answer to "is it on?" is the switch rather than the uptime of
+ * the process. `MCP_ENABLED=true` still enables it — see `mcpEnabled` below for
+ * why that step keeps its own exact-string rule rather than the registry's.
  *
  * ## Paths
  *
@@ -66,8 +68,28 @@ export function resetMcpRateLimit(): void {
 
 export const MCP_RATE_LIMIT = { limit: MCP_LIMIT, windowMs: MCP_WINDOW_MS } as const;
 
+/**
+ * The `mcp_server` switch, resolved per request against the in-process cache.
+ *
+ * Synchronous, because this sits on every request to `/mcp` and `/.well-known/`
+ * and a promise has no business in that path — which is why `FeatureRegistry`
+ * caches and polls rather than querying per read.
+ *
+ * **The legacy step keeps this file's own strictness.** The registry's generic
+ * legacy reader accepts `1|true|yes|on`, matching what `EVENT_DRAIN_ENABLED` and
+ * `PRERENDER_ENABLED` always accepted. `MCP_ENABLED` never did: it was an exact
+ * `=== "true"`, and `test/mcp.test.ts` pins that with "404s on any value other
+ * than the exact string true". Widening it here would turn `MCP_ENABLED=1` — a
+ * value somebody has plausibly typed into a deploy config expecting it to be
+ * inert — into a live public endpoint. So when the resolution says the legacy
+ * variable is what decided, this call site re-reads its own variable by its own
+ * rule. Every other step (kill switch, registry row, default) is the registry's
+ * answer unchanged, and a registry row overrides the variable either way.
+ */
 export function mcpEnabled(): boolean {
-  return process.env.MCP_ENABLED === "true";
+  const resolution = resolveFeature("mcp_server");
+  if (resolution.source === "legacy-env") return process.env.MCP_ENABLED === "true";
+  return resolution.enabled;
 }
 
 /**

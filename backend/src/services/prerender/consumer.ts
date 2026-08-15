@@ -12,6 +12,7 @@ import {
   meetingSources,
 } from "./pages";
 import { PrerenderStore } from "./store";
+import { featureEnabled } from "../features/registry";
 
 /**
  * The seventh reader of the event log, and the one that writes files.
@@ -110,16 +111,25 @@ const CURSOR_FILE = ".prerender-cursor.json";
 const RENDERABLE_KINDS: readonly string[] = ["meeting", "finding", "claim", "document"];
 
 /**
- * `PRERENDER_ENABLED`, defaulting to **off**, for the reason
+ * The `prerender` switch, defaulting to **off**, for the reason
  * `eventDrainEnabled` gives: the loop ships and runs dark before anything serves
  * what it writes. A dark consumer writing files nobody reads still proves the
  * loop, which is the only way to find out the loop is wrong without a reader
  * finding out first.
+ *
+ * Resolved through the registry — kill switch, then the `features` row, then
+ * `PRERENDER_ENABLED`, then off. With no row and no registry installed the
+ * variable still decides, on exactly the values it always did, so this suite and
+ * the deploy config both keep meaning what they meant.
+ *
+ * Note that the switch does not lift the rebuild requirement. The consumer walks
+ * forward from its cursor and nothing replays an old publish, so `requiresSeed`
+ * on the manifest entry tells the operator to run `npm run prerender:rebuild` —
+ * on the row, because a prerequisite that lives only in a document is one that
+ * gets skipped.
  */
 export function prerenderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env.PRERENDER_ENABLED;
-  if (raw === undefined || raw.trim() === "") return false;
-  return /^(1|true|yes|on)$/i.test(raw.trim());
+  return featureEnabled("prerender", env);
 }
 
 /**

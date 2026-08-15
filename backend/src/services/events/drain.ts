@@ -6,6 +6,7 @@ import type {
   JsonValue,
 } from "../delivery/dispatcher";
 import type { EventExecutor, EventSubjectKind } from "./emit";
+import { featureEnabled } from "../features/registry";
 
 /**
  * The thing that finally feeds `DeliveryDispatcher`.
@@ -78,17 +79,30 @@ export const DEFAULT_DRAIN_BATCH_SIZE = 50;
 export const DEFAULT_DRAIN_INTERVAL_MS = 5_000;
 
 /**
- * `EVENT_DRAIN_ENABLED`, defaulting to **off**.
+ * The `event_drain` switch, defaulting to **off**.
  *
  * Off by default so the spine ships and runs in production dark before any
  * channel is routed. A dark drain over an empty routes table sends nothing and
  * still proves the loop — which is the only way to find out the loop is wrong
  * without a reader finding out first.
+ *
+ * This used to read `EVENT_DRAIN_ENABLED` and nothing else. It now goes through
+ * the registry, which reads the kill switch, then the `features` row, then that
+ * same variable, then the default. With no registry installed and no row
+ * present — every test in this suite, and production until an operator writes
+ * one — the answer is byte-identical to the old one: the variable is still
+ * honoured, still trimmed, and still only on for `1|true|yes|on`. What changes is
+ * that an operator can now turn it off in seconds instead of ten minutes, and
+ * that turning it on leaves an actor and a reason behind.
+ *
+ * The `env` argument still decides on that path, which is what keeps the
+ * existing table-driven assertions meaningful. An *installed* registry answers
+ * from the environment it captured at construction and ignores this argument —
+ * see `resolveFeature`, which documents why: two callers in one process must not
+ * disagree about the same switch.
  */
 export function eventDrainEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env.EVENT_DRAIN_ENABLED;
-  if (raw === undefined || raw.trim() === "") return false;
-  return /^(1|true|yes|on)$/i.test(raw.trim());
+  return featureEnabled("event_drain", env);
 }
 
 /**
