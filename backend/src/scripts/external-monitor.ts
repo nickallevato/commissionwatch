@@ -53,6 +53,42 @@ export const REQUEST_TIMEOUT_MS = 10_000;
 /** The pause before the single retry. Long enough to cross a container restart. */
 export const RETRY_DELAY_MS = 5_000;
 
+/**
+ * How many times a release-drift mismatch is re-read before it is believed.
+ *
+ * **The race this closes.** `deploy.yml` runs the drift check with
+ * `MONITOR_MAX_DRIFT_MINUTES: "0"`, so any mismatch is an immediate FAIL and the
+ * step's status fails the deploy job. The step immediately before it polls
+ * `/api/health` up to six times and **exits on the first 200** — and that 200
+ * can be answered by the *old* container while the compose swap is still
+ * finishing. A perfectly good deploy could therefore read a stale sha once and
+ * turn the pipeline red.
+ *
+ * Raising the allowance cannot fix it: drift age is measured from the *commit*
+ * time, which is already ~12 minutes old by the time `deploy-aws` finishes (the
+ * three green pipelines behind `DEFAULT_MAX_DRIFT_MINUTES`), so every threshold
+ * below that still fails an in-flight swap, and every threshold above it stops
+ * failing a release that never landed. The fix has to be a bounded re-read.
+ *
+ * **Why three at ten seconds.** `deploy/deploy-aws-ssm.sh` gives the containers
+ * their own settle window on the host — ten polls of `/version.json` and
+ * `/api/version` three seconds apart, thirty seconds in total — and only exits 0
+ * once both answer and both equal `EXPECT_SHA`. Thirty seconds is therefore the
+ * host's own measured allowance for a swap becoming visible, and this matches it
+ * from outside the box, where Caddy's upstream connection reuse adds the last
+ * few seconds. Ten-second spacing is the same cadence as the health poll in
+ * `deploy.yml` that precedes it.
+ *
+ * **Why it stays cheap.** Nothing is re-read on a match, so the ordinary
+ * periodic run costs exactly what it did before. The cost is paid only when the
+ * live sha already disagrees with the expected head — which is a deploy in
+ * flight, or a real drift, and both are worth thirty seconds.
+ */
+export const DEFAULT_SETTLE_ATTEMPTS = 3;
+
+/** The pause between settle re-reads. See `DEFAULT_SETTLE_ATTEMPTS`. */
+export const DEFAULT_SETTLE_DELAY_MS = 10_000;
+
 /** Discord refuses a message body longer than this. */
 export const DISCORD_CONTENT_LIMIT = 2000;
 
@@ -257,7 +293,14 @@ export const DEFAULT_MAX_DRIFT_MINUTES = 30;
 
 /** Where the expected head comes from, once the environment has been read. */
 export type ReleaseExpectation =
-  | { ok: true; sha: string; committedAt: string | null; maxDriftMinutes: number }
+  | {
+      ok: true;
+      sha: string;
+      committedAt: string | null;
+      maxDriftMinutes: number;
+      settleAttempts: number;
+      settleDelayMs: number;
+    }
   | { ok: false; reason: string };
 
 /** A full or abbreviated commit sha, and nothing else. */
@@ -301,28 +344,45 @@ export function readReleaseExpectation(env: Record<string, string | undefined>):
     return { ok: false, reason: `MONITOR_EXPECTED_SHA is not a commit sha: ${JSON.stringify(rawSha)}` };
   }
 
-  const rawMinutes = (env.MONITOR_MAX_DRIFT_MINUTES ?? "").trim();
-  let maxDriftMinutes = DEFAULT_MAX_DRIFT_MINUTES;
-  if (rawMinutes !== "") {
-    const parsed = Number(rawMinutes);
-    // A garbage allowance silently falling back to the default is a threshold
-    // nobody set being reported as one somebody did.
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      return {
-        ok: false,
-        reason: `MONITOR_MAX_DRIFT_MINUTES is not a non-negative number: ${JSON.stringify(rawMinutes)}`,
-      };
-    }
-    maxDriftMinutes = parsed;
-  }
+  const maxDriftMinutes = readNonNegative(env.MONITOR_MAX_DRIFT_MINUTES, "MONITOR_MAX_DRIFT_MINUTES", DEFAULT_MAX_DRIFT_MINUTES);
+  if (!maxDriftMinutes.ok) return { ok: false, reason: maxDriftMinutes.reason };
+
+  const settleAttempts = readNonNegative(env.MONITOR_SETTLE_ATTEMPTS, "MONITOR_SETTLE_ATTEMPTS", DEFAULT_SETTLE_ATTEMPTS);
+  if (!settleAttempts.ok) return { ok: false, reason: settleAttempts.reason };
+
+  const settleDelayMs = readNonNegative(env.MONITOR_SETTLE_DELAY_MS, "MONITOR_SETTLE_DELAY_MS", DEFAULT_SETTLE_DELAY_MS);
+  if (!settleDelayMs.ok) return { ok: false, reason: settleDelayMs.reason };
 
   const rawCommittedAt = (env.MONITOR_EXPECTED_SHA_TIME ?? "").trim();
   return {
     ok: true,
     sha: rawSha,
     committedAt: rawCommittedAt === "" ? null : rawCommittedAt,
-    maxDriftMinutes,
+    maxDriftMinutes: maxDriftMinutes.value,
+    settleAttempts: Math.floor(settleAttempts.value),
+    settleDelayMs: settleDelayMs.value,
   };
+}
+
+/**
+ * A non-negative numeric setting, or the reason it is not one.
+ *
+ * A garbage value silently falling back to the default is a threshold nobody set
+ * being reported as one somebody did — so it is `blocked`, exactly like a
+ * missing expected head.
+ */
+function readNonNegative(
+  raw: string | undefined,
+  name: string,
+  fallback: number,
+): { ok: true; value: number } | { ok: false; reason: string } {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") return { ok: true, value: fallback };
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { ok: false, reason: `${name} is not a non-negative number: ${JSON.stringify(trimmed)}` };
+  }
+  return { ok: true, value: parsed };
 }
 
 /**
@@ -446,6 +506,90 @@ export function evaluateReleaseDrift(
       `${both}, committed ${minutes} min ago — within the ${expectation.maxDriftMinutes}-min allowance, ` +
       `so a deploy is probably still in flight`,
   };
+}
+
+/**
+ * The same judgement, given a bounded chance to settle.
+ *
+ * `evaluateReleaseDrift` answers from one reading. One reading is not enough
+ * immediately after a deploy: `deploy.yml`'s health poll exits on the first 200,
+ * and that 200 can come from the container being replaced, so the very next
+ * request may still be answered by the old image. See `DEFAULT_SETTLE_ATTEMPTS`
+ * for why a re-read — and not a larger allowance — is the only thing that can
+ * fix it.
+ *
+ * What the settle deliberately does **not** do:
+ *
+ * - **It cannot turn a persistent drift into a pass.** A re-read only changes
+ *   the verdict by observing a *different, matching* sha. A site that keeps
+ *   serving the old commit is read three more times and still fails, with the
+ *   count in the message so nobody mistakes a settled deploy for a first-read
+ *   match.
+ * - **It never re-reads a `blocked` first reading.** "The version endpoint could
+ *   not be read" is already retried once inside `probe()`, is already its own
+ *   failure on the `version` check, and is not drift. Looping on it would be
+ *   this check spending a minute to arrive at the same honest "cannot tell" —
+ *   or worse, converting an absence into a claim.
+ * - **It never lets an unreadable re-read overturn a reading that succeeded.**
+ *   If a later probe comes back unreadable, the mismatch already observed stands
+ *   and the message says the re-read failed. An absence does not erase an
+ *   observation, in either direction.
+ *
+ * `now` is fixed for the whole settle on purpose: the reported drift age is the
+ * age at the moment the run started, not a figure that creeps by half a minute
+ * depending on how many re-reads happened.
+ */
+export async function resolveReleaseDrift(
+  expectation: ReleaseExpectation,
+  first: ProbeResult,
+  reread: () => Promise<ProbeResult>,
+  now: Date,
+  wait: (ms: number) => Promise<void> = sleep,
+): Promise<CheckOutcome> {
+  const outcome = evaluateReleaseDrift(expectation, first, now);
+
+  // Nothing to settle: the release landed, or there is no expected head to
+  // compare against, or the first reading was never usable.
+  if (outcome.state === "pass") return outcome;
+  if (!expectation.ok) return outcome;
+  if (!readSha(first, "/api/version").ok) return outcome;
+  if (expectation.settleAttempts < 1) return outcome;
+
+  const spacing = `${Math.round(expectation.settleDelayMs / 100) / 10}s apart`;
+  let latest = outcome;
+
+  for (let attempt = 1; attempt <= expectation.settleAttempts; attempt += 1) {
+    await wait(expectation.settleDelayMs);
+    const probed = await reread();
+
+    if (!readSha(probed, "/api/version").ok) {
+      return withSettleNote(
+        latest,
+        `Re-read /api/version ${attempt} time(s) ${spacing} to let a deploy settle; ` +
+          `read ${attempt} came back unreadable, so the mismatch above is the last thing actually seen`,
+      );
+    }
+
+    latest = evaluateReleaseDrift(expectation, probed, now);
+    if (latest.state === "pass") {
+      return withSettleNote(
+        latest,
+        `settled after ${attempt} re-read(s) of /api/version ${spacing} — the first read was still ` +
+          `serving an older sha, which is a deploy finishing rather than a release that did not land`,
+      );
+    }
+  }
+
+  return withSettleNote(
+    latest,
+    `Re-read /api/version ${expectation.settleAttempts} time(s) ${spacing} to let a deploy settle, ` +
+      `and the live sha did not change`,
+  );
+}
+
+/** Append the settle account to an outcome, leaving its state alone. */
+function withSettleNote(outcome: CheckOutcome, note: string): CheckOutcome {
+  return { ...outcome, detail: `${outcome.detail}. ${note}` };
 }
 
 /* ── Probe 4: ingestion staleness ───────────────────────────────────── */
@@ -759,10 +903,20 @@ export async function main(): Promise<number> {
   const webVersion = await probe(`${baseUrl}/version.json`);
   const sources = await probe(`${baseUrl}/api/ingestion/sources`);
 
+  // The drift check may re-read `/api/version` a few times before it believes a
+  // mismatch — see `resolveReleaseDrift`. It re-probes rather than reusing
+  // `apiVersion`, because the whole point is to look again.
+  const drift = await resolveReleaseDrift(
+    readReleaseExpectation(process.env),
+    apiVersion,
+    () => probe(`${baseUrl}/api/version`),
+    now,
+  );
+
   const outcomes: CheckOutcome[] = [
     evaluateHealth(health),
     evaluateVersion(apiVersion, webVersion),
-    evaluateReleaseDrift(readReleaseExpectation(process.env), apiVersion, now),
+    drift,
     ...evaluateSources(sources, now),
   ];
 

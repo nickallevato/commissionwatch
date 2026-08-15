@@ -501,6 +501,16 @@ jobs:
       # so anything other than this commit being live is a release that did not
       # land, not one in flight. The periodic monitor keeps the 30-minute
       # default, where in-flight is the common case.
+      #
+      # A zero allowance would race the step above, which exits on the FIRST 200
+      # from /api/health — and that 200 can be answered by the old container
+      # while the compose swap is still finishing. The monitor closes that race
+      # itself: a mismatched sha is re-read a bounded number of times before it
+      # is believed (MONITOR_SETTLE_ATTEMPTS / MONITOR_SETTLE_DELAY_MS, three
+      # reads ten seconds apart by default), and the message says how many reads
+      # it took, so a settled deploy is distinguishable in the log from a
+      # first-read match. Raising the allowance instead cannot work: drift is
+      # aged from the COMMIT time, already ~12 minutes old by now.
       - name: Probe the deployment with the external monitor
         shell: bash
         env:

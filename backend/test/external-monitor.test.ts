@@ -10,7 +10,10 @@ import {
   evaluateSources,
   evaluateVersion,
   readReleaseExpectation,
+  resolveReleaseDrift,
   summarise,
+  DEFAULT_SETTLE_ATTEMPTS,
+  DEFAULT_SETTLE_DELAY_MS,
   type CheckOutcome,
   type ProbeResult,
 } from "../src/scripts/external-monitor";
@@ -506,6 +509,216 @@ describe("external monitor — release drift", () => {
     assert.equal(summary.blocked.length, 1);
     assert.equal(summary.warnings.length, 0);
     assert.match(summary.lines[1], /^BLOCKED {2}release-drift: /);
+  });
+});
+
+/**
+ * The settle — the deploy-pipeline race, closed.
+ *
+ * `deploy.yml` runs the drift check with a zero allowance, and the step before
+ * it polls `/api/health` and exits on the FIRST 200. That 200 can be answered by
+ * the old container while the compose swap is still finishing, so a perfectly
+ * good deploy could read a stale sha once and turn the pipeline red. Raising the
+ * allowance cannot help: drift is aged from the commit time, which is already
+ * ~12 minutes old by then.
+ *
+ * Everything below asserts both halves of the bargain — a swap in progress
+ * settles to a pass, and a release that genuinely did not land still fails.
+ */
+describe("external monitor — the settle", () => {
+  const OLD_COMMIT = "2026-08-10T02:30:00.000Z";
+  /** What `deploy.yml` sees: the head was committed twelve minutes ago. */
+  const TWELVE_MINUTES_AGO = "2026-08-10T03:48:00.000Z";
+
+  function expectation(overrides: Record<string, string | undefined> = {}) {
+    return readReleaseExpectation({
+      MONITOR_EXPECTED_SHA: OTHER_SHA,
+      MONITOR_EXPECTED_SHA_TIME: OLD_COMMIT,
+      ...overrides,
+    });
+  }
+
+  /** The old container's answer, and the new one's. */
+  const STALE = () => response(200, versionBody("backend", SHA));
+  const LANDED = () => response(200, versionBody("backend", OTHER_SHA));
+
+  /** A re-reader that hands back a scripted sequence, and counts its calls. */
+  function reader(sequence: Array<() => ProbeResult>) {
+    const calls: number[] = [];
+    const waits: number[] = [];
+    return {
+      calls,
+      waits,
+      wait: (ms: number) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+      read: () => {
+        const next = sequence[calls.length] ?? sequence[sequence.length - 1];
+        calls.push(1);
+        return Promise.resolve(next());
+      },
+    };
+  }
+
+  it("does not re-read at all when the first read is already the expected head", async () => {
+    const r = reader([STALE]);
+    const outcome = await resolveReleaseDrift(
+      expectation({ MONITOR_EXPECTED_SHA: SHA }),
+      STALE(),
+      r.read,
+      NOW,
+      r.wait,
+    );
+
+    assert.equal(outcome.state, "pass");
+    assert.equal(r.calls.length, 0, "a match must cost nothing");
+    // No retry wording, so an operator can tell this from a settled deploy.
+    assert.doesNotMatch(outcome.detail, /re-read/i);
+    assert.doesNotMatch(outcome.detail, /settled/i);
+  });
+
+  it("settles the deploy-pipeline race: the swap finishes on the second read", async () => {
+    const r = reader([LANDED]);
+    const outcome = await resolveReleaseDrift(
+      // deploy.yml exactly: zero allowance, head committed twelve minutes ago.
+      expectation({ MONITOR_MAX_DRIFT_MINUTES: "0", MONITOR_EXPECTED_SHA_TIME: TWELVE_MINUTES_AGO }),
+      STALE(),
+      r.read,
+      NOW,
+      r.wait,
+    );
+
+    assert.equal(outcome.state, "pass", `a finished swap must not fail the deploy: ${outcome.detail}`);
+    assert.equal(r.calls.length, 1);
+    assert.match(outcome.detail, /settled after 1 re-read/);
+    assert.equal(summarise([outcome]).failed, false);
+  });
+
+  it("says how many re-reads it took, so a settled deploy is not read as a first-read match", async () => {
+    const r = reader([STALE, STALE, LANDED]);
+    const outcome = await resolveReleaseDrift(expectation(), STALE(), r.read, NOW, r.wait);
+
+    assert.equal(outcome.state, "pass");
+    assert.equal(r.calls.length, 3);
+    assert.match(outcome.detail, /settled after 3 re-read\(s\)/);
+    assert.match(outcome.detail, /10s apart/);
+  });
+
+  it("still FAILS a drift that persists across every re-read", async () => {
+    const r = reader([STALE]);
+    const outcome = await resolveReleaseDrift(expectation(), STALE(), r.read, NOW, r.wait);
+
+    assert.equal(outcome.state, "fail");
+    assert.equal(r.calls.length, DEFAULT_SETTLE_ATTEMPTS, "the settle must be bounded");
+    assert.match(outcome.detail, /has not landed/);
+    assert.match(outcome.detail, /Re-read \/api\/version 3 time\(s\)/);
+    assert.match(outcome.detail, /did not change/);
+    // Both shas survive the annotation — they are the first thing anyone needs.
+    assert.ok(outcome.detail.includes(SHA));
+    assert.ok(outcome.detail.includes(OTHER_SHA));
+  });
+
+  it("keeps a warn a warn when the drift is inside the allowance", async () => {
+    const r = reader([STALE]);
+    const outcome = await resolveReleaseDrift(
+      expectation({ MONITOR_EXPECTED_SHA_TIME: "2026-08-10T03:55:00.000Z" }),
+      STALE(),
+      r.read,
+      NOW,
+      r.wait,
+    );
+
+    assert.equal(outcome.state, "warn");
+    assert.match(outcome.detail, /Re-read \/api\/version 3 time\(s\)/);
+  });
+
+  it("never re-reads a first read that could not be read, and stays blocked", async () => {
+    const r = reader([LANDED]);
+    const outcome = await resolveReleaseDrift(
+      expectation(),
+      unreachable("connect ECONNREFUSED 10.0.0.1:443"),
+      r.read,
+      NOW,
+      r.wait,
+    );
+
+    assert.equal(outcome.state, "blocked", "a retry loop must not turn `cannot read` into anything else");
+    assert.equal(r.calls.length, 0);
+    assert.match(outcome.detail, /drift is unknown/);
+  });
+
+  it("does not re-read when there is no expected head to compare against", async () => {
+    const r = reader([LANDED]);
+    const outcome = await resolveReleaseDrift(readReleaseExpectation({}), STALE(), r.read, NOW, r.wait);
+
+    assert.equal(outcome.state, "blocked");
+    assert.equal(r.calls.length, 0);
+  });
+
+  it("does not let an unreadable re-read overturn the mismatch it already saw", async () => {
+    const r = reader([() => unreachable("socket hang up")]);
+    const outcome = await resolveReleaseDrift(expectation(), STALE(), r.read, NOW, r.wait);
+
+    // An absence does not erase an observation. The mismatch was read cleanly.
+    assert.equal(outcome.state, "fail");
+    assert.equal(r.calls.length, 1, "no point re-reading past an unreadable endpoint");
+    assert.match(outcome.detail, /came back unreadable/);
+    assert.match(outcome.detail, /has not landed/);
+  });
+
+  it("honours a configured settle count and delay", async () => {
+    const r = reader([STALE]);
+    const outcome = await resolveReleaseDrift(
+      expectation({ MONITOR_SETTLE_ATTEMPTS: "1", MONITOR_SETTLE_DELAY_MS: "250" }),
+      STALE(),
+      r.read,
+      NOW,
+      r.wait,
+    );
+
+    assert.equal(outcome.state, "fail");
+    assert.deepEqual(r.waits, [250]);
+    assert.match(outcome.detail, /Re-read \/api\/version 1 time\(s\) 0.3s apart/);
+  });
+
+  it("can be switched off entirely with a zero settle count", async () => {
+    const r = reader([LANDED]);
+    const outcome = await resolveReleaseDrift(
+      expectation({ MONITOR_SETTLE_ATTEMPTS: "0" }),
+      STALE(),
+      r.read,
+      NOW,
+      r.wait,
+    );
+
+    assert.equal(outcome.state, "fail");
+    assert.equal(r.calls.length, 0);
+    assert.doesNotMatch(outcome.detail, /Re-read/);
+  });
+
+  it("is blocked rather than guessing when the settle configuration is garbage", async () => {
+    for (const bad of [
+      { MONITOR_SETTLE_ATTEMPTS: "a few" },
+      { MONITOR_SETTLE_ATTEMPTS: "-1" },
+      { MONITOR_SETTLE_DELAY_MS: "ten seconds" },
+    ]) {
+      const r = reader([LANDED]);
+      const outcome = await resolveReleaseDrift(expectation(bad), STALE(), r.read, NOW, r.wait);
+
+      assert.equal(outcome.state, "blocked", `expected blocked for ${JSON.stringify(bad)}`);
+      assert.equal(r.calls.length, 0);
+      assert.match(outcome.detail, /MONITOR_SETTLE_/);
+    }
+  });
+
+  it("defaults to a bounded, cheap settle", () => {
+    const parsed = readReleaseExpectation({ MONITOR_EXPECTED_SHA: SHA });
+    assert.equal(parsed.ok && parsed.settleAttempts, DEFAULT_SETTLE_ATTEMPTS);
+    assert.equal(parsed.ok && parsed.settleDelayMs, DEFAULT_SETTLE_DELAY_MS);
+    // Thirty seconds in the worst case, and only ever on a mismatch. Matching
+    // deploy-aws-ssm.sh's own 10 × 3s host-side version poll.
+    assert.equal(DEFAULT_SETTLE_ATTEMPTS * DEFAULT_SETTLE_DELAY_MS, 30_000);
   });
 });
 
