@@ -24,20 +24,13 @@ import {
   judgeClaim,
   renderGovernorUser,
 } from "../src/services/governor/judge";
-import {
-  GOVERNOR_INPUT_KEYS,
-  GOVERNOR_WINDOW,
-  buildGovernorInput,
-  locateInWindow,
-  parseGovernorVerdict,
-  windowSha256,
-} from "../src/services/governor/verdict";
+import { GOVERNOR_INPUT_KEYS, GOVERNOR_WINDOW, buildGovernorInput, locateInWindow, parseGovernorVerdict, windowSha256 } from "../src/services/governor/verdict";
 import {
   createGovernHandler,
   governArtifact,
   heldClaimsFor,
 } from "../src/services/governor/stage";
-import { governorBacklog, recordVerdict } from "../src/services/governor/store";
+import { governorBacklog, recordVerdict, toClaimVerdict } from "../src/services/governor/store";
 import { BlockedError } from "../src/services/ingestion/queue";
 import type { GovernContext } from "../src/services/ingestion/worker";
 import {
@@ -833,5 +826,64 @@ describe("the pin the review screen approves", () => {
     const published = await listPublicClaims(db, meetingId);
     assert.equal(published.claims.length, 1);
     assert.equal(published.claims[0].text, proposed);
+  });
+});
+
+
+/**
+ * `relied_on` indexes the governor's ±2,000-character window, and nothing
+ * serves that window: the review screen shows ±500 characters and the artifact
+ * viewer shows its own slice.
+ *
+ * The governor UI refused to draw those spans for exactly that reason, and it
+ * was right — a consumer handed window-relative offsets and a different window
+ * marks arbitrary characters *with the authority of a highlight*, which is worse
+ * than marking nothing. `relied_on_document` re-bases them so any window can map
+ * them, using the governor window's own deterministic start.
+ */
+describe("relied_on in document coordinates", () => {
+  it("re-bases the spans by the governor window's start", () => {
+    const quoteOffset = GOVERNOR_WINDOW + 500;
+    const verdict = toClaimVerdict({
+      governor_supported: false,
+      governor_unsupported_fragments: JSON.stringify(["moved"]),
+      governor_relied_on: JSON.stringify([{ start: 10, end: 20 }]),
+      governor_confidence: "high",
+      governor_model: "test/model:free",
+      governor_prompt_version: "test.1",
+      governor_window_sha256: "a".repeat(64),
+      governor_created_at: new Date(0),
+      quote_offset: quoteOffset,
+    });
+
+    assert.ok(verdict);
+    // Window-relative offsets are untouched: they are what was located against
+    // the judged bytes, and rewriting them would lose that.
+    assert.deepEqual(verdict.relied_on, [{ start: 10, end: 20 }]);
+    // Document-relative are those plus the window's start, which is
+    // max(0, quote_offset - GOVERNOR_WINDOW) = 500 here.
+    assert.deepEqual(verdict.relied_on_document, [{ start: 510, end: 520 }]);
+  });
+
+  /**
+   * A quote near the top of a document has its window clamped at zero, so the
+   * two coordinate systems coincide. Getting this wrong would shift every span
+   * on every early-document claim by a constant nobody would notice.
+   */
+  it("clamps at the start of the document rather than going negative", () => {
+    const verdict = toClaimVerdict({
+      governor_supported: true,
+      governor_unsupported_fragments: JSON.stringify([]),
+      governor_relied_on: JSON.stringify([{ start: 4, end: 9 }]),
+      governor_confidence: "medium",
+      governor_model: "test/model:free",
+      governor_prompt_version: "test.1",
+      governor_window_sha256: "b".repeat(64),
+      governor_created_at: new Date(0),
+      quote_offset: 12,
+    });
+
+    assert.ok(verdict);
+    assert.deepEqual(verdict.relied_on_document, [{ start: 4, end: 9 }]);
   });
 });

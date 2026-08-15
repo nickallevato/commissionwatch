@@ -1,10 +1,5 @@
 import type { Knex } from "knex";
-import {
-  VERDICT_CONFIDENCES,
-  type GovernorVerdict,
-  type ReliedSpan,
-  type VerdictConfidence,
-} from "./verdict";
+import { GOVERNOR_WINDOW, VERDICT_CONFIDENCES, type GovernorVerdict, type ReliedSpan, type VerdictConfidence } from "./verdict";
 
 /**
  * Storing a verdict, reading the current one, and counting the backlog.
@@ -94,6 +89,22 @@ export interface ClaimVerdict {
   supported: boolean;
   unsupported_fragments: string[];
   relied_on: ReliedSpan[];
+  /**
+   * The same spans in **document** coordinates, so any window can map them.
+   *
+   * `relied_on` indexes the governor's ±2,000-character window and nothing
+   * serves that window: the review screen shows ±500 characters and the public
+   * artifact viewer shows its own slice. A consumer handed window-relative
+   * offsets and a different window will mark arbitrary characters *with the
+   * authority of a highlight*, which is worse than marking nothing — the
+   * governor UI correctly refused to render them for exactly this reason.
+   *
+   * The governor's window start is deterministic — `max(0, quote_offset -
+   * GOVERNOR_WINDOW)` — so this is derived, not stored. It is still ours rather
+   * than the model's: `relied_on` was located against the bytes when the verdict
+   * was recorded, and this only re-bases it.
+   */
+  relied_on_document: ReliedSpan[];
   confidence: VerdictConfidence;
   model: string;
   prompt_version: string;
@@ -150,13 +161,23 @@ function asIso(value: unknown): string {
  */
 export function toClaimVerdict(row: Record<string, unknown>): ClaimVerdict | null {
   if (typeof row.governor_supported !== "boolean") return null;
+  const spans = readSpans(row.governor_relied_on);
+  // The window the governor judged began here. Recomputed rather than stored,
+  // because it is a pure function of the claim's own offset and storing it
+  // would let the two disagree.
+  const quoteOffset = typeof row.quote_offset === "number" ? row.quote_offset : 0;
+  const windowStart = Math.max(0, quoteOffset - GOVERNOR_WINDOW);
   const confidence =
     VERDICT_CONFIDENCES.find((value) => value === row.governor_confidence) ?? "low";
   return {
     state: row.governor_supported ? "supported" : "governor_rejected",
     supported: row.governor_supported,
     unsupported_fragments: readFragments(row.governor_unsupported_fragments),
-    relied_on: readSpans(row.governor_relied_on),
+    relied_on: spans,
+    relied_on_document: spans.map((span) => ({
+      start: span.start + windowStart,
+      end: span.end + windowStart,
+    })),
     confidence,
     model: typeof row.governor_model === "string" ? row.governor_model : "",
     prompt_version:
