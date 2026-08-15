@@ -175,9 +175,15 @@ because a control that accepts a click and changes nothing is worse than no cont
 
 ## What this does not solve
 
-- **A flag is not a migration.** Turning on `prerender` still requires the `prerender-rebuild` seed,
-  because the consumer walks the event log and nothing replays an old publish. The console states
-  that requirement on the row rather than leaving it in `docs/STATUS.md`.
+- **A flag is not a migration.** Turning on `prerender` still requires a rebuild, because the
+  consumer walks the event log and nothing replays an old publish. The console states that
+  requirement on the row rather than leaving it in `docs/STATUS.md`.
+
+  **Correction, found while implementing F1b:** this document called that a *seed*, and it is not
+  one. `seeds/` holds `001_pilot_data.ts` and nothing else; the real thing is
+  `npm run prerender:rebuild` → `src/scripts/prerender-rebuild.ts`. The distinction matters because
+  an operator told to "run the seed" will look in `seeds/`, find no such file, and reasonably
+  conclude the step is already done — on the one step this release documents as not optional.
 - **Nothing here schedules extraction.** That is gated on the truncation work, not on a switch.
 - **The email defect is unaffected.** `event_drain` on with SPF/DKIM/DMARC unconfigured and
   `ALERT_FROM_EMAIL` pointed at a domain we do not deploy still fails alignment. The console says so
