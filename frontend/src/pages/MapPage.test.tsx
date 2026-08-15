@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { MapPage } from "./MapPage";
 import { server } from "@/mocks/server";
+import { metrics } from "@/mocks/data";
 import type { PlaceDetail, PlaceLinkView, PlaceNearResult } from "@/types";
 
 beforeAll(() => server.listen());
@@ -111,21 +112,71 @@ function serve(entries: Array<{ near: PlaceNearResult; links: PlaceLinkView[] }>
 const NEAR = `/map?near=${CENTRE.lat},${CENTRE.lon}&radius=500`;
 
 describe("MapPage", () => {
-  it("states an empty answer as our silence, not as an empty neighbourhood", async () => {
-    // The default handler answers with no places, which is what the deployed
-    // database holds today.
+  /**
+   * This asserted a single empty-state sentence until `/api/metrics` grew
+   * `places_total` and `places_public`. The page could tell two states apart
+   * and needed four, and the difference is not cosmetic: "nothing near you" is
+   * a statement about a neighbourhood, while the other three are statements
+   * about us. Each branch gets its own assertion, and the strongest claim is
+   * asserted absent from all of them but the last.
+   */
+  it("says nothing has been located anywhere when nothing has", async () => {
+    server.use(
+      http.get("/api/metrics", () =>
+        HttpResponse.json({ ...metrics, quality: { ...metrics.quality, places_total: 0, places_public: 0 } }),
+      ),
+    );
     renderAt(NEAR);
 
-    const absence = await screen.findByText(/no sweep has collected located decisions yet/i);
-    expect(absence).toBeInTheDocument();
-    // The one sentence that must be there: an empty radius is a fact about this
-    // project, and the page has to say so or it reads as a finding.
+    expect(
+      await screen.findByText(/nothing anywhere has been tied to a location yet/i),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/statement about this project, not about your neighbourhood/i),
     ).toBeInTheDocument();
-    // And it must never make the stronger claim.
     expect(screen.queryByText(/the record shows no/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/nothing is happening/i)).not.toBeInTheDocument();
+  });
+
+  it("says located-but-unreviewed rather than implying nothing was found", async () => {
+    // The default fixture is 12 located, 0 public — the state a fixture of
+    // all-zeroes would never exercise, and the one most likely to be rendered
+    // as "nothing here".
+    renderAt(NEAR);
+
+    expect(await screen.findByText(/none has been through review yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/a person checks it first/i)).toBeInTheDocument();
+    expect(screen.queryByText(/the record shows no/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * Only once something is published elsewhere is silence about the
+   * neighbourhood rather than about us — and even then the page offers a wider
+   * radius rather than asserting the area is quiet.
+   */
+  it("makes the stronger claim only when there is something to compare against", async () => {
+    server.use(
+      http.get("/api/metrics", () =>
+        HttpResponse.json({ ...metrics, quality: { ...metrics.quality, places_total: 40, places_public: 31 } }),
+      ),
+    );
+    renderAt(NEAR);
+
+    expect(await screen.findByText(/try a wider radius/i)).toBeInTheDocument();
+  });
+
+  /**
+   * A fourth state. An unanswered metrics request must not borrow the wording
+   * of any of the other three — falling back to the most flattering reading of
+   * an unknown is the failure this whole component exists to prevent.
+   */
+  it("does not guess when it could not check", async () => {
+    server.use(http.get("/api/metrics", () => new HttpResponse(null, { status: 500 })));
+    renderAt(NEAR);
+
+    expect(
+      await screen.findByText(/could not check how much of the record has been located/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/try a wider radius/i)).not.toBeInTheDocument();
   });
 
   it("distinguishes a coarse position from an exact one, in words and in the figure", async () => {

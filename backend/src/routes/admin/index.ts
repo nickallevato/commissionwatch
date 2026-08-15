@@ -5,6 +5,7 @@ import recordsRouter from './records';
 import pressroomRouter from './pressroom';
 import reviewRouter from './review';
 import claimsRouter from './claims';
+import placeLinksRouter from './place-links';
 import { requireOperator } from '../../middleware/requireOperator';
 
 const router = Router();
@@ -27,6 +28,9 @@ router.use('/review', reviewRouter);
 // The claims review path. `minute_claims` is the other table whose rows name a
 // living person, and this is the only thing that can make one of them public.
 router.use('/claims', claimsRouter);
+// The place-link review path. A link is what puts a decision on the map, so an
+// unreviewed one is a coordinate we inferred and have not stood behind yet.
+router.use('/place-links', placeLinksRouter);
 
 // A guarded catch-all. Without it an unknown admin path 404s before the guard
 // runs, which confirms to an unauthenticated caller which routes exist.

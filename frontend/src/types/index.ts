@@ -248,6 +248,9 @@ export interface QualityMetrics {
   roster_seats_sourced: number;
   roster_seats_implied: number;
   roster_sourced: boolean;
+  /** Places recorded at all, and those with at least one approved link. */
+  places_total: number;
+  places_public: number;
 }
 
 export interface Metrics {
@@ -1648,4 +1651,130 @@ export interface PlaceLinkView {
 /** `GET /api/places/:id`. 404 when every link it has is held, inferred or unpublished. */
 export interface PlaceDetail extends Place {
   links: PlaceLinkView[];
+}
+
+/* ---------------------------------------------------------------------------
+   Place-link review — `GET|POST /api/admin/place-links/*`
+   --------------------------------------------------------------------------- */
+
+/**
+ * `place_links.status`. Mirrors `PLACE_LINK_STATUSES` in
+ * `backend/src/services/places.ts` and migration 094's CHECK.
+ *
+ * There is no `published`: the wall is `status = 'approved'` *and* the subject
+ * being public *and* `confidence <> 'inferred'`, so a fourth value would be a
+ * second place for the same rule to be written down and disagree.
+ */
+export const PLACE_LINK_STATUSES = ["held", "approved", "rejected"] as const;
+export type PlaceLinkStatus = (typeof PLACE_LINK_STATUSES)[number];
+
+/** `place_links.subject_kind`. Mirrors `PLACE_SUBJECT_KINDS` on the server. */
+export const PLACE_SUBJECT_KINDS = ["agenda_item", "meeting", "document", "finding"] as const;
+export type PlaceSubjectKind = (typeof PLACE_SUBJECT_KINDS)[number];
+
+/**
+ * The window of document text the quote is read inside, as
+ * `services/review/place-links.ts` ships it.
+ *
+ * Structurally identical to `ClaimQuoteContext` because it is literally the
+ * same `sliceContext` on the server — declared separately rather than aliased so
+ * that a change to one review path's window cannot silently redefine the other's.
+ */
+export interface PlaceQuoteContext {
+  text: string;
+  quote_start: number;
+  quote_end: number;
+  window_offset: number;
+  /**
+   * False means the quote was found by searching the text rather than at the
+   * offset stored on the link, so the two disagree about where it is. It does
+   * not block approval; it is a reason to read before deciding.
+   */
+  offset_matches_stored: boolean;
+}
+
+export interface PlaceLinkCitation {
+  artifact_sha256: string;
+  quote: string;
+  quote_offset: number;
+  /** Where we got the bytes. Null when no `artifacts` row holds this address. */
+  source_url: string | null;
+  /** Whether the cited bytes are stored. False blocks approval. */
+  artifact_stored: boolean;
+  /**
+   * The viewer address, built by the backend. `?offset=&len=`, never
+   * `#offset-` — a fragment never leaves the browser and the server is what
+   * picks the window. The console links this string rather than rebuilding it.
+   */
+  viewer_path: string;
+  context: PlaceQuoteContext | null;
+}
+
+export interface PlaceLinkSubject {
+  kind: string;
+  id: string;
+  /** How the record names it. Null when the subject no longer exists. */
+  label: string | null;
+  meeting_id: string | null;
+  /**
+   * Whether a reader can already see the subject. **False does not block
+   * approval** — the wall keeps the pin off the map until the subject goes out.
+   * Shown so an operator does not read that later absence as a bug.
+   */
+  is_public: boolean;
+}
+
+/** One row of `/api/admin/place-links/queue`, and the whole of `GET /:id`. */
+export interface PlaceLinkReviewItem {
+  link: {
+    id: string;
+    place_id: string;
+    subject_kind: string;
+    subject_id: string;
+    relation: string;
+    confidence: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+  };
+  place: {
+    id: string;
+    jurisdiction_id: string;
+    jurisdiction_name: string | null;
+    kind: string;
+    /** As printed in the record. Never normalised into something nobody wrote. */
+    label: string;
+    lat: number;
+    lon: number;
+    precision: string;
+    /**
+     * What that precision means, in the project's own words — the backend's
+     * `PRECISION_MEANING`. Null when the column holds a grade this build's
+     * server does not explain, which renders as that rather than as silence.
+     */
+    precision_meaning: string | null;
+    geocoder: string | null;
+    geocoded_at: string | null;
+    external_source: string | null;
+    external_ref: string | null;
+  };
+  /** Null for an `inferred` link, which is permitted to carry no citation. */
+  citation: PlaceLinkCitation | null;
+  subject: PlaceLinkSubject;
+  decision: {
+    /** Whether `POST /:id/approve` would succeed right now. */
+    approvable: boolean;
+    /** Why not, in the backend's own words. Null when approvable. */
+    blocked_reason: string | null;
+  };
+}
+
+export interface PlaceLinkQueueResponse {
+  data: PlaceLinkReviewItem[];
+  total: number;
+  /**
+   * Counted over the whole table, not the filtered page. A number that moved
+   * when you changed the filter would answer a question nobody asked.
+   */
+  counts: { held: number; approved: number; rejected: number };
 }

@@ -237,3 +237,42 @@ describe("GET /api/metrics", () => {
     });
   });
 });
+
+
+/**
+ * The map could tell two states apart and needed three.
+ *
+ * "Nothing near you", "we have located nothing anywhere" and "we have located
+ * things but nobody has approved them" all render as an empty result, and the
+ * first is a statement about a neighbourhood while the other two are statements
+ * about us. Saying the wrong one is how a transparency site tells a reader their
+ * area is quiet when the truth is that we have not looked.
+ */
+describe("metrics · places", () => {
+  it("reports located places and publicly visible ones separately", async () => {
+    const metrics = await collectMetrics(db);
+    assert.equal(typeof metrics.quality.places_total, "number");
+    assert.equal(typeof metrics.quality.places_public, "number");
+    // Public is a subset by construction: it requires an approved,
+    // non-inferred link on the same row.
+    assert.ok(
+      metrics.quality.places_public <= metrics.quality.places_total,
+      "a place cannot be public without existing",
+    );
+  });
+
+  it("counts a place once however many approved links it carries", async () => {
+    // The rule is an EXISTS rather than a join precisely so a place with three
+    // approved links is one place, not three.
+    const metrics = await collectMetrics(db);
+    const distinct = await db("places")
+      .whereExists(
+        db("place_links")
+          .whereRaw("place_links.place_id = places.id")
+          .where("place_links.status", "approved")
+          .whereNot("place_links.confidence", "inferred"),
+      )
+      .countDistinct<{ n: string }[]>({ n: "places.id" });
+    assert.equal(metrics.quality.places_public, Number(distinct[0].n));
+  });
+});

@@ -9,6 +9,7 @@ import { buildIngestionStack, startIngestion } from "./services/ingestion";
 import { registerPressroomStack } from "./routes/admin/pressroom";
 import { DeliveryDispatcher } from "./services/delivery/dispatcher";
 import { EventDrain } from "./services/events/drain";
+import { PrerenderConsumer } from "./services/prerender/consumer";
 import { DisputeMailer, ensureDisputeReplyChannel } from "./services/dispute-notifications";
 
 const PORT = process.env.PORT || 3001;
@@ -55,6 +56,12 @@ operatorAuthService()
 const dispatcher = new DeliveryDispatcher(db, { direct: new DisputeMailer(db) });
 const eventDrain = new EventDrain(db, { dispatcher });
 
+// The prerender consumer writes a static, self-contained copy of every public
+// page for readers that do not run JavaScript. It reads the same `events` table
+// the drain does but never writes `dispatched_at` — that column is the drain's,
+// and a second writer would steal events from it. Off unless PRERENDER_ENABLED.
+const prerender = new PrerenderConsumer(db);
+
 const server = app.listen(PORT, () => {
   console.log(`CommissionWatch backend listening on port ${PORT}`);
   digestScheduler.start();
@@ -69,6 +76,10 @@ const server = app.listen(PORT, () => {
   // No-op unless EVENT_DRAIN_ENABLED is set; the drain decides that itself
   // rather than making every caller remember to ask.
   eventDrain.start();
+
+  // No-op unless PRERENDER_ENABLED is set, and it throws rather than emitting
+  // localhost canonicals if PUBLIC_BASE_URL is missing.
+  prerender.start();
 
   // Without this row a dispute event resolves to nothing and the ledger stays
   // `queued` — the reply is composed, recorded, and never handed to anything.
@@ -94,6 +105,7 @@ function shutdown() {
   ingestion.governorWorker?.stop();
   ingestion.locateWorker.stop();
   eventDrain.stop();
+  prerender.stop();
   server.close(() => {
     // `flushAll` sends whatever is buffered in the dispatcher's batching window
     // and was written for exactly this moment. It had never been called by a
@@ -112,4 +124,4 @@ function shutdown() {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
-export { notificationService, emailService, digestScheduler, ingestion, dispatcher, eventDrain };
+export { notificationService, emailService, digestScheduler, ingestion, dispatcher, eventDrain, prerender };

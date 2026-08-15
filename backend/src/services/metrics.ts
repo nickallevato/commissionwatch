@@ -121,6 +121,18 @@ export interface QualityMetrics {
   transcripts_absent: number;
   transcripts_unavailable: number;
   transcripts_unchecked: number;
+  /**
+   * Places with at least one approved link, and places recorded at all.
+   *
+   * Two numbers because the map needs to tell three states apart and could only
+   * tell two: "nothing near you", "we have located nothing anywhere" and "we
+   * have located things but nobody has approved them" all render as an empty
+   * result. The first is a statement about a neighbourhood; the other two are
+   * statements about us, and saying the wrong one tells a reader their area is
+   * quiet when the truth is that we have not looked.
+   */
+  places_public: number;
+  places_total: number;
 }
 
 export interface Metrics {
@@ -161,6 +173,8 @@ export async function collectMetrics(db: Knex, now: Date = new Date()): Promise<
     disputes_resolved,
     vote_events_total,
     vote_events_approved,
+    places_total,
+    places_public,
   ] = await Promise.all([
     countOf(db, "meetings"),
     countOf(db, "meetings", (q) => q.whereNotNull("published_at")),
@@ -177,6 +191,18 @@ export async function collectMetrics(db: Knex, now: Date = new Date()): Promise<
     countOf(db, "record_disputes", (q) => q.whereIn("status", ["upheld", "declined"])),
     countOf(db, "vote_events"),
     countOf(db, "vote_events", (q) => q.where("status", "approved")),
+    countOf(db, "places"),
+    // A place is public when it has an approved, non-inferred link — the same
+    // rule `wherePlaceLinkPublic` applies, kept here as an EXISTS rather than a
+    // join so a place with three approved links counts once.
+    countOf(db, "places", (q) =>
+      q.whereExists(
+        db("place_links")
+          .whereRaw("place_links.place_id = places.id")
+          .where("place_links.status", "approved")
+          .whereNot("place_links.confidence", "inferred"),
+      ),
+    ),
   ]);
 
   // Reported per jurisdiction by the service and summed here, because a reader
@@ -240,6 +266,8 @@ export async function collectMetrics(db: Knex, now: Date = new Date()): Promise<
       transcripts_absent: transcripts.absent,
       transcripts_unavailable: transcripts.unavailable,
       transcripts_unchecked: transcripts.unchecked,
+      places_public,
+      places_total,
     },
     review: {
       findings_total,

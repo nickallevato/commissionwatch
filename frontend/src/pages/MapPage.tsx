@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Absence } from "@/components/ui/Absence";
+import { useMetrics } from "@/hooks/useMetrics";
 import { Citation, type CitationRef } from "@/components/ui/Citation";
 import { PRECISION_GRADES, distanceText, precisionOf } from "@/components/places/precision";
 import { ProximityPlot, type PlottedPlace } from "@/components/places/ProximityPlot";
@@ -151,6 +152,63 @@ interface ResolvedPlace {
   links: SourcedLink[];
 }
 
+
+/**
+ * Why the radius came back empty, in the reader's terms.
+ *
+ * `undefined` counts mean the metrics request has not answered — which is a
+ * fourth thing, and it must not borrow the wording of any of the other three.
+ * Falling back to the most flattering reading of an unknown is exactly the
+ * failure this component exists to prevent.
+ */
+function PlacesAbsence({
+  totalPlaces,
+  publicPlaces,
+}: {
+  totalPlaces: number | undefined;
+  publicPlaces: number | undefined;
+}) {
+  if (totalPlaces === undefined || publicPlaces === undefined) {
+    return (
+      <Absence reason="not-yet-ingested" subject="located decisions">
+        We could not check how much of the record has been located, so this may
+        be a gap in our collection rather than a quiet neighbourhood.
+      </Absence>
+    );
+  }
+
+  if (totalPlaces === 0) {
+    return (
+      <Absence reason="not-yet-ingested" subject="located decisions">
+        Nothing anywhere has been tied to a location yet. That is a statement
+        about this project, not about your neighbourhood.
+      </Absence>
+    );
+  }
+
+  if (publicPlaces === 0) {
+    // Held, not missing. Nothing naming a location is published before a person
+    // reads it, exactly as nothing naming a person is.
+    return (
+      <Absence reason="not-reviewed" subject="located decisions">
+        We have tied{" "}
+        <span className="figure">{totalPlaces.toLocaleString("en-US")}</span>{" "}
+        decisions to a place and none has been through review yet. A pin is a
+        claim about where something happened, so a person checks it first.
+      </Absence>
+    );
+  }
+
+  // Now, and only now, is silence about the neighbourhood rather than about us.
+  return (
+    <Absence reason="none-exist" subject="located decisions near this point">
+      <span className="figure">{publicPlaces.toLocaleString("en-US")}</span>{" "}
+      located decisions are published elsewhere — try a wider radius.
+    </Absence>
+  );
+}
+
+
 /** Whether a resolved place has a position on the ground at all. */
 function isPlaceable(resolved: ResolvedPlace): boolean {
   return (
@@ -215,6 +273,9 @@ function PlaceCard({
 }
 
 export function MapPage() {
+  // Only for the empty branch: a reader who gets results never needs it, and it
+  // is a cheap cached read either way.
+  const { data: metrics } = useMetrics();
   const [params, setParams] = useSearchParams();
   const near = params.get("near");
   const radius = parseRadius(params.get("radius"));
@@ -413,23 +474,23 @@ export function MapPage() {
           Looking for located decisions…
         </p>
       ) : resolved.length === 0 ? (
-        /* `not-yet-ingested`, not `none-exist`.
-
-          Extraction into `places` is still being built and the table is empty,
-          so today every radius answers with nothing, and the reader is owed the
-          reason. `none-exist` would be the strongest claim available — "the
-          record shows no located decisions near you" — on the weakest possible
-          evidence, and it would be false: decisions are certainly being taken
-          near this point and none of them has been tied to a location here yet.
-
-          This will need revisiting the day extraction runs, because from the
-          near route alone the page cannot tell an empty table from an empty
-          radius. Making that distinction honestly needs a signal that does not
-          exist yet — a places count on `/api/metrics`, or a total on the near
-          response — and inventing one here would be guessing. */
-        <Absence reason="not-yet-ingested" subject="located decisions">
-          That is a statement about this project, not about your neighbourhood.
-        </Absence>
+        /* Three states, not two — and the distinction is the whole point.
+        
+          "Nothing near you" is a statement about a neighbourhood. "We have
+          located nothing anywhere" and "we have located things and nobody has
+          approved them yet" are statements about us. Rendering all three as the
+          same empty result tells a reader their area is quiet when the truth is
+          that we have not looked, which is the strongest available claim on the
+          weakest possible evidence.
+        
+          This branch was `not-yet-ingested` unconditionally until
+          `/api/metrics` grew `places_total` and `places_public`; the comment
+          that stood here said the honest distinction needed a signal that did
+          not exist, and named the one it needed. It exists now. */
+        <PlacesAbsence
+          totalPlaces={metrics?.quality.places_total}
+          publicPlaces={metrics?.quality.places_public}
+        />
       ) : (
         <>
           {placed.length > 0 ? (

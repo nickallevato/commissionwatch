@@ -418,6 +418,36 @@ export function wherePlaceLinkPublic<T extends Knex.QueryBuilder>(
   return query;
 }
 
+/**
+ * Is the thing this link points at public — ignoring the link's own status?
+ *
+ * The review screen has to answer it separately from `wherePlaceLinkPublic`,
+ * which folds three conditions into one predicate. An operator may legitimately
+ * approve a link whose meeting is still withheld — the wall keeps the pin off
+ * the map until the meeting goes out — but they must be told they are doing it,
+ * and "approved and still invisible" is otherwise indistinguishable on the
+ * screen from a bug in the wall.
+ *
+ * It reuses `SUBJECT_IS_PUBLIC`, correlated against `place_links` by id, rather
+ * than reimplementing four per-kind joins. A second copy of the subject wall is
+ * how the console and the reader start disagreeing about what is published.
+ */
+export async function placeLinkSubjectIsPublic(db: Knex, linkId: string): Promise<boolean> {
+  const row = await db("place_links as pl")
+    .where("pl.id", linkId)
+    .where((outer) => {
+      for (const kind of PLACE_SUBJECT_KINDS) {
+        outer.orWhere((branch) => {
+          branch
+            .where("pl.subject_kind", kind)
+            .whereExists(SUBJECT_IS_PUBLIC[kind](db, "pl"));
+        });
+      }
+    })
+    .first<{ id: string } | undefined>("pl.id");
+  return row !== undefined;
+}
+
 /* ---------------------------------------------------------------------------
    Reading
    --------------------------------------------------------------------------- */

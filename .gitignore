@@ -30,3 +30,8 @@ deploy/deployment.env
 # auditable.
 *.bundle
 coverage/
+
+# Prerendered pages. `PRERENDER_OUTPUT_DIR` points at a mounted volume in
+# production; unset, the consumer writes here so a local run produces files
+# nobody serves rather than crashing on a path that does not exist.
+backend/.prerender/

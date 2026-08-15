@@ -615,6 +615,10 @@ export const metrics: Metrics = {
     roster_seats_sourced: 5,
     roster_seats_implied: 8,
     roster_sourced: false,
+    // Non-zero total with zero public: the state the map most needs to say
+    // correctly, and the one a fixture of all-zeroes would never exercise.
+    places_total: 12,
+    places_public: 0,
   },
   review: {
     findings_total: 14,

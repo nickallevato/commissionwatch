@@ -419,8 +419,12 @@ function claimQuery(db: Knex): Knex.QueryBuilder {
  * `len` carries the quote's length so the viewer can mark where it *ends*. The
  * API returns no quote length, and without this the page can find the start and
  * nothing else.
+ *
+ * Exported so the place-link review path links to the same address rather than
+ * building a second one — that is how the two would drift back into the
+ * fragment form, one file at a time.
  */
-function viewerPath(sha256: string, offset: number, quoteLength: number): string {
+export function viewerPath(sha256: string, offset: number, quoteLength: number): string {
   const params = new URLSearchParams({ offset: String(offset), len: String(quoteLength) });
   return `/source/${sha256}?${params.toString()}`;
 }
