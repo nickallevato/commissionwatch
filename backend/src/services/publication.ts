@@ -117,3 +117,65 @@ export async function findPublicFinding(
   const row: unknown = await whereFindingPublic(db, query).first();
   return typeof row === "object" && row !== null ? (row as Record<string, unknown>) : undefined;
 }
+
+/* ---------------------------------------------------------------------------
+   Claims — the same wall, around the sentence that names a person.
+   --------------------------------------------------------------------------- */
+
+/**
+ * Constrains a `minute_claims` query to claims a reader may see.
+ *
+ * Three conditions, and each is a separate predicate because each fails
+ * differently:
+ *
+ *  - **`status = 'approved'`.** Migration 072 defaults `status` to `held` and
+ *    the extractor writes nothing else, so until `services/review/claims.ts` an
+ *    approval was not expressible. A `rejected` claim is excluded by the same
+ *    clause that excludes a held one — one rule, one failure mode.
+ *  - **`retracted_at IS NULL`.** A retraction never deletes the row and never
+ *    blanks `rendered_text`; the tombstone the meeting page shows is read from
+ *    that preserved text deliberately. So the row stays `approved` and it is
+ *    *this* clause that takes it off the page. A wall keyed on status alone
+ *    would republish every retraction.
+ *  - **Its meeting is published.** Unlike a finding, a claim always has one:
+ *    `minute_claims.meeting_id` is NOT NULL. Approving a claim on a meeting an
+ *    operator has withheld is a legitimate act — the queue decides the claim,
+ *    not the meeting — and this clause is what keeps that from being a leak.
+ *
+ * The operator console does **not** use this, for the reason the header gives:
+ * a mechanism that hid unpublished rows from every reader would hide them from
+ * the person whose job is to decide.
+ */
+export function whereClaimPublic<T extends Knex.QueryBuilder>(
+  db: Knex,
+  query: T,
+  table = "minute_claims",
+): T {
+  query
+    .where(`${table}.status`, "approved")
+    .whereNull(`${table}.retracted_at`)
+    .whereExists(
+      db("meetings")
+        .whereRaw(`meetings.id = ${table}.meeting_id`)
+        .whereNotNull("meetings.published_at"),
+    );
+  return query;
+}
+
+/**
+ * A publicly visible claim by id, or `undefined`.
+ *
+ * `undefined` covers "no such claim", "not approved", "retracted" and "its
+ * meeting is not published", and every caller turns all four into the same 404.
+ * On this table that matters more than anywhere else: distinguishing them would
+ * let anyone enumerate the generated sentences about named people that an
+ * operator has read and refused.
+ */
+export async function findPublicClaim(
+  db: Knex,
+  id: string,
+): Promise<Record<string, unknown> | undefined> {
+  const query = db("minute_claims").where("minute_claims.id", id).select("minute_claims.*");
+  const row: unknown = await whereClaimPublic(db, query).first();
+  return typeof row === "object" && row !== null ? (row as Record<string, unknown>) : undefined;
+}

@@ -10,6 +10,12 @@ import {
 } from "../finance/entity-resolution";
 import { parseVoteDonorEvidence, type VoteDonorEvidence } from "../finance/evidence";
 import { MATCH_BANDS, type MatchBand } from "../finance/name-match";
+import {
+  emitEvent,
+  subjectIsPublic,
+  EVENT_SEVERITIES,
+  type EventSeverity,
+} from "../events";
 import { appendCorrectionRow } from "../pressroom/corrections";
 import { resolveCitations, type Citation } from "./evidence";
 import { motiveTerms } from "./language";
@@ -41,6 +47,10 @@ import {
  *  4. **Overdue is derived, never written.** See migration 038's header: a
  *     terminal status set by a clock is indistinguishable, in the log, from a
  *     decision a person made.
+ *  5. **Approval emits `finding.published` into `events`**, in the same
+ *     transaction, and that row is the only thing any delivery channel reads.
+ *     See `services/events/emit.ts`: consumers read events instead of tables so
+ *     the publication wall is asserted once rather than once per consumer.
  */
 
 export class ReviewError extends Error {
@@ -528,6 +538,34 @@ async function loadForDecision(
   return { flag, request };
 }
 
+/**
+ * The severity ladder `events` and `channel_routes` share, or null.
+ *
+ * `anomaly_flags.severity` is its own enum and the two happen to line up today.
+ * Filtering rather than casting is what keeps a future value added to one and
+ * not the other from becoming a CHECK violation that rolls back an operator's
+ * approval.
+ */
+function asEventSeverity(value: unknown): EventSeverity | null {
+  const found = EVENT_SEVERITIES.filter((severity) => severity === value);
+  return found[0] ?? null;
+}
+
+/** The jurisdiction a finding belongs to, for routing. Null for a records-derived flag. */
+async function findingJurisdictionId(
+  trx: Knex.Transaction,
+  meetingId: string | null,
+): Promise<string | null> {
+  if (meetingId === null) return null;
+  const row = await trx("meetings")
+    .join("commissions", "commissions.id", "meetings.commission_id")
+    .where("meetings.id", meetingId)
+    .first<{ jurisdiction_id: string | null } | undefined>(
+      "commissions.jurisdiction_id as jurisdiction_id",
+    );
+  return row?.jurisdiction_id ?? null;
+}
+
 function requirePending(request: Record<string, unknown>): void {
   const status = asRequestStatus(request.status);
   if (status !== "pending_review") {
@@ -600,6 +638,32 @@ export async function approveFinding(db: Knex, input: DecisionInput): Promise<Qu
         reviewed_at: trx.fn.now(),
         updated_at: trx.fn.now(),
       });
+
+    // The event spine. Written inside this transaction on purpose: an event
+    // committed while its approval rolled back would announce a finding no
+    // reader can see.
+    //
+    // The guard is here rather than a weakening of `emitEvent`. Approving a
+    // finding whose meeting is still unpublished is a legitimate act — the
+    // queue decides the finding, not the meeting — but such a finding is not
+    // public, and an emitter that refuses it is doing its job. What announces
+    // it is the meeting publish path, when the meeting goes out. So: emit only
+    // what a reader can already see, and let the wall stay a wall.
+    if (await subjectIsPublic(trx, "finding", input.flagId)) {
+      await emitEvent(trx, {
+        event_type: "finding.published",
+        subject_kind: "finding",
+        subject_id: input.flagId,
+        jurisdiction_id: await findingJurisdictionId(trx, textOrNull(flag.meeting_id)),
+        severity: asEventSeverity(flag.severity),
+        payload: {
+          title: text(flag.flag_type),
+          description: text(flag.description),
+          finding_id: input.flagId,
+          meeting_id: textOrNull(flag.meeting_id),
+        },
+      });
+    }
   });
 
   const item = await getQueueItem(db, input.flagId);

@@ -1,5 +1,6 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import db from "../src/config/database";
 import {
   assertFreeModel,
@@ -42,7 +43,16 @@ import {
   summariseFailures,
   toFailedChunk,
 } from "../src/services/extraction/runs";
-import { cleanupByPrefix, createMeeting, createSource } from "./helpers/pressroom";
+import { createExtractHandler, enqueueExtraction } from "../src/services/extraction/stage";
+import { ExtractionUnavailable } from "../src/services/extraction/run";
+import { BlockedError, IngestionQueue } from "../src/services/ingestion/queue";
+import type { ExtractContext } from "../src/services/ingestion/worker";
+import {
+  cleanupByPrefix,
+  createMeeting,
+  createSource,
+  deleteArtifacts,
+} from "./helpers/pressroom";
 
 /**
  * The first feature in this project whose output is written by a language
@@ -1477,5 +1487,177 @@ describe("which of two named officials actually did it", () => {
     );
     assert.equal(result.rejected.length, 1);
     assert.equal(result.rejected[0].reason, "wrong-role-in-quote");
+  });
+});
+
+/**
+ * Extraction as a queue stage.
+ *
+ * The route used to fire `void runExtraction(...)` — an unawaited promise in a
+ * request handler. A deploy mid-run destroyed the work and left an
+ * `extraction_runs` row `running` forever, which its own CHECK constraint then
+ * made permanent; there was no concurrency control over a per-minute
+ * rate-limited free tier, and no queue depth to answer "how much of the corpus
+ * is unread". The work now owns an `ingestion_jobs` row.
+ */
+describe("extraction as a queue stage", () => {
+  const STAGE_PREFIX = `${PREFIX}-stage`;
+  /** `artifacts` is global and outlives a jurisdiction, so it is cleaned by hand. */
+  const shas: string[] = [];
+
+  /** A meeting whose minutes have been fetched, parsed and stored. */
+  async function meetingWithMinutes(
+    seed: string,
+  ): Promise<{ meetingId: string; sha256: string; runId: string }> {
+    const { commissionId, sourceId } = await createSource(`${STAGE_PREFIX}-${seed}`, {
+      enabled: true,
+    });
+    const meetingId = await createMeeting(commissionId, { date: "2026-06-10" });
+    const sha256 = createHash("sha256").update(`${STAGE_PREFIX}-${seed}`).digest("hex");
+    shas.push(sha256);
+
+    const [run] = await db("ingestion_runs")
+      .insert({ source_id: sourceId, status: "running" })
+      .returning<Array<{ id: string }>>("id");
+    await db("artifacts")
+      .insert({
+        sha256,
+        storage_key: `artifacts/${sha256.slice(0, 2)}/${sha256}`,
+        content_type: "application/pdf",
+        source_url: `https://example.invalid/${seed}-minutes.pdf`,
+        byte_size: 2048,
+      })
+      .onConflict("sha256")
+      .ignore();
+    await db("ingestion_jobs").insert({
+      run_id: run.id,
+      stage: "parse",
+      target: JSON.stringify({ sha256, meetingId, documentType: "minutes" }),
+      status: "done",
+      attempts: 1,
+    });
+
+    return { meetingId, sha256, runId: run.id };
+  }
+
+  after(async () => {
+    await cleanupByPrefix(STAGE_PREFIX);
+    await deleteArtifacts(shas);
+  });
+
+  it("queues a job against the stored minutes instead of starting a promise", async () => {
+    const { meetingId, sha256 } = await meetingWithMinutes("queued");
+    const queue = new IngestionQueue(db);
+
+    const queued = await enqueueExtraction(db, queue, meetingId);
+    assert.equal(queued.meeting_id, meetingId);
+    assert.equal(queued.artifact_sha256, sha256);
+
+    const job = await queue.get(queued.job_id);
+    assert.ok(job);
+    assert.equal(job.stage, "extract");
+    assert.equal(job.status, "pending");
+    assert.equal(job.runId, queued.run_id);
+    assert.deepEqual(job.target, { sha256, meetingId });
+  });
+
+  it("refuses a second job while one is already queued", async () => {
+    const { meetingId } = await meetingWithMinutes("twice");
+    const queue = new IngestionQueue(db);
+    await enqueueExtraction(db, queue, meetingId);
+
+    // Two operators, or one impatient one, against a per-minute rate limit.
+    await assert.rejects(
+      () => enqueueExtraction(db, queue, meetingId),
+      (error: unknown) => {
+        assert.ok(error instanceof ExtractionUnavailable);
+        assert.equal(error.statusCode, 409);
+        return true;
+      },
+    );
+  });
+
+  it("says which document is missing rather than queueing nothing", async () => {
+    const { commissionId } = await createSource(`${STAGE_PREFIX}-nominutes`, { enabled: true });
+    const meetingId = await createMeeting(commissionId, { date: "2026-06-11" });
+
+    await assert.rejects(
+      () => enqueueExtraction(db, new IngestionQueue(db), meetingId),
+      (error: unknown) => {
+        assert.ok(error instanceof ExtractionUnavailable);
+        assert.equal(error.statusCode, 404);
+        assert.match(error.message, /Minutes are a separate/);
+        return true;
+      },
+    );
+  });
+
+  function contextOver(content: Buffer, meetingId: string, sha256: string): ExtractContext {
+    return {
+      stage: "extract",
+      jobId: "00000000-0000-4000-8000-000000000001",
+      runId: "00000000-0000-4000-8000-000000000002",
+      attempts: 1,
+      db,
+      signal: new AbortController().signal,
+      enqueue: async () => {
+        throw new Error("the extract stage enqueues nothing");
+      },
+      target: { sha256, meetingId },
+      artifact: {
+        id: "00000000-0000-4000-8000-000000000003",
+        sha256,
+        storageKey: `artifacts/${sha256.slice(0, 2)}/${sha256}`,
+        contentType: "application/pdf",
+        sourceUrl: "https://example.invalid/minutes.pdf",
+        byteSize: content.byteLength,
+        fetchedAt: new Date(),
+      },
+      content,
+    };
+  }
+
+  it("blocks rather than retries when the deployment has no key", async () => {
+    const { meetingId, sha256 } = await meetingWithMinutes("nokey");
+    const handler = createExtractHandler({
+      client: new OpenRouterClient({ apiKey: "", logger: { info: () => {}, warn: () => {} } }),
+    });
+
+    // Five attempts would not conjure an API key, and "attempts exhausted"
+    // hides the reason behind a retry count.
+    await assert.rejects(
+      () => handler(contextOver(Buffer.from("%PDF-1.4 minutes"), meetingId, sha256)),
+      (error: unknown) => {
+        assert.ok(error instanceof BlockedError);
+        assert.match(error.message, /OPENROUTER_API_KEY/);
+        return true;
+      },
+    );
+  });
+
+  it("blocks a document no model can be asked about", async () => {
+    const { meetingId, sha256 } = await meetingWithMinutes("notpdf");
+    const handler = createExtractHandler({
+      client: new OpenRouterClient({
+        apiKey: "test-key",
+        model: "test/model:free",
+        logger: { info: () => {}, warn: () => {} },
+      }),
+    });
+
+    await assert.rejects(
+      () => handler(contextOver(Buffer.from("this is not a pdf"), meetingId, sha256)),
+      (error: unknown) => {
+        assert.ok(error instanceof BlockedError);
+        assert.match(error.message, /not a PDF/);
+        return true;
+      },
+    );
+
+    // Recorded, not swallowed: the attempt has a run row with its reason.
+    const runs = await listRuns(db, meetingId);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].status, "failed");
+    assert.match(runs[0].error ?? "", /not a PDF/);
   });
 });

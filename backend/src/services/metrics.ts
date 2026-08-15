@@ -1,4 +1,5 @@
 import type { Knex } from "knex";
+import { rosterCoverage } from "./roster-coverage";
 
 /**
  * This project's own numbers, published on the same terms it demands of others.
@@ -67,8 +68,42 @@ export interface LatencyMetrics {
   last_published_at: string | null;
 }
 
+/**
+ * Signals about how well the record was *read*, as opposed to how much of it
+ * there is.
+ *
+ * Both numbers here were computed by services that had no consumer. A quality
+ * signal nothing reads is a quality signal nobody acts on, and the two most
+ * useful ones in this system were sitting behind exported functions.
+ */
+export interface QualityMetrics {
+  vote_events_total: number;
+  vote_events_approved: number;
+  /**
+   * Officeholders the stored claims name who have no `members` row.
+   *
+   * This is the number that predicts the extractor's `not-an-official`
+   * rejection rate: every unmatched name is a true claim the verifier will
+   * throw away. It is a lower bound — it can only count names we already
+   * extracted.
+   */
+  roster_unmatched: number;
+  roster_seats_sourced: number;
+  roster_seats_implied: number;
+  /**
+   * Whether any jurisdiction's roster can prove where it came from.
+   *
+   * `false` today and honestly so: `members` carries no source URL, no
+   * fetched-at and no artifact sha, so a row naming a real commissioner is
+   * indistinguishable from a row somebody typed. Publishing the `false` is the
+   * point — it is the gap that gates the whole claims pipeline.
+   */
+  roster_sourced: boolean;
+}
+
 export interface Metrics {
   corpus: CorpusMetrics;
+  quality: QualityMetrics;
   review: ReviewMetrics;
   latency: LatencyMetrics;
   generated_at: string;
@@ -102,6 +137,8 @@ export async function collectMetrics(db: Knex, now: Date = new Date()): Promise<
     claims_approved,
     disputes_received,
     disputes_resolved,
+    vote_events_total,
+    vote_events_approved,
   ] = await Promise.all([
     countOf(db, "meetings"),
     countOf(db, "meetings", (q) => q.whereNotNull("published_at")),
@@ -116,7 +153,14 @@ export async function collectMetrics(db: Knex, now: Date = new Date()): Promise<
     countOf(db, "minute_claims", (q) => q.where("status", "approved")),
     countOf(db, "record_disputes"),
     countOf(db, "record_disputes", (q) => q.whereIn("status", ["upheld", "declined"])),
+    countOf(db, "vote_events"),
+    countOf(db, "vote_events", (q) => q.where("status", "approved")),
   ]);
+
+  // Reported per jurisdiction by the service and summed here, because a reader
+  // of this page wants one number and an operator chasing a specific gap has
+  // the per-jurisdiction breakdown available from the service directly.
+  const coverage = await rosterCoverage(db, { asOf: now });
 
   // `percentile_cont` over the published set. Postgres computes it; doing it in
   // JavaScript would mean pulling every published meeting into memory to answer
@@ -156,6 +200,14 @@ export async function collectMetrics(db: Knex, now: Date = new Date()): Promise<
       documents_total,
       votes,
       matters,
+    },
+    quality: {
+      vote_events_total,
+      vote_events_approved,
+      roster_unmatched: coverage.reduce((total, row) => total + row.unmatched.length, 0),
+      roster_seats_sourced: coverage.reduce((total, row) => total + row.seats_sourced, 0),
+      roster_seats_implied: coverage.reduce((total, row) => total + row.seats_implied, 0),
+      roster_sourced: coverage.some((row) => row.provenance !== "unsourced"),
     },
     review: {
       findings_total,

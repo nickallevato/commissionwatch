@@ -11,7 +11,7 @@ import type { Knex } from "knex";
  * Schema of record: backend/migrations/018_create_ingestion_jobs.ts
  */
 
-export type IngestionStage = "discover" | "fetch" | "parse" | "analyze";
+export type IngestionStage = "discover" | "fetch" | "parse" | "analyze" | "extract";
 
 export type IngestionJobStatus =
   | "pending"
@@ -72,11 +72,31 @@ export interface AnalyzeTarget {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Read a meeting's stored minutes with a language model.
+ *
+ * Post-`fetch`, so a content address and no URL — the invariant above holds
+ * here as it does for parse and analyze. The one network call the handler makes
+ * is to OpenRouter, which is not a source of record: nothing it returns is
+ * stored without first being located in these bytes.
+ *
+ * `meetingId` is required, unlike on the other post-fetch stages. A claim and a
+ * tally are both about a meeting, and there is no meaningful extraction of an
+ * artifact belonging to none.
+ */
+export interface ExtractTarget {
+  /** Content address of a stored artifact. Lowercase hex SHA-256. */
+  sha256: string;
+  meetingId: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface StageTargets {
   discover: DiscoverTarget;
   fetch: FetchTarget;
   parse: ParseTarget;
   analyze: AnalyzeTarget;
+  extract: ExtractTarget;
 }
 
 export type JobTarget = StageTargets[IngestionStage];
@@ -155,6 +175,7 @@ const STAGES: readonly IngestionStage[] = [
   "fetch",
   "parse",
   "analyze",
+  "extract",
 ];
 
 const STATUSES: readonly IngestionJobStatus[] = [
@@ -357,6 +378,16 @@ export function parseAnalyzeTarget(raw: unknown): AnalyzeTarget {
   };
 }
 
+export function parseExtractTarget(raw: unknown): ExtractTarget {
+  const target = asTargetRecord(raw, "extract");
+  rejectNetworkTarget(target, "extract");
+  return {
+    sha256: parseSha256(target, "extract"),
+    meetingId: requiredTargetString(target, "meetingId", "extract"),
+    metadata: optionalMetadata(target, "extract"),
+  };
+}
+
 /** Turns a stored record into a stage-discriminated, fully typed job. */
 export function toClaimedJob(record: JobRecord): ClaimedJob {
   const base = {
@@ -374,6 +405,8 @@ export function toClaimedJob(record: JobRecord): ClaimedJob {
       return { ...base, stage: "parse", target: parseParseTarget(record.target) };
     case "analyze":
       return { ...base, stage: "analyze", target: parseAnalyzeTarget(record.target) };
+    case "extract":
+      return { ...base, stage: "extract", target: parseExtractTarget(record.target) };
   }
 }
 
@@ -405,6 +438,16 @@ export interface QueueOptions {
 export const DEFAULT_MAX_ATTEMPTS = 5;
 export const DEFAULT_BASE_BACKOFF_MS = 30_000;
 export const DEFAULT_MAX_BACKOFF_MS = 60 * 60 * 1000;
+
+/**
+ * How long a `running` row must sit untouched before it counts as abandoned.
+ *
+ * Thirty minutes, set by the slowest stage rather than the average one: an
+ * extraction is nine-ish sequential calls to a rate-limited free model and
+ * legitimately takes minutes. Too small a threshold requeues live work and
+ * doubles the load on the thing that was already slow.
+ */
+export const DEFAULT_STALLED_AFTER_MS = 30 * 60 * 1000;
 
 export interface EnqueueOptions {
   /** Delay before the job first becomes claimable. Default 0 (due now). */
@@ -524,6 +567,9 @@ export class IngestionQueue {
         return;
       case "analyze":
         parseAnalyzeTarget(target);
+        return;
+      case "extract":
+        parseExtractTarget(target);
         return;
       default:
         throw new InvalidJobError(`unknown stage ${String(stage)}`);
@@ -726,6 +772,50 @@ export class IngestionQueue {
       "failed",
       errorMessage(error),
     );
+  }
+
+  /**
+   * Returns jobs left `running` by a dead process to the queue.
+   *
+   * A claim marks the row `running` and only the worker that made it ever moves
+   * it on. Kill that process — a deploy, an OOM, a restart — and the row stays
+   * `running` forever, claimable by nobody. That is the same permanent limbo
+   * `extraction_runs` fell into, and moving extraction onto the queue would
+   * merely have relocated it, since an extract job holds its claim for minutes
+   * and is the most likely job in the table to be mid-flight when a deploy
+   * lands.
+   *
+   * Attempts are **not** reset: the crashed attempt was an attempt, and a job
+   * that dies the same way every time must still run out of retries rather than
+   * loop forever. `unblock` resets them, deliberately — that is a human saying
+   * the cause is gone.
+   *
+   * The threshold is what makes this safe to run while workers are live: a job
+   * whose row has not been touched for far longer than any handler takes cannot
+   * still be in progress.
+   */
+  async recoverStalled(
+    olderThanMs: number = DEFAULT_STALLED_AFTER_MS,
+    executor?: QueryExecutor,
+  ): Promise<number> {
+    if (!Number.isFinite(olderThanMs) || olderThanMs <= 0) {
+      throw new RangeError("recoverStalled olderThanMs must be a positive number");
+    }
+    const runner = executor ?? this.db;
+    return runner("ingestion_jobs")
+      .where({ status: "running" })
+      .where(
+        "updated_at",
+        "<",
+        runner.raw("now() - (? * interval '1 millisecond')", [olderThanMs]),
+      )
+      .update({
+        status: "pending",
+        last_error:
+          "the worker holding this job stopped without finishing it; requeued for another attempt",
+        next_attempt_at: runner.fn.now(),
+        updated_at: runner.fn.now(),
+      });
   }
 
   /** Returns blocked jobs to the queue, due immediately, with attempts reset. */

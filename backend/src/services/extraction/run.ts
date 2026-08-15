@@ -12,12 +12,18 @@ import { failRun, finishRun, startRun, summariseFailures } from "./runs";
 /**
  * Extract one meeting's minutes, end to end.
  *
- * Deliberately a service called by a route rather than a CLI script. The
- * lesson is two days old and cost this project a live outage: `npm run sweep`
- * is `tsx src/scripts/sweep.ts`, `backend/Dockerfile` copies `dist/` and
- * `migrations/` and never `src/`, and so the only lever for enabling a source
- * did not exist inside the container. An operator action that cannot be taken
- * on the deployment is not an operator action.
+ * Deliberately a service rather than a CLI script. The lesson cost this project
+ * a live outage: `npm run sweep` is `tsx src/scripts/sweep.ts`,
+ * `backend/Dockerfile` copies `dist/` and `migrations/` and never `src/`, and
+ * so the only lever for enabling a source did not exist inside the container.
+ * An operator action that cannot be taken on the deployment is not an operator
+ * action.
+ *
+ * It is no longer called *from a request*. `services/extraction/stage.ts` runs
+ * it as the queue's `extract` stage, so the work owns an `ingestion_jobs` row
+ * and survives a restart. That is why the bytes arrive as an argument: the
+ * worker has already resolved the content address and loaded them, and this
+ * module keeps no way to read anything else.
  *
  * Reads stored bytes only. Nothing here reaches the source — the artifact was
  * fetched by the `fetch` stage, is addressed by its hash, and is what the
@@ -36,8 +42,9 @@ export class ExtractionUnavailable extends Error {
 
 export interface MinutesArtifact {
   sha256: string;
-  storage_key: string;
   content_type: string | null;
+  /** The source whose sweep captured these bytes. The enqueuer needs it. */
+  source_id: string;
 }
 
 /**
@@ -47,6 +54,12 @@ export interface MinutesArtifact {
  * artifact: an agenda and a set of minutes for the same meeting are both PDFs
  * from the same host, and extracting officials' votes from an *agenda* would
  * produce claims about things that had not happened yet.
+ *
+ * It also carries back the source, because `ingestion_runs.source_id` is NOT
+ * NULL and an `extract` job needs a run to belong to. The parse job that
+ * captured the bytes already knows which source they came from, so the answer
+ * is joined out of the queue rather than guessed from the jurisdiction — the
+ * same reasoning `reparseMeeting` uses.
  */
 export async function findMinutesArtifact(
   db: Knex,
@@ -54,26 +67,35 @@ export async function findMinutesArtifact(
 ): Promise<MinutesArtifact | null> {
   const row: unknown = await db("ingestion_jobs as j")
     .join("artifacts as a", db.raw("a.sha256 = j.target ->> 'sha256'"))
+    .join("ingestion_runs as r", "j.run_id", "r.id")
     .where("j.stage", "parse")
     .whereRaw("j.target ->> 'meetingId' = ?", [meetingId])
     .whereRaw("lower(coalesce(j.target ->> 'documentType', '')) = 'minutes'")
     .orderBy("j.created_at", "desc")
-    .first("a.sha256 as sha256", "a.storage_key as storage_key", "a.content_type as content_type");
+    .first("a.sha256 as sha256", "a.content_type as content_type", "r.source_id as source_id");
 
   if (typeof row !== "object" || row === null) return null;
   const value = row as Record<string, unknown>;
-  if (typeof value.sha256 !== "string" || typeof value.storage_key !== "string") return null;
+  if (typeof value.sha256 !== "string" || typeof value.source_id !== "string") return null;
   return {
     sha256: value.sha256,
-    storage_key: value.storage_key,
     content_type: typeof value.content_type === "string" ? value.content_type : null,
+    source_id: value.source_id,
   };
 }
 
 export interface RunExtractionDeps {
   db: Knex;
-  read: (storageKey: string) => Promise<Buffer>;
   client: OpenRouterClient;
+}
+
+/** The bytes to read, already resolved and loaded by the worker. */
+export interface StoredMinutes {
+  meetingId: string;
+  /** Content address of those bytes. Every citation is recorded against it. */
+  sha256: string;
+  contentType: string | null;
+  bytes: Buffer;
 }
 
 export interface RunExtractionResult {
@@ -96,11 +118,11 @@ export interface RunExtractionResult {
  */
 export async function runExtraction(
   deps: RunExtractionDeps,
-  meetingId: string,
+  minutes: StoredMinutes,
 ): Promise<RunExtractionResult> {
-  const runId = await startRun(deps.db, meetingId);
+  const runId = await startRun(deps.db, minutes.meetingId);
   try {
-    const result = await extractOnce(deps, meetingId);
+    const result = await extractOnce(deps, minutes);
     await finishRun(deps.db, runId, {
       artifactSha256: result.artifact_sha256,
       outcome: result.outcome,
@@ -142,7 +164,7 @@ function reportUnread(runId: string, outcome: ExtractionOutcome): void {
 
 async function extractOnce(
   deps: RunExtractionDeps,
-  meetingId: string,
+  minutes: StoredMinutes,
 ): Promise<Omit<RunExtractionResult, "run_id">> {
   if (!deps.client.configured) {
     throw new ExtractionUnavailable(
@@ -151,19 +173,10 @@ async function extractOnce(
     );
   }
 
-  const artifact = await findMinutesArtifact(deps.db, meetingId);
-  if (artifact === null) {
-    throw new ExtractionUnavailable(
-      "No minutes document has been fetched for this meeting. Minutes are a separate " +
-        "document from the agenda, and a meeting can be ingested long before they are published.",
-      404,
-    );
-  }
-
-  const bytes = await deps.read(artifact.storage_key);
+  const { meetingId, bytes } = minutes;
   if (!looksLikePdf(bytes)) {
     throw new ExtractionUnavailable(
-      `The stored minutes artifact is not a PDF (content type ${artifact.content_type ?? "unknown"}).`,
+      `The stored minutes artifact is not a PDF (content type ${minutes.contentType ?? "unknown"}).`,
       422,
     );
   }
@@ -185,7 +198,7 @@ async function extractOnce(
   }
 
   const outcome = await extractClaims(deps.client, { documentText: text });
-  const persistOptions = { meetingId, artifactSha256: artifact.sha256 };
+  const persistOptions = { meetingId, artifactSha256: minutes.sha256 };
   const stored = await persistClaims(deps.db, outcome, persistOptions);
   // After storing, not before: a run that fails partway should not have
   // stripped claims it was about to replace.
@@ -194,5 +207,5 @@ async function extractOnce(
     console.log(`Extraction ${meetingId}: removed ${pruned} held claim(s) no longer permitted`);
   }
 
-  return { meeting_id: meetingId, artifact_sha256: artifact.sha256, outcome, stored };
+  return { meeting_id: meetingId, artifact_sha256: minutes.sha256, outcome, stored };
 }

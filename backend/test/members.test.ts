@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
-import { signInOperator } from "./helpers/pressroom";
+import { rosterCoverage, type RosterCoverage } from "../src/services/roster-coverage";
+import {
+  cleanupByPrefix,
+  createMeeting,
+  createSource,
+  signInOperator,
+} from "./helpers/pressroom";
 
 const BOZEMAN_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 const NON_EXISTENT_ID = "00000000-0000-0000-0000-000000000000";
@@ -140,6 +146,109 @@ describe("the roster writes refuse an unauthenticated caller", () => {
 
   it("leaves the public reads open", async () => {
     await request(app).get("/api/members").expect(200);
+  });
+});
+
+/**
+ * The roster gate, counted rather than guessed at.
+ *
+ * `verify.ts` rejects a claim as `not-an-official` against `RECORDED_OFFICES`
+ * plus this table, and no sourced roster could be found on 2026-08-11. Until
+ * one exists the honest thing is a number: how many seats are sourced, how many
+ * the record implies, and which names fall through. These tests hold the report
+ * to being a measurement — it must never quietly create the rows it is
+ * counting, and it must never claim provenance the schema cannot carry.
+ */
+describe("roster coverage", () => {
+  const ROSTER_PREFIX = "members-roster";
+  const SHA = "a".repeat(64);
+  let fixture: Awaited<ReturnType<typeof createSource>>;
+  let meetingId: string;
+
+  async function claim(subject: string, offset: number): Promise<void> {
+    await db("minute_claims").insert({
+      meeting_id: meetingId,
+      artifact_sha256: SHA,
+      subject_name: subject,
+      action: "voted_yes",
+      quote: `${subject} voted aye.`,
+      quote_offset: offset,
+      model: "test/model:free",
+      prompt_version: "test-prompt",
+      status: "held",
+    });
+  }
+
+  async function coverageForFixture(): Promise<RosterCoverage> {
+    const all = await rosterCoverage(db, { asOf: new Date("2026-08-14T00:00:00Z") });
+    const found = all.find((entry) => entry.jurisdiction_id === fixture.jurisdictionId);
+    assert.ok(found, "the jurisdiction must appear even with an empty roster");
+    return found;
+  }
+
+  before(async () => {
+    await cleanupByPrefix(ROSTER_PREFIX);
+    fixture = await createSource(ROSTER_PREFIX);
+    meetingId = await createMeeting(fixture.commissionId, { date: "2026-05-05" });
+
+    await db("members").insert([
+      {
+        jurisdiction_id: fixture.jurisdictionId,
+        name: "Emma Bode",
+        title: "Commissioner",
+        term_start: "2024-01-01",
+      },
+      // Out of office by the day being counted. A claim about someone who had
+      // left is a different error from a claim about someone who never held the
+      // seat, and the count must not blur them.
+      {
+        jurisdiction_id: fixture.jurisdictionId,
+        name: "Former Person",
+        title: "Commissioner",
+        term_start: "2018-01-01",
+        term_end: "2022-12-31",
+      },
+    ]);
+  });
+
+  after(async () => {
+    await cleanupByPrefix(ROSTER_PREFIX);
+  });
+
+  it("counts seats in office, not every row that ever existed", async () => {
+    const coverage = await coverageForFixture();
+    assert.equal(coverage.seats_sourced, 1);
+    assert.equal(coverage.seats_implied, 0, "no claims yet");
+  });
+
+  it("matches a printed surname to the roster and names what is missing", async () => {
+    // "Commissioner Bode" is how minutes print "Emma Bode".
+    await claim("Commissioner Bode", 10);
+    await claim("Deputy Mayor Sample", 20);
+    // A member of the public is a bug elsewhere, not a seat this roster lacks.
+    await claim("Jordan From The Audience", 30);
+
+    const coverage = await coverageForFixture();
+    assert.equal(coverage.seats_implied, 2);
+    assert.deepEqual(coverage.unmatched, ["sample"]);
+  });
+
+  it("reports the roster as unsourced, because `members` carries no provenance", async () => {
+    // A row saying "Emma Bode, Commissioner" is indistinguishable from one
+    // somebody typed, and the report must say so rather than imply a source.
+    const coverage = await coverageForFixture();
+    assert.equal(coverage.provenance, "unsourced");
+  });
+
+  it("writes nothing while counting", async () => {
+    const before = await db("members")
+      .where({ jurisdiction_id: fixture.jurisdictionId })
+      .count<{ count: string }[]>("* as count");
+    await coverageForFixture();
+    const after = await db("members")
+      .where({ jurisdiction_id: fixture.jurisdictionId })
+      .count<{ count: string }[]>("* as count");
+    assert.equal(after[0].count, before[0].count, "a report that resolves names reports itself");
   });
 });
 

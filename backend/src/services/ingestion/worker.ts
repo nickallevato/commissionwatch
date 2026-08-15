@@ -8,6 +8,7 @@ import {
   type AnalyzeTarget,
   type ClaimedJob,
   type DiscoverTarget,
+  type ExtractTarget,
   type FetchTarget,
   type IngestionStage,
   type ParseTarget,
@@ -117,6 +118,19 @@ export interface AnalyzeContext extends StoredArtifactContext {
   readonly target: AnalyzeTarget;
 }
 
+/**
+ * Reading the minutes with a model. Bytes in, held claims out.
+ *
+ * A stored-artifact context like parse and analyze, for the same reason: the
+ * handler is handed the bytes its citations will be checked against and has no
+ * way to ask for anything else. Its call to OpenRouter is not a source fetch —
+ * nothing the model returns is stored unless it is first located in `content`.
+ */
+export interface ExtractContext extends StoredArtifactContext {
+  readonly stage: "extract";
+  readonly target: ExtractTarget;
+}
+
 export type StageOutcome = Promise<StageResult | void>;
 
 /**
@@ -128,6 +142,7 @@ export interface HandlerRegistry {
   fetch?: (ctx: FetchContext) => StageOutcome;
   parse?: (ctx: ParseContext) => StageOutcome;
   analyze?: (ctx: AnalyzeContext) => StageOutcome;
+  extract?: (ctx: ExtractContext) => StageOutcome;
 }
 
 /** Count key recorded when a stage succeeds. */
@@ -136,6 +151,7 @@ const SUCCESS_COUNT_KEY: Record<IngestionStage, string> = {
   fetch: "fetched",
   parse: "parsed",
   analyze: "analyzed",
+  extract: "extracted",
 };
 
 // ---------------------------------------------------------------------------
@@ -380,6 +396,17 @@ export class IngestionWorker {
         return handler({
           ...base,
           stage: "analyze",
+          target: job.target,
+          artifact,
+          content,
+        });
+      }
+      case "extract": {
+        const handler = this.requireHandler("extract", this.handlers.extract);
+        const { artifact, content } = await this.loadArtifact(job.target.sha256);
+        return handler({
+          ...base,
+          stage: "extract",
           target: job.target,
           artifact,
           content,

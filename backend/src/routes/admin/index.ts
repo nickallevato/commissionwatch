@@ -4,6 +4,7 @@ import channelsRouter from './channels';
 import recordsRouter from './records';
 import pressroomRouter from './pressroom';
 import reviewRouter from './review';
+import claimsRouter from './claims';
 import { requireOperator } from '../../middleware/requireOperator';
 
 const router = Router();
@@ -23,6 +24,9 @@ router.use('/pressroom', pressroomRouter);
 // B-a's review queue. The only route in this product that makes a generated
 // claim about a named person public lives behind this line.
 router.use('/review', reviewRouter);
+// The claims review path. `minute_claims` is the other table whose rows name a
+// living person, and this is the only thing that can make one of them public.
+router.use('/claims', claimsRouter);
 
 // A guarded catch-all. Without it an unknown admin path 404s before the guard
 // runs, which confirms to an unauthenticated caller which routes exist.

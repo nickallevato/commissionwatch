@@ -40,7 +40,6 @@ describe("the sitemap", () => {
 
   after(async () => {
     await cleanupByPrefix(PREFIX);
-    await db.destroy();
   });
 
   it("lists a published meeting and omits an unpublished one", async () => {
@@ -136,4 +135,83 @@ describe("the sitemap", () => {
       else process.env.PUBLIC_BASE_URL = saved;
     }
   });
+});
+
+/**
+ * Matters reached the sitemap after they got pages of their own. The wall is a
+ * different rule for a matter than for a meeting — public when *any* appearance
+ * is on a published meeting — so it gets its own both-directions test rather
+ * than riding on the meeting one.
+ */
+describe("sitemap · matters", () => {
+  it("lists a matter once one of its appearances is published, and not before", async () => {
+    const [j] = await db("jurisdictions")
+      .insert({ name: "Sitemap Matters County", state: "MT", type: "county" })
+      .returning("id");
+    const jurisdictionId = typeof j === "string" ? j : j.id;
+    try {
+      const [c] = await db("commissions")
+        .insert({ jurisdiction_id: jurisdictionId, name: "Sitemap Matters Board" })
+        .returning("id");
+      const commissionId = typeof c === "string" ? c : c.id;
+
+      const [m] = await db("meetings")
+        .insert({ commission_id: commissionId, date: "2026-04-07" })
+        .returning("id");
+      const meetingId = typeof m === "string" ? m : m.id;
+
+      const [item] = await db("agenda_items")
+        .insert({ meeting_id: meetingId, item_number: 1, title: "Ordinance 4242 sitemap probe" })
+        .returning("id");
+      const itemId = typeof item === "string" ? item : item.id;
+
+      const [mt] = await db("matters")
+        .insert({
+          commission_id: commissionId,
+          identity_key: "ordinance 4242",
+          designator: "Ordinance 4242",
+          title: "Ordinance 4242 sitemap probe",
+        })
+        .returning("id");
+      const matterId = typeof mt === "string" ? mt : mt.id;
+      await db("matter_appearances").insert({
+        matter_id: matterId,
+        agenda_item_id: itemId,
+        match_rule: "designator",
+      });
+
+      const withheld = await collectSitemapEntries(db);
+      assert.ok(
+        !withheld.some((entry) => entry.path === `/matters/${matterId}`),
+        "a matter with no published appearance must not be listed",
+      );
+
+      // The second half. Absence alone would also hold for a query that is
+      // simply broken.
+      await db("meetings")
+        .where({ id: meetingId })
+        .update({ published_at: new Date("2026-04-10T00:00:00Z") });
+
+      const published = await collectSitemapEntries(db);
+      assert.ok(
+        published.some((entry) => entry.path === `/matters/${matterId}`),
+        "publishing the meeting must put its matter in the sitemap",
+      );
+    } finally {
+      await db("jurisdictions").where({ id: jurisdictionId }).del();
+    }
+  });
+});
+
+/**
+ * File scope, not inside a describe.
+ *
+ * node:test runs a describe's `after` the moment that block's tests finish, so
+ * `db.destroy()` in the first describe kills the pool for every suite declared
+ * below it — the second one here failed with "Unable to acquire a connection"
+ * before it ran a single query. This project has been bitten by that before;
+ * pool teardown belongs where the file ends, not where the first block does.
+ */
+after(async () => {
+  await db.destroy();
 });

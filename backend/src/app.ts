@@ -20,6 +20,8 @@ import publicRecordsRouter from "./routes/public-records";
 import correctionsRouter from "./routes/corrections";
 import dataRouter from "./routes/data";
 import metricsRouter from "./routes/metrics";
+import sourceRouter from "./routes/source";
+import feedRouter from "./routes/feed";
 import sitemapRouter from "./routes/sitemap";
 import calendarRouter from "./routes/calendar";
 import adminRouter from "./routes/admin";
@@ -122,6 +124,9 @@ app.use("/api/data", dataRouter);
 
 // Site root, not /api — a crawler looks for /sitemap.xml and nowhere else.
 // `frontend/nginx.conf` has an exact-match location proxying it here.
+// The feeds own their own paths, so no prefix. Served from the site root like
+// the sitemap, because that is where a reader's client looks for them.
+app.use(feedRouter);
 app.use("/sitemap.xml", sitemapRouter);
 // The public meeting calendar and the per-jurisdiction iCal feeds. Published
 // meetings only; a meeting with no published time is an all-day event rather
@@ -130,6 +135,9 @@ app.use("/sitemap.xml", sitemapRouter);
 // and unauthenticated for the reason `/status` is: it describes this site's
 // collection, not anybody's record.
 app.use("/api/metrics", metricsRouter);
+// The other end of every citation: a stored document at its content address.
+// Public, and walled to documents on a published meeting.
+app.use("/api/source", sourceRouter);
 app.use("/api/calendar", calendarRouter);
 app.use("/api/ingestion", ingestionRouter);
 // The legacy email-only subscription and notification routers, now operator-

@@ -15,6 +15,7 @@ import {
   type ArtifactRef,
   type ArtifactStore,
   type DiscoverContext,
+  type ExtractContext,
   type FetchContext,
   type ParseContext,
 } from "../src/services/ingestion/worker";
@@ -649,5 +650,166 @@ describe("IngestionWorker — poll loop", () => {
       .where({ run_id: runId, status: "done" })
       .count<{ count: string }[]>("* as count");
     assert.equal(Number(done[0].count), 5);
+  });
+});
+
+/**
+ * `extract` — the stage that replaced `void runExtraction(...)`.
+ *
+ * The old version was an unawaited promise in a request handler: a deploy
+ * mid-run destroyed the work and left `extraction_runs` `running` forever,
+ * there was no concurrency control over a per-minute rate-limited free tier,
+ * and there was no queue depth to look at. Everything below is a property that
+ * only holds because the work now owns a row.
+ */
+describe("IngestionQueue — the extract stage", () => {
+  const MEETING_ID = "3b2a1c9d-4e5f-4a7b-8c9d-0e1f2a3b4c5d";
+
+  it("rejects an extract target carrying a url", async () => {
+    const queue = new IngestionQueue(db);
+    await assert.rejects(
+      () =>
+        queue.enqueue(
+          "extract",
+          Object.assign(
+            { sha256: ARTIFACT_SHA, meetingId: MEETING_ID },
+            { url: "https://x.invalid" },
+          ),
+          runId,
+        ),
+      InvalidJobError,
+      "extraction reads stored bytes; the only network it touches is the model",
+    );
+  });
+
+  it("rejects an extract target with no meeting", async () => {
+    const queue = new IngestionQueue(db);
+    await assert.rejects(
+      // A tally and a claim are both about a meeting. An extraction of an
+      // artifact belonging to none has nowhere to write its output.
+      () => queue.enqueue("extract", { sha256: ARTIFACT_SHA, meetingId: "" }, runId),
+      InvalidJobError,
+    );
+  });
+
+  it("hands the handler the stored bytes and the meeting", async () => {
+    const queue = new IngestionQueue(db);
+    const received: ExtractContext[] = [];
+    const worker = new IngestionWorker(db, queue, {
+      logger: silentLogger,
+      artifacts: new MemoryArtifactStore(new Map([[STORAGE_KEY, ARTIFACT_BODY]])),
+      handlers: {
+        extract: async (ctx: ExtractContext) => {
+          received.push(ctx);
+          return { counts: { extraction_claims_stored: 3 } };
+        },
+      },
+    });
+
+    await queue.enqueue("extract", { sha256: ARTIFACT_SHA, meetingId: MEETING_ID }, runId);
+    const tick = await worker.runOnce();
+    assert.equal(tick.completed, 1);
+
+    const ctx = received[0];
+    assert.ok(ctx, "extract handler ran");
+    assert.equal(ctx.target.meetingId, MEETING_ID);
+    assert.equal(ctx.artifact.sha256, ARTIFACT_SHA);
+    assert.equal(ctx.content.toString(), ARTIFACT_BODY.toString());
+
+    const run = await db("ingestion_runs").where({ id: runId }).first();
+    assert.deepEqual(run.counts, { extracted: 1, extraction_claims_stored: 3 });
+  });
+
+  it("keeps the extraction loop off the other stages' work", async () => {
+    const queue = new IngestionQueue(db);
+    const worker = new IngestionWorker(db, queue, {
+      logger: silentLogger,
+      stages: ["extract"],
+      artifacts: new MemoryArtifactStore(new Map([[STORAGE_KEY, ARTIFACT_BODY]])),
+      handlers: { extract: async () => undefined, parse: async () => undefined },
+    });
+
+    const parseId = await queue.enqueue("parse", { sha256: ARTIFACT_SHA }, runId);
+    await queue.enqueue("extract", { sha256: ARTIFACT_SHA, meetingId: MEETING_ID }, runId);
+
+    const tick = await worker.runOnce();
+    assert.equal(tick.claimed, 1, "a stage-restricted worker claims only its stage");
+    assert.equal((await queue.get(parseId))?.status, "pending");
+  });
+
+  /**
+   * The restart the old design lost work to. A worker claims an extract job,
+   * the process dies before the handler returns, and the row is left `running`
+   * — claimable by nobody, because only the claimer ever moves it on.
+   */
+  it("requeues an extract job abandoned by a stopped worker", async () => {
+    const queue = new IngestionQueue(db);
+    const jobId = await queue.enqueue(
+      "extract",
+      { sha256: ARTIFACT_SHA, meetingId: MEETING_ID },
+      runId,
+    );
+    await queue.claim(1, undefined, ["extract"]);
+    assert.equal((await queue.get(jobId))?.status, "running");
+
+    // The process died an hour ago.
+    await db("ingestion_jobs")
+      .where({ id: jobId })
+      .update({ updated_at: db.raw("now() - interval '1 hour'") });
+
+    assert.equal(await queue.recoverStalled(30 * 60 * 1000), 1);
+    const recovered = await queue.get(jobId);
+    assert.equal(recovered?.status, "pending");
+    assert.equal(recovered?.attempts, 1, "the crashed attempt still counts as an attempt");
+    assert.match(recovered?.lastError ?? "", /stopped without finishing it/);
+
+    const reclaimed = ownJobs(await queue.claim(5, undefined, ["extract"]));
+    assert.deepEqual(
+      reclaimed.map((job) => job.id),
+      [jobId],
+    );
+  });
+
+  it("leaves a job a live worker is still holding alone", async () => {
+    const queue = new IngestionQueue(db);
+    await queue.enqueue("extract", { sha256: ARTIFACT_SHA, meetingId: MEETING_ID }, runId);
+    await queue.claim(1, undefined, ["extract"]);
+
+    // Nine chunks against a throttled free model take minutes. A threshold
+    // that requeues live work doubles the load on the slowest thing there is.
+    assert.equal(await queue.recoverStalled(30 * 60 * 1000), 0);
+  });
+
+  it("two concurrent claims never return the same extract job", async () => {
+    const queue = new IngestionQueue(db);
+    const jobIds: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      jobIds.push(
+        await queue.enqueue("extract", { sha256: ARTIFACT_SHA, meetingId: MEETING_ID }, runId),
+      );
+    }
+
+    const trxA: Knex.Transaction = await db.transaction();
+    const trxB: Knex.Transaction = await db.transaction();
+    let claimedA: ClaimedJob[] = [];
+    let claimedB: ClaimedJob[] = [];
+    try {
+      await trxA.raw("SET LOCAL statement_timeout = '5000ms'");
+      await trxB.raw("SET LOCAL statement_timeout = '5000ms'");
+      [claimedA, claimedB] = await Promise.all([
+        queue.claim(2, trxA, ["extract"]),
+        queue.claim(2, trxB, ["extract"]),
+      ]);
+      await trxA.commit();
+      await trxB.commit();
+    } catch (error) {
+      if (!trxA.isCompleted()) await trxA.rollback();
+      if (!trxB.isCompleted()) await trxB.rollback();
+      throw error;
+    }
+
+    const ids = [...ownJobs(claimedA), ...ownJobs(claimedB)].map((job) => job.id);
+    assert.equal(new Set(ids).size, ids.length, "SKIP LOCKED must partition the queue");
+    assert.equal(ids.length, jobIds.length);
   });
 });

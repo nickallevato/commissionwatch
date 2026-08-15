@@ -122,8 +122,34 @@ export async function collectSitemapEntries(conn: Knex): Promise<SitemapEntry[]>
     .whereIn("votes.meeting_id", whereMeetingPublished(conn("meetings"), "meetings.published_at").select("meetings.id"))
     .orderBy("members.updated_at", "desc");
 
+  /**
+   * A matter is public when at least one of its appearances is on a published
+   * meeting — the same rule `services/matters.ts` enforces for the list and the
+   * detail page, reached here through the same join rather than retyped.
+   *
+   * Listing `matters` wholesale would put every matter derived from a withheld
+   * meeting into a document we hand to search engines, complete with its id.
+   * That is the shape of leak `/api/anomalies` and `/search` each had to be
+   * guarded against separately: a sitemap takes no id, so nobody has to guess
+   * one.
+   */
+  const matters = await conn("matters")
+    .distinct("matters.id")
+    .select("matters.updated_at")
+    .join("matter_appearances", "matter_appearances.matter_id", "matters.id")
+    .join("agenda_items", "agenda_items.id", "matter_appearances.agenda_item_id")
+    .whereIn(
+      "agenda_items.meeting_id",
+      whereMeetingPublished(conn("meetings"), "meetings.published_at").select("meetings.id"),
+    )
+    .orderBy("matters.updated_at", "desc");
+
   return [
     ...STATIC_PATHS.map((path) => ({ path, lastmod: null })),
+    ...matters.map((row: { id: string; updated_at: Date | null }) => ({
+      path: `/matters/${row.id}`,
+      lastmod: isoDate(row.updated_at),
+    })),
     ...meetings.map((row: { id: string; updated_at: Date | null }) => ({
       path: `/meetings/${row.id}`,
       lastmod: isoDate(row.updated_at),

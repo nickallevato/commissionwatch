@@ -107,6 +107,35 @@ describe("GET /api/metrics", () => {
     for (const [key, value] of Object.entries(metrics.review)) {
       assert.equal(typeof value, "number", `review.${key} must be a number`);
     }
+    for (const [key, value] of Object.entries(metrics.quality)) {
+      const expected = key === "roster_sourced" ? "boolean" : "number";
+      assert.equal(typeof value, expected, `quality.${key} must be a ${expected}`);
+    }
+  });
+
+  /**
+   * `rosterCoverage` and the vote-event counts were built as exported functions
+   * with no caller. A quality signal nothing reads is a signal nobody acts on.
+   */
+  it("reports the roster gap, which is what predicts the rejection rate", async () => {
+    const metrics = await collectMetrics(db);
+    assert.equal(typeof metrics.quality.roster_unmatched, "number");
+    assert.equal(typeof metrics.quality.roster_seats_implied, "number");
+  });
+
+  /**
+   * `members` has no source URL, no fetched-at and no artifact sha, so no row
+   * can prove where it came from. Publishing the `false` is the point — it is
+   * the gap that gates the whole claims pipeline, and a page that quietly
+   * reported `true` would be claiming provenance the schema cannot carry.
+   */
+  it("says plainly that no roster is sourced yet", async () => {
+    const metrics = await collectMetrics(db);
+    assert.equal(
+      metrics.quality.roster_sourced,
+      false,
+      "members carries no provenance columns; reporting true would be a claim we cannot support",
+    );
   });
 
   it("derives held findings so the parts always sum to the whole", async () => {

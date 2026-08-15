@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from "express";
+import type { Knex } from "knex";
 import db from "../../config/database";
+import { emitEvent } from "../../services/events";
 import type { IngestionQueue } from "../../services/ingestion/queue";
 import type { SourceScheduler } from "../../services/ingestion/scheduler";
 import {
@@ -16,10 +18,9 @@ import {
   MEETING_PAGE_MAX,
 } from "../../services/pressroom/meetings";
 import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services/pressroom/runs";
-import { OpenRouterClient } from "../../services/extraction/openrouter";
-import { ExtractionUnavailable, runExtraction } from "../../services/extraction/run";
+import { ExtractionUnavailable } from "../../services/extraction/run";
+import { enqueueExtraction } from "../../services/extraction/stage";
 import { isExtracting, listRuns } from "../../services/extraction/runs";
-import { downloadDocument } from "../../services/storage";
 import { listSources, setSourceEnabled } from "../../services/pressroom/sources";
 
 /**
@@ -340,7 +341,19 @@ router.post(
         return;
       }
 
-      res.json(await publishMeetings(db, ids, body.reason, actorOf(req)));
+      const reason = body.reason;
+      const actor = actorOf(req);
+      // One transaction over the whole batch, for `publishMeetings`' reason: a
+      // partial publish that also partially announced would tell readers about
+      // records the log cannot explain. Only the meetings that actually changed
+      // are announced — an already-published one is not republished, so there is
+      // nothing new to say about it.
+      const result = await db.transaction(async (trx) => {
+        const published = await publishMeetings(trx, ids, reason, actor);
+        await announcePublished(trx, published.published);
+        return published;
+      });
+      res.json(result);
     } catch (err) {
       fail(res, err, next);
     }
@@ -348,27 +361,32 @@ router.post(
 );
 
 /**
- * Extract this meeting's minutes into cited claims.
+ * Queue this meeting's minutes for extraction.
  *
  * A route rather than a script, for the reason `services/extraction/run.ts`
  * spells out: the production image ships no `src/`, so an operator action that
  * lives in a CLI script does not exist on the deployment.
  *
+ * It **enqueues**. The previous version fired `void runExtraction(...)` — an
+ * unawaited promise in a request handler, which a deploy or a restart mid-run
+ * silently destroyed, leaving an `extraction_runs` row `running` forever. The
+ * work now owns an `ingestion_jobs` row: it survives a restart, retries with
+ * backoff, holds in a visible `blocked` state, and has a queue depth an
+ * operator can look at. The 202 carries the job id.
+ *
  * Everything it produces is **held**. Every claim names a person, and nothing
  * naming a person auto-publishes — that rule predates this feature and is the
  * reason the feature is allowed to exist at all.
- *
- * The response reports how much of the model's output was thrown away.
- * `proposed` against `verified` is the number that matters: it is the
- * hallucination rate of whichever free model is configured, measured on this
- * document rather than assumed, and an operator watching it fall is watching
- * the guard rail work.
  */
 router.post("/meetings/:id/extract", async (req: Request<{ id: string }>, res, next) => {
   try {
     const { id } = req.params;
     if (!UUID_RE.test(id)) return badId(res, "meeting");
+    const live = requireStack(res);
+    if (live === null) return;
 
+    // Two different "already going": a run the worker has started, and a job
+    // waiting to be claimed. `enqueueExtraction` refuses the second.
     if (await isExtracting(db, id)) {
       res.status(409).json({
         error: "An extraction of this meeting is already running",
@@ -377,25 +395,14 @@ router.post("/meetings/:id/extract", async (req: Request<{ id: string }>, res, n
       return;
     }
 
-    const client = new OpenRouterClient();
-
-    // Started, not awaited. Nine chunks against a free model take minutes, and
-    // nginx's 60-second proxy_read_timeout turned the synchronous version into
-    // a 504 with no JSON body — indistinguishable, from the console, from a
-    // meeting that produced nothing. The work now outlives the request and
-    // reports itself through `extraction_runs`.
-    void runExtraction({ db, read: downloadDocument, client }, id).catch((error: unknown) => {
-      // Already recorded on the run row by runExtraction; logged so a crash
-      // loop is visible in container logs too.
-      console.error(`Extraction of meeting ${id} failed`, error);
-    });
+    const queued = await enqueueExtraction(db, live.queue, id);
 
     res.status(202).json({
-      meeting_id: id,
-      status: "running",
+      ...queued,
+      status: "queued",
       message:
-        "Extraction started. It runs in the background and takes a few minutes; " +
-        "poll GET /meetings/:id/extract-runs for the outcome. Every claim it produces " +
+        "Extraction queued. A worker claims it and takes a few minutes; poll " +
+        "GET /meetings/:id/extract-runs for the outcome. Every claim it produces " +
         "is held for review — nothing naming a person is published without an operator.",
     });
   } catch (err) {
@@ -477,6 +484,57 @@ function actorOf(req: Request): { id: string | null; email: string | null } {
   return { id: req.operator?.id ?? null, email: req.operator?.email ?? null };
 }
 
+/**
+ * Announce meetings that have just gone public — in the transaction that
+ * published them.
+ *
+ * This is the emitter the event spine was missing, and it is load-bearing for
+ * more than meetings. `approveFinding` and `approveClaim` both emit only when
+ * their subject is *already* public, which is correct: approving a finding on a
+ * meeting an operator has withheld is a legitimate act, and `emitEvent` refuses
+ * to announce something no reader can see. The consequence is that those
+ * approvals produce no event at all, and until this function existed nothing
+ * ever announced them — the meeting went out and its findings and claims were
+ * public and unannounced.
+ *
+ * Wrapped in an outer transaction by each caller so the emit and the publish
+ * commit together; `publishMeeting` and `publishMeetings` open a savepoint
+ * inside it rather than a second connection. An event committed while its
+ * publish rolled back announces something that did not happen, and a publish
+ * committed without its event is a record nobody is told about.
+ *
+ * Re-publishing is a real operation — that is how publishing over a known
+ * defect is recorded — and `emitEvent`'s dedupe key makes the second
+ * announcement a no-op rather than a second notification to every subscriber.
+ */
+async function announcePublished(trx: Knex.Transaction, meetingIds: string[]): Promise<void> {
+  for (const meetingId of meetingIds) {
+    const row = await trx("meetings")
+      .join("commissions", "commissions.id", "meetings.commission_id")
+      .where("meetings.id", meetingId)
+      .first<
+        { jurisdiction_id: string | null; commission_name: string | null; date: string } | undefined
+      >(
+        "commissions.jurisdiction_id as jurisdiction_id",
+        "commissions.name as commission_name",
+        trx.raw("meetings.date::text as date"),
+      );
+    if (row === undefined) continue;
+
+    await emitEvent(trx, {
+      event_type: "meeting.published",
+      subject_kind: "meeting",
+      subject_id: meetingId,
+      jurisdiction_id: row.jurisdiction_id,
+      payload: {
+        title: `${row.commission_name ?? "Meeting"}, ${row.date}`,
+        meeting_id: meetingId,
+        meeting_date: row.date,
+      },
+    });
+  }
+}
+
 router.post(
   "/meetings/:id/publish",
   async (req: Request<{ id: string }, unknown, PublishBody>, res, next) => {
@@ -484,7 +542,13 @@ router.post(
       const { id } = req.params;
       if (!UUID_RE.test(id)) return badId(res, "meeting");
       const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
-      const result = await publishMeeting(db, id, reason, actorOf(req));
+      // The publish and its announcement share one transaction. `publishMeeting`
+      // takes the transaction as its executor and opens a savepoint inside it.
+      const result = await db.transaction(async (trx) => {
+        const publication = await publishMeeting(trx, id, reason, actorOf(req));
+        await announcePublished(trx, [id]);
+        return publication;
+      });
       res.json(result);
     } catch (err) {
       fail(res, err, next);

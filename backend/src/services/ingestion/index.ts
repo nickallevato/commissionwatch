@@ -9,6 +9,8 @@ import { registerSources, type RegisteredSource } from "./registration";
 import { SourceScheduler, schedulerEnabled } from "./scheduler";
 import { IngestionWorker } from "./worker";
 import { downloadDocument, uploadDocument } from "../storage";
+import { OpenRouterClient } from "../extraction/openrouter";
+import { createExtractHandler, EXTRACT_CONCURRENCY } from "../extraction/stage";
 
 /**
  * Assembles the ingestion stack.
@@ -52,12 +54,28 @@ export const minioArtifactWriter: ArtifactWriter = {
  */
 export const STATIONARY_STAGES = ["parse", "analyze"] as const;
 
+/**
+ * `extract` gets a worker of its own, not a seat on the stationary one.
+ *
+ * Two reasons. A set of minutes is minutes of sequential model calls, and on a
+ * shared loop with `batchSize: 1` it would stall every parse behind it. And the
+ * free tier is rate-limited per minute, so extraction needs its own low
+ * concurrency knob — `EXTRACT_CONCURRENCY` — rather than inheriting whatever
+ * suits parsing.
+ *
+ * It is still a post-`fetch` stage: content address in, no URL anywhere, so
+ * running it from boot cannot turn a restart into a crawl.
+ */
+export const EXTRACT_STAGES = ["extract"] as const;
+
 export interface IngestionStack {
   registry: AdapterRegistry;
   queue: IngestionQueue;
   worker: IngestionWorker;
   /** Polls `parse` and `analyze` from boot. Never claims a networked stage. */
   stationaryWorker: IngestionWorker;
+  /** Polls `extract` from boot, one job at a time. */
+  extractionWorker: IngestionWorker;
   scheduler: SourceScheduler;
 }
 
@@ -110,6 +128,23 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     // second for nothing.
     idleDelayMs: 5000,
   });
+  /**
+   * The extraction loop.
+   *
+   * Its handler is built here rather than in `createIngestionHandlers` because
+   * it needs an OpenRouter client and no other stage does — and a client
+   * constructed in the shared factory would be built by every test that builds
+   * handlers. Unconfigured, the handler blocks its jobs with "OPENROUTER_API_KEY
+   * is not set", which is the honest state of that deployment rather than a
+   * crash.
+   */
+  const extractionWorker = new IngestionWorker(db, queue, {
+    handlers: { extract: createExtractHandler({ client: new OpenRouterClient() }) },
+    artifacts: createArtifactStore(options.read ?? downloadDocument),
+    batchSize: EXTRACT_CONCURRENCY,
+    stages: EXTRACT_STAGES,
+    idleDelayMs: 5000,
+  });
   const scheduler = new SourceScheduler(db, {
     queue,
     worker,
@@ -117,7 +152,7 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     ...(options.enabled === undefined ? {} : { enabled: options.enabled }),
     ...(options.lookbackDays === undefined ? {} : { lookbackDays: options.lookbackDays }),
   });
-  return { registry, queue, worker, stationaryWorker, scheduler };
+  return { registry, queue, worker, stationaryWorker, extractionWorker, scheduler };
 }
 
 /**
@@ -142,6 +177,21 @@ export async function startIngestion(
       );
     }
   }
+  /**
+   * Anything left `running` by the process this one replaced.
+   *
+   * A claim is only reversible by the worker that made it, so a deploy in the
+   * middle of a job strands that row forever. Recovering at boot is what makes
+   * "the queue is restart-safe" true rather than merely intended — and it is
+   * the reason extraction belongs on the queue at all, since an extract job
+   * holds its claim for minutes and is the likeliest thing to be in flight when
+   * a deploy lands.
+   */
+  const recovered = await stack.queue.recoverStalled();
+  if (recovered > 0) {
+    console.log(`Ingestion: requeued ${recovered} job(s) abandoned by a stopped worker`);
+  }
+
   await stack.scheduler.start();
 
   /**
@@ -181,6 +231,12 @@ export async function startIngestion(
   if (schedulerEnabled()) {
     void stack.stationaryWorker.start().catch((error: unknown) => {
       console.error("Ingestion: parse/analyze worker loop stopped", error);
+    });
+    // Same gate, same reasoning, its own loop: without it an operator's
+    // "extract" button would enqueue a job nothing ever claims — which is the
+    // failure re-parse had for a day, reported as success and producing silence.
+    void stack.extractionWorker.start().catch((error: unknown) => {
+      console.error("Ingestion: extract worker loop stopped", error);
     });
   }
 
