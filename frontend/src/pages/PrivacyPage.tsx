@@ -219,14 +219,19 @@ export function PrivacyPage() {
               rule exists so you do not have to take our word for that.
             </Body>
             <Body>
-              Three pieces of this policy are a stated intention, not a
-              running system yet, and we are saying so rather than implying
+              A housekeeping job now clears out old operator sign-in records
+              on its own. Once a day it removes any session row past its
+              absolute expiry — it does not touch a session still within its
+              window, and a person signing in stays signed in exactly as
+              before. That table no longer grows forever untouched.
+            </Body>
+            <Body>
+              Two pieces of this policy are still a stated intention, not a
+              running system, and we are saying so rather than implying
               otherwise: the automatic version of dispute-contact removal
-              described above, a time limit after which an unsubscribed
+              described above, and a time limit after which an unsubscribed
               contact's saved address or phone number is purged rather than
-              only disabled, and a housekeeping job that would clear out old
-              operator sign-in records automatically instead of relying on
-              someone to run it by hand.
+              only disabled.
             </Body>
           </section>
 

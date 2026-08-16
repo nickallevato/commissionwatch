@@ -21,7 +21,7 @@ tree on 2026-08-16, not from prose. File paths and migration numbers are cited i
 | `dispute_notifications` | hashed address only | Cascades with its dispute | N/A — no plaintext to remove |
 | `email_suppressions` | hashed address only | No — must persist by design | N/A — permanent by design |
 | `record_corrections` | operator email (not reader PII) | **No — DB-enforced, not deletable, ever** | Trigger (migration 031) |
-| `operator_sessions` | operator IP, user agent | Session ends on revoke; row itself is not purged automatically | `sweepExpiredSessions()` exists but **nothing calls it** |
+| `operator_sessions` | operator IP, user agent | Session ends on revoke; row itself is not purged automatically | `sweepExpiredSessions()`, wired into a daily scheduler on 2026-08-16 (`52cfd60`) |
 | `export_snapshots` / `export_snapshot_runs` | none (public record only) | See existing spec — deletion refused | Schema bound (`_runs`); none (`_snapshots`, by design) |
 
 ---
@@ -171,15 +171,18 @@ immediately, but **the row is not deleted**. `validateSession()` refuses any ses
 
 **What enforces cleanup.** `AuthService.sweepExpiredSessions()`
 (`backend/src/services/auth/operators.ts:296-301`) exists and does exactly this — "Bounds table
-growth. Nothing depends on it for correctness" — but a repo-wide search
-(`grep -rn "sweepExpiredSessions" backend/src`) finds **no caller**. It is invoked from tests only.
-**Nothing enforces this yet**: expired and revoked sessions accumulate in the table indefinitely
-until an operator or a future scheduler calls this method.
+growth. Nothing depends on it for correctness." **Corrected 2026-08-16 (maturity review 2, H2):**
+this section originally reported that a repo-wide search found no caller and that the method was
+invoked from tests only. That is no longer true. `52cfd60` wired it into
+`SessionSweepScheduler` (`backend/src/services/auth/session-sweep.ts`), armed unconditionally in
+`backend/src/index.ts` at boot and stopped on shutdown, running on a 24-hour interval and deleting
+sessions past `absolute_expires_at`. `backend/test/session-sweep.test.ts` asserts the scheduler is
+actually constructed and started in `src/index.ts`, not merely that the class exists.
 
-**Policy stated here.** Wire `sweepExpiredSessions()` into the existing scheduler (the same
-mechanism that drives ingestion) on a daily cadence, deleting sessions past `absolute_expires_at`.
-This is low-risk since the method already exists and is already proven safe by its own tests — it
-is a wiring gap, not a design gap. **Not yet done.**
+**Policy stated here, and now done.** Wire `sweepExpiredSessions()` into the existing scheduler
+mechanism, on a daily cadence, deleting sessions past `absolute_expires_at`. This was low-risk since
+the method already existed and was already proven safe by its own tests — it was a wiring gap, not
+a design gap. **Done, 2026-08-16.**
 
 ---
 
@@ -224,9 +227,9 @@ item named it explicitly, not because it changes the PII picture above.
   it in the open rather than treating it as pending.
 - `export_snapshots` deletion is refused, per the adopted spec.
 - The dispute rate limiter stores nothing durable about a submitter's IP.
+- `sweepExpiredSessions()` is wired into a daily scheduler. (§4 — done 2026-08-16, `52cfd60`.)
 
 **Committed as a decision, not yet built** (each listed with what would need to change):
-- Wire `sweepExpiredSessions()` into the scheduler. (§4 — smallest lift, method already exists.)
 - A redaction path for `record_disputes.contact` on decided disputes, on request. (§2 — new code.)
 - A time-boxed purge of the encrypted destination on unsubscribed/unverified `delivery_channels`
   rows. (§1 — new code, and a chosen window.)

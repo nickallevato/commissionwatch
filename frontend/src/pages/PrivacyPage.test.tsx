@@ -82,14 +82,31 @@ describe("PrivacyPage", () => {
   it("names the retention gaps that are a decision but not yet built, without implying they exist", () => {
     renderPage();
     expect(
-      screen.getByText(/stated intention, not a running system yet/i),
+      screen.getByText(/stated intention, not a running system/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/time limit after which an unsubscribed contact's saved address/i),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * `sweepExpiredSessions()` was wired into a daily scheduler on 2026-08-16
+   * (`52cfd60`, `backend/src/services/auth/session-sweep.ts`). This page must
+   * say it runs, not that it is merely planned — a privacy page that
+   * understates what the project does about personal data is still wrong
+   * about personal data.
+   */
+  it("states that the operator session sweep now runs, not that it is only planned", () => {
+    renderPage();
     expect(
-      screen.getByText(/housekeeping job that would clear out old operator sign-in records/i),
+      screen.getByText(/housekeeping job now clears out old operator sign-in records/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/removes any session row past its absolute expiry/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/housekeeping job that would clear out old operator sign-in records/i),
+    ).not.toBeInTheDocument();
   });
 
   it("does not cite the test-fixture correction row count as if it were production", () => {
