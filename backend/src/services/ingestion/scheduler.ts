@@ -339,6 +339,32 @@ export class SourceScheduler {
   }
 
   /**
+   * One recovery pass: stranded jobs and stranded runs.
+   *
+   * `IngestionQueue.recoverStalled` was called **once, at boot**, on the
+   * reasoning that a claim is only reversible by the worker that made it and a
+   * deploy is what strands one. That covers a process that died — a restart
+   * follows, and boot recovery runs.
+   *
+   * It does not cover the case this codebase actually creates. Every standing
+   * loop in `startIngestion` is started with a `.catch()` that logs "worker loop
+   * stopped" and lets the process carry on serving. A loop that dies that way
+   * takes no container with it, so **no boot ever happens**, and whatever job it
+   * held stays `running` until someone deploys. Recovering runs on a timer while
+   * leaving jobs to a restart that may never come is half a fix, and the half
+   * left out is the one with no other backstop.
+   */
+  private async recoverAbandoned(): Promise<void> {
+    const jobs = await this.options.queue.recoverStalled();
+    if (jobs > 0) {
+      this.logger.warn(
+        `SourceScheduler: requeued ${jobs} job(s) abandoned by a stopped worker loop`,
+      );
+    }
+    await this.recoverAbandonedRuns();
+  }
+
+  /**
    * Closes runs left `running` by a process that no longer exists.
    *
    * `IngestionQueue.recoverStalled` already does this for **jobs**, and its
@@ -440,8 +466,8 @@ export class SourceScheduler {
      * `stop()`.
      */
     this.recoveryTimer = setInterval(() => {
-      void this.recoverAbandonedRuns().catch((error: unknown) => {
-        this.logger.error(`SourceScheduler: abandoned-run recovery failed — ${errorMessage(error)}`);
+      void this.recoverAbandoned().catch((error: unknown) => {
+        this.logger.error(`SourceScheduler: recovery pass failed — ${errorMessage(error)}`);
       });
     }, this.recoveryIntervalMs);
     this.recoveryTimer.unref();

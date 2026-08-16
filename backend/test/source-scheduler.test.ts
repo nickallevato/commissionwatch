@@ -619,6 +619,39 @@ describe("SourceScheduler.recoverAbandonedRuns", () => {
     }
   });
 
+  it("requeues a job stranded by a worker loop that died without the process", async () => {
+    // The case boot recovery cannot reach. Every standing loop is started with
+    // a .catch() that logs and lets the process carry on serving, so a loop
+    // that dies takes no container with it and no boot ever happens.
+    const runId = await insertRun(60, {});
+    const [job] = await db("ingestion_jobs")
+      .insert({
+        run_id: runId,
+        stage: "discover",
+        target: JSON.stringify({ since: "2026-01-01T00:00:00.000Z" }),
+        status: "running",
+        attempts: 1,
+        updated_at: db.raw("now() - interval '90 minutes'"),
+      })
+      .returning("id");
+
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }), {
+      recoveryIntervalMs: 20,
+    });
+
+    try {
+      await scheduler.start();
+      const row = await waitFor(async () => {
+        const current = await db("ingestion_jobs").where({ id: job.id }).first();
+        return current.status === "pending" ? current : null;
+      });
+      assert.match(row.last_error, /stopped without finishing it/);
+      assert.equal(Number(row.attempts), 1, "the crashed attempt was still an attempt");
+    } finally {
+      scheduler.stop();
+    }
+  });
+
   it("stops checking once the scheduler stops", async () => {
     const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }), {
       recoveryIntervalMs: 20,
