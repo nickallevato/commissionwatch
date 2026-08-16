@@ -22,6 +22,26 @@
  * with a hole in it that reads exactly like a transcript without one — and this
  * project publishes the result as the custodian's record.
  *
+ * ## Where that rule was doing harm, and the distinction that fixes it
+ *
+ * A cue whose end precedes its start used to throw, and on 2026-08-16 that had
+ * blocked five Bozeman transcripts outright — one of them 2,352 lines — after
+ * five attempts each. The inversions were 69ms to 391ms: an encoder rounding
+ * artifact, not a corrupt file.
+ *
+ * Refusing the whole transcript to avoid mis-stating four hundred milliseconds
+ * of it is the trade backwards. But *skipping* the cue would be the hole this
+ * module refuses. So there is a third answer, and it is the only one that keeps
+ * both halves: **repair the span, keep every character of the text, and record
+ * that it happened.** `endMsAsPublished` carries what the file actually said, so
+ * the repair is visible rather than laundered, and nothing the custodian wrote
+ * is lost or invented.
+ *
+ * No threshold on how inverted a cue may be. Every observed case is under half a
+ * second, and picking a cutoff from that sample would be inventing a number this
+ * project has no evidence for — a wildly inverted cue will show up in the
+ * recorded count rather than being silently tolerated or silently refused.
+ *
  * The sampled files use none of WebVTT's optional machinery: across clips 2775
  * and 2786 there are no cue identifiers, no `NOTE`/`STYLE`/`REGION` blocks, no
  * cue settings after the arrow, no inline tags, and timestamps always in the long
@@ -44,6 +64,15 @@ export interface VttCue {
   endMs: number;
   /** The payload verbatim. Multi-line payloads keep their line breaks. */
   text: string;
+  /**
+   * What the file gave as the end time, when that was **before** the start and
+   * `endMs` above was therefore clamped to `startMs`.
+   *
+   * Absent on every well-formed cue, so its presence is the whole record of the
+   * repair. Reading a transcript's cues and finding none of these means nothing
+   * was adjusted.
+   */
+  endMsAsPublished?: number;
 }
 
 /** Raised when the bytes are WebVTT-shaped but a specific line cannot be read. */
@@ -173,11 +202,16 @@ export function parseWebVttCues(bytes: Uint8Array): VttCue[] {
         `end timestamp ${JSON.stringify(endToken)} is not HH:MM:SS.mmm or MM:SS.mmm`,
       );
     }
+    // Repaired, not refused and not skipped — see the module docblock. The
+    // span collapses to a point at the start time, the text is untouched, and
+    // `endMsAsPublished` keeps what the file said.
+    const text = block.slice(arrowAt + 1).join('\n');
     if (endMs < startMs) {
-      throw new WebVttParseError(timingLineNo, `cue ends at ${endMs}ms before it starts at ${startMs}ms`);
+      cues.push({ startMs, endMs: startMs, text, endMsAsPublished: endMs });
+      continue;
     }
 
-    cues.push({ startMs, endMs, text: block.slice(arrowAt + 1).join('\n') });
+    cues.push({ startMs, endMs, text });
   }
 
   return cues;

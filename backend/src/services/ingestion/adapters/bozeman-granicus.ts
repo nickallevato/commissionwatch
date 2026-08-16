@@ -577,7 +577,15 @@ export function createBozemanGranicusAdapter(
 ): SourceAdapter {
   const transport =
     options.transport ??
-    createPoliteTransport({ userAgent: BOZEMAN_USER_AGENT, minDelayMs: BOZEMAN_MIN_DELAY_MS });
+    createPoliteTransport({
+      userAgent: BOZEMAN_USER_AGENT,
+      minDelayMs: BOZEMAN_MIN_DELAY_MS,
+      // A retry that is only visible as slowness is a retry nobody can debug.
+      onRetry: ({ url, attempt, waitMs, reason }) =>
+        (options.logger ?? consoleLogger).warn(
+          `bozeman-granicus: retry ${attempt} of ${url} in ${waitMs}ms after ${reason}`,
+        ),
+    });
   const documentCache = options.documentCache ?? createMemoryDocumentCache();
   const now = options.now ?? ((): Date => new Date());
   const respectRobotsTxt = options.respectRobotsTxt ?? false;

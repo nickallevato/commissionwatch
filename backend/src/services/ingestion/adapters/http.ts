@@ -22,7 +22,88 @@ export const COMMISSIONWATCH_USER_AGENT =
 /** Default gap between two requests when an adapter states none. */
 export const DEFAULT_MIN_DELAY_MS = 2000;
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+export const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * How many times a request is retried after a *transient* failure.
+ *
+ * Two, so a request gets three goes in total. Deliberately small: the job queue
+ * behind this transport already retries with its own backoff, and stacking a
+ * generous in-request retry on top of that turns one unlucky night into a
+ * multiplied hammering of a county web server. This layer exists for the
+ * failure the queue handles badly — a single timed-out or rate-limited request
+ * inside an otherwise good pass — not as a second retry budget.
+ */
+export const DEFAULT_MAX_RETRIES = 2;
+
+/**
+ * The longest `Retry-After` this transport will actually wait out.
+ *
+ * A server asking for two minutes gets two minutes. A server asking for an hour
+ * gets the request abandoned and the job returned to the queue, which will come
+ * back later anyway — holding a worker idle for an hour would stall every other
+ * source behind it.
+ */
+export const MAX_RETRY_AFTER_MS = 120_000;
+
+/** Statuses that mean "not now, come back" rather than "no". */
+const BACKOFF_STATUSES = new Set([429, 503]);
+
+/**
+ * A request that never produced a response, with enough context to diagnose it.
+ *
+ * **The original failure is carried verbatim in `reason`, never replaced.** A
+ * connection reset is not a timeout, and an error class that flattened both
+ * into "aborted" would be the same loss of information it exists to fix.
+ *
+ * The reason this class exists: on 2026-08-16 Gallatin's discover stage failed
+ * in production with exactly `AbortError: This operation was aborted` — no URL,
+ * no elapsed time, no indication of which of a dozen requests had been in
+ * flight. The failure could not be diagnosed from its own logs, and probing the
+ * source from outside could not reproduce it. An error that cannot say what it
+ * was doing is a failure to observe, not a failure to handle.
+ */
+export class HttpRequestFailed extends Error {
+  constructor(
+    readonly url: string,
+    readonly elapsedMs: number,
+    readonly timeoutMs: number,
+    readonly attempts: number,
+    /** The underlying failure, verbatim — `AbortError: …`, `TypeError: fetch failed`, … */
+    readonly reason: string,
+  ) {
+    super(
+      `request to ${url} failed after ${elapsedMs}ms ` +
+        `(${attempts} attempt${attempts === 1 ? '' : 's'}, ${timeoutMs}ms timeout): ${reason}`,
+    );
+    this.name = 'HttpRequestFailed';
+  }
+
+  /** True when this was our own timer rather than the host or the network. */
+  get timedOut(): boolean {
+    return this.reason.startsWith('AbortError');
+  }
+}
+
+/**
+ * `Retry-After` in milliseconds — delta-seconds or an HTTP-date — or null.
+ *
+ * Null for an absent, unparseable or past date, so a malformed header falls
+ * through to ordinary backoff rather than being read as "retry immediately",
+ * which is the reading that turns a rate limit into a hammering.
+ */
+export function parseRetryAfter(header: string | undefined, now: number): number | null {
+  if (header === undefined) return null;
+  const text = header.trim();
+  if (text === '') return null;
+
+  if (/^\d+$/.test(text)) return Number(text) * 1000;
+
+  const at = Date.parse(text);
+  if (Number.isNaN(at)) return null;
+  const delta = at - now;
+  return delta > 0 ? delta : null;
+}
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -126,6 +207,13 @@ export interface PoliteTransportOptions {
   /** Floor on the gap between two requests. */
   minDelayMs?: number;
   timeoutMs?: number;
+  /** Retries after a transient failure. Defaults to {@link DEFAULT_MAX_RETRIES}. */
+  maxRetries?: number;
+  /**
+   * Told when a request is retried, so a stall is visible in the log rather
+   * than only in a wall-clock that looks slow.
+   */
+  onRetry?: (detail: { url: string; attempt: number; waitMs: number; reason: string }) => void;
   /** Injected for tests; defaults to global `fetch`. */
   fetchImpl?: FetchLike;
   /** Injected for tests; defaults to `Date.now`. */
@@ -163,19 +251,35 @@ export function createPoliteTransport(options: PoliteTransportOptions = {}): Htt
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const now = options.now ?? (() => Date.now());
   const sleep = options.sleep ?? realSleep;
+  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const onRetry = options.onRetry ?? ((): void => undefined);
   const doFetch: FetchLike = options.fetchImpl ?? fetch;
 
   let lastRequestAt = Number.NEGATIVE_INFINITY;
   // Serializes requests: maxConcurrency is 1, and it is 1 because the queue is a chain.
   let queue: Promise<unknown> = Promise.resolve();
 
-  async function perform(request: HttpRequest): Promise<HttpResponse> {
+  /**
+   * Exponential backoff between attempts, floored at the politeness delay.
+   *
+   * Never *shorter* than `minDelayMs`: a retry is still a request to the same
+   * host, and a transport that backed off faster than it crawls would answer a
+   * server's "slow down" by speeding up.
+   */
+  function backoffMs(attempt: number): number {
+    return Math.max(minDelayMs, minDelayMs * 2 ** attempt);
+  }
+
+  async function attemptOnce(
+    request: HttpRequest,
+  ): Promise<{ ok: true; response: HttpResponse; status: number; retryAfter: string | undefined } | { ok: false; elapsedMs: number; reason: string }> {
     const waitMs =
       lastRequestAt === Number.NEGATIVE_INFINITY ? 0 : lastRequestAt + minDelayMs - now();
     if (waitMs > 0) {
       await sleep(waitMs);
     }
     lastRequestAt = now();
+    const startedAt = now();
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -216,14 +320,90 @@ export function createPoliteTransport(options: PoliteTransportOptions = {}): Htt
         response.status === 304 ? new Uint8Array(0) : new Uint8Array(await response.arrayBuffer());
 
       return {
+        ok: true,
         status: response.status,
-        headers: flat,
-        setCookies,
-        bytes,
-        finalUrl: response.url === '' ? request.url : response.url,
+        retryAfter: flat['retry-after'],
+        response: {
+          status: response.status,
+          headers: flat,
+          setCookies,
+          bytes,
+          finalUrl: response.url === '' ? request.url : response.url,
+        },
+      };
+    } catch (error) {
+      // Every failure here is a *transport* failure — the request never
+      // produced a response. The elapsed time is captured at the point of
+      // failure rather than reconstructed later, because it is the one number
+      // that distinguishes "the host went quiet" from "we gave up early".
+      return {
+        ok: false,
+        elapsedMs: now() - startedAt,
+        reason: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
       };
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /**
+   * One request, with retries for the failures that are worth retrying.
+   *
+   * Three kinds of outcome and three different answers:
+   *
+   *  - **A response, any status other than 429/503** — returned as-is. Deciding
+   *    what a 403 or a 404 means is the adapter's job, not the transport's, and
+   *    a transport that retried them would turn a refusal into a hammering.
+   *  - **429 or 503** — the server asking for time. `Retry-After` is honoured
+   *    when it is present and sane, and ordinary backoff used when it is not.
+   *    After the last attempt the response is *returned* rather than thrown, so
+   *    the adapter still sees the status the server actually sent.
+   *  - **No response at all** (timeout, connection reset, DNS) — retried, then
+   *    raised as `HttpTimeoutError` naming the URL and how long it ran.
+   */
+  async function perform(request: HttpRequest): Promise<HttpResponse> {
+    let lastElapsedMs = 0;
+    let lastReason = 'no attempt was made';
+
+    for (let attempt = 0; ; attempt += 1) {
+      const outcome = await attemptOnce(request);
+
+      if (outcome.ok && !BACKOFF_STATUSES.has(outcome.status)) {
+        return outcome.response;
+      }
+
+      const isLast = attempt >= maxRetries;
+
+      if (outcome.ok) {
+        // 429 or 503.
+        if (isLast) return outcome.response;
+        const asked = parseRetryAfter(outcome.retryAfter, now());
+        const waitMs =
+          asked === null ? backoffMs(attempt) : Math.min(asked, MAX_RETRY_AFTER_MS);
+        onRetry({
+          url: request.url,
+          attempt: attempt + 1,
+          waitMs,
+          reason: `HTTP ${outcome.status}${asked === null ? '' : ` (Retry-After ${asked}ms)`}`,
+        });
+        await sleep(waitMs);
+        continue;
+      }
+
+      lastElapsedMs = outcome.elapsedMs;
+      lastReason = outcome.reason;
+      if (isLast) {
+        throw new HttpRequestFailed(
+          request.url,
+          lastElapsedMs,
+          timeoutMs,
+          attempt + 1,
+          lastReason,
+        );
+      }
+      const waitMs = backoffMs(attempt);
+      onRetry({ url: request.url, attempt: attempt + 1, waitMs, reason: lastReason });
+      await sleep(waitMs);
     }
   }
 

@@ -4,7 +4,11 @@ import db from "../src/config/database";
 import { classifyRun, SweepDeadlineReached } from "../src/services/ingestion/scheduler";
 import { IngestionQueue } from "../src/services/ingestion/queue";
 import { meetingParseStatus } from "../src/services/pressroom/meetings";
-import { STATIONARY_STAGES } from "../src/services/ingestion";
+import {
+  FETCH_STAGES,
+  fetchWorkerEnabled,
+  STATIONARY_STAGES,
+} from "../src/services/ingestion";
 import { cleanupByPrefix, createMeeting, createRun, createSource } from "./helpers/pressroom";
 
 /**
@@ -91,6 +95,43 @@ describe("the standing worker cannot reach the network", () => {
     assert.deepEqual([...STATIONARY_STAGES], ["parse", "analyze"]);
     assert.ok(!STATIONARY_STAGES.includes("fetch" as never));
     assert.ok(!STATIONARY_STAGES.includes("discover" as never));
+  });
+});
+
+/**
+ * The follow-through this suite's own docblock had been describing since
+ * 2026-08-10 without anything acting on it.
+ *
+ * "That source can never finish in one run" was written as an observation about
+ * one sweep. It is really a statement about convergence: fetch was drained only
+ * inside a fifteen-minute box, at a published ten-second crawl-delay — about
+ * ninety documents a night — while each nightly discover added hundreds. On
+ * 2026-08-16 the queue held 1,639 pending fetches, the oldest three days old.
+ */
+describe("fetch can drain outside a sweep, when an operator says so", () => {
+  it("is its own stage list, so the standing worker keeps its safety property", () => {
+    assert.deepEqual([...FETCH_STAGES], ["fetch"]);
+    // The stationary loop's guarantee is unchanged in every deployment: the
+    // fetch loop is a separate worker, not a stage bolted onto that one.
+    assert.ok(!STATIONARY_STAGES.includes("fetch" as never));
+  });
+
+  it("is off unless an operator sets the flag", () => {
+    // Every other loop inherits `schedulerEnabled`. This one cannot: turning it
+    // on changes what a county's vendor sees from us, and that is not a
+    // decision to inherit from a code change.
+    assert.equal(fetchWorkerEnabled({}), false);
+    assert.equal(fetchWorkerEnabled({ NODE_ENV: "production" }), false);
+    assert.equal(fetchWorkerEnabled({ FETCH_WORKER_ENABLED: "" }), false);
+    assert.equal(fetchWorkerEnabled({ FETCH_WORKER_ENABLED: "false" }), false);
+    assert.equal(fetchWorkerEnabled({ FETCH_WORKER_ENABLED: "0" }), false);
+    assert.equal(fetchWorkerEnabled({ FETCH_WORKER_ENABLED: "no" }), false);
+  });
+
+  it("is on for the affirmative spellings an operator would actually write", () => {
+    for (const raw of ["1", "true", "TRUE", "yes", "on"]) {
+      assert.equal(fetchWorkerEnabled({ FETCH_WORKER_ENABLED: raw }), true, raw);
+    }
   });
 });
 

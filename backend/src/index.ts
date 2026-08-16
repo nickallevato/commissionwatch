@@ -185,6 +185,10 @@ function shutdown() {
   // serve the archive over.
   ingestion.governorWorker?.stop();
   ingestion.locateWorker.stop();
+  // Stopped whether or not it was started: `stop()` on an unstarted worker is
+  // a no-op, and the alternative — reading the env flag again here — would
+  // leave a running crawl unstopped if the flag ever changed under us.
+  ingestion.fetchWorker.stop();
   eventDrain.stop();
   prerender.stop();
   exportSnapshots.stop();

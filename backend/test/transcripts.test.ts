@@ -223,6 +223,40 @@ describe("parseWebVttCues", () => {
     );
   });
 
+  it("repairs a cue that ends before it starts instead of losing the transcript", () => {
+    // Five Bozeman transcripts were blocked on this in production, one of them
+    // 2,352 lines, for inversions of 69ms to 391ms. Refusing a whole record to
+    // avoid mis-stating four hundred milliseconds of it is the trade backwards.
+    const inverted = new TextEncoder().encode(
+      [
+        "WEBVTT",
+        "",
+        "00:00:01.000 --> 00:00:02.000",
+        "first",
+        "",
+        "00:04:25.780 --> 00:04:25.711",
+        "second",
+        "",
+      ].join("\n"),
+    );
+
+    const cues = parseWebVttCues(inverted);
+
+    assert.equal(cues.length, 2, "the cue is kept, not skipped — a hole reads like no hole");
+    assert.equal(cues[1].text, "second", "every character of the payload survives");
+    assert.equal(cues[1].startMs, 265_780);
+    assert.equal(cues[1].endMs, 265_780, "the span collapses to a point at the start");
+    assert.equal(cues[1].endMsAsPublished, 265_711, "what the file said is kept, not laundered");
+  });
+
+  it("leaves no repair marker on a well-formed cue", () => {
+    // The marker's absence is what makes its presence mean something.
+    const cues = parseWebVttCues(
+      new TextEncoder().encode("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nfine\n"),
+    );
+    assert.equal(cues[0].endMsAsPublished, undefined);
+  });
+
   it("throws rather than ignoring a block it cannot classify", () => {
     assert.throws(
       () => parseWebVttCues(new TextEncoder().encode("WEBVTT\n\nnot a cue at all\n")),

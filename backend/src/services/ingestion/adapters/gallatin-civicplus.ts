@@ -464,7 +464,16 @@ export function createGallatinCivicPlusAdapter(
 ): SourceAdapter {
   const transport =
     options.transport ??
-    createPoliteTransport({ userAgent: GALLATIN_USER_AGENT, minDelayMs: GALLATIN_MIN_DELAY_MS });
+    createPoliteTransport({
+      userAgent: GALLATIN_USER_AGENT,
+      minDelayMs: GALLATIN_MIN_DELAY_MS,
+      // The 2026-08-16 abort was undiagnosable partly because a retried request
+      // left no trace at all. This is that trace.
+      onRetry: ({ url, attempt, waitMs, reason }) =>
+        console.warn(
+          `[${GALLATIN_ADAPTER_KEY}] retry ${attempt} of ${url} in ${waitMs}ms after ${reason}`,
+        ),
+    });
   const documentCache = options.documentCache ?? createMemoryDocumentCache();
   const now = options.now ?? (() => new Date());
   const respectRobotsTxt = options.respectRobotsTxt ?? true;

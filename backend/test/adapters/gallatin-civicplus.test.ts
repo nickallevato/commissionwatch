@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { expect } from '../helpers/expect';
 import { runAdapterContract } from './contract';
+import { parseRetryAfter } from '../../src/services/ingestion/adapters/http';
 import {
   GALLATIN_ADAPTER_KEY,
   GALLATIN_AGENDA_CENTER_URL,
@@ -676,6 +677,9 @@ describe('createPoliteTransport', () => {
   });
 
   it('keeps serving after a request fails', async () => {
+    // The guarantee this has always been about: one failed request must not
+    // poison the serialising chain behind it. Pinned with retries off, so it
+    // tests the chain rather than the retry policy layered over it.
     let call = 0;
     const flaky: FetchLike = async () => {
       call += 1;
@@ -685,12 +689,137 @@ describe('createPoliteTransport', () => {
     const transport = createPoliteTransport({
       fetchImpl: flaky,
       sleep: async () => undefined,
+      maxRetries: 0,
     });
 
     await expect(transport({ url: `${GALLATIN_ORIGIN}/a`, method: 'GET' })).rejects.toThrow(
-      'boom',
+      /boom/,
     );
     const second = await transport({ url: `${GALLATIN_ORIGIN}/b`, method: 'GET' });
     expect(second.status).toBe(200);
+  });
+
+  it('retries a transport failure and succeeds on the second attempt', async () => {
+    let call = 0;
+    const flaky: FetchLike = async () => {
+      call += 1;
+      if (call === 1) throw new Error('boom');
+      return new Response('ok', { status: 200 });
+    };
+    const transport = createPoliteTransport({ fetchImpl: flaky, sleep: async () => undefined });
+
+    const response = await transport({ url: `${GALLATIN_ORIGIN}/a`, method: 'GET' });
+
+    expect(response.status).toBe(200);
+    expect(call).toBe(2);
+  });
+
+  it('names the URL and the elapsed time when a request runs out of attempts', async () => {
+    // The whole reason this error class exists: production logged
+    // "AbortError: This operation was aborted" with no URL, no elapsed time and
+    // no way to tell which of a dozen requests had been in flight.
+    const dead: FetchLike = async () => {
+      throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
+    };
+    const transport = createPoliteTransport({ fetchImpl: dead, sleep: async () => undefined });
+
+    await expect(transport({ url: `${GALLATIN_ORIGIN}/slow`, method: 'GET' })).rejects.toThrow(
+      /gallatinmt\.gov\/slow failed after \d+ms \(3 attempts, \d+ms timeout\): AbortError/,
+    );
+  });
+
+  it('waits out a Retry-After rather than pressing on', async () => {
+    // "Sleep if needed to not get blocked" — a 429 is the server saying exactly
+    // how long to wait, and honouring it is cheaper than being banned.
+    const slept: number[] = [];
+    let call = 0;
+    const limited: FetchLike = async () => {
+      call += 1;
+      if (call === 1) {
+        return new Response('slow down', { status: 429, headers: { 'Retry-After': '7' } });
+      }
+      return new Response('ok', { status: 200 });
+    };
+    const transport = createPoliteTransport({
+      fetchImpl: limited,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+
+    const response = await transport({ url: `${GALLATIN_ORIGIN}/a`, method: 'GET' });
+
+    expect(response.status).toBe(200);
+    expect(slept).toContain(7000);
+  });
+
+  it('never backs off faster than it crawls', async () => {
+    // A Retry-After shorter than the politeness delay must not become licence
+    // to go quicker than the crawl rate we publish.
+    const slept: number[] = [];
+    let call = 0;
+    const limited: FetchLike = async () => {
+      call += 1;
+      if (call === 1) return new Response('', { status: 503 });
+      return new Response('ok', { status: 200 });
+    };
+    // A clock that advances when the transport sleeps, so the politeness gap is
+    // measured against simulated time rather than against a wall clock that
+    // never moved.
+    let clock = 1_000_000;
+    const transport = createPoliteTransport({
+      fetchImpl: limited,
+      minDelayMs: 2000,
+      now: () => clock,
+      sleep: async (ms) => {
+        slept.push(ms);
+        clock += ms;
+      },
+    });
+
+    await transport({ url: `${GALLATIN_ORIGIN}/a`, method: 'GET' });
+
+    expect(slept.every((ms) => ms >= 2000)).toBe(true);
+  });
+
+  it('hands the adapter the real status when the server never relents', async () => {
+    // Returned, not thrown: a 429 that outlives our retries is a fact about the
+    // server, and the adapter decides what it means.
+    const limited: FetchLike = async () => new Response('', { status: 429 });
+    const transport = createPoliteTransport({
+      fetchImpl: limited,
+      sleep: async () => undefined,
+      maxRetries: 1,
+    });
+
+    const response = await transport({ url: `${GALLATIN_ORIGIN}/a`, method: 'GET' });
+
+    expect(response.status).toBe(429);
+  });
+});
+
+
+describe('parseRetryAfter', () => {
+  const NOW = Date.parse('2026-08-16T12:00:00.000Z');
+
+  it('reads delta-seconds', () => {
+    expect(parseRetryAfter('120', NOW)).toBe(120_000);
+  });
+
+  it('reads an HTTP-date as the remaining wait', () => {
+    expect(parseRetryAfter('Sun, 16 Aug 2026 12:00:30 GMT', NOW)).toBe(30_000);
+  });
+
+  it('returns null for a date already in the past', () => {
+    // Not zero. Zero would read as "retry immediately", which is how a rate
+    // limit becomes a hammering.
+    expect(parseRetryAfter('Sun, 16 Aug 2026 11:59:00 GMT', NOW)).toBe(null);
+  });
+
+  it('returns null for absent or unreadable headers rather than guessing', () => {
+    expect(parseRetryAfter(undefined, NOW)).toBe(null);
+    expect(parseRetryAfter('', NOW)).toBe(null);
+    expect(parseRetryAfter('soon please', NOW)).toBe(null);
+    expect(parseRetryAfter('-5', NOW)).toBe(null);
   });
 });
