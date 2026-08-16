@@ -18,9 +18,12 @@ project invariants. Invoke it before planning or implementing anything substanti
 brainstorm → spec → plan → fan-out pipeline, the rules for parallel agents, and the constraints
 that make published output defensible.
 
-**Live:** `https://commissionwatch.bmux.sh` — deployed and healthy. Ingestion is wired as of
-2026-08-09 and a real Gallatin sweep has run locally; the live source is registered **disabled**
-until an operator enables it. See `docs/STATUS.md`.
+**Live:** `https://commissionwatch.bmux.sh` — deployed and healthy. **All three sources are enabled
+and collecting as of 2026-08-16**: `bozeman-granicus` (1,639 records), `gallatin-civicplus` (43, its
+first ever — the discover stage had been failing on an unretried transient abort), and `mt-cers`
+(137, first sweep, at one request every five seconds). `fetch` drains continuously via
+`FETCH_WORKER_ENABLED`; without it the queue could not converge, since a nightly fifteen-minute
+window fetches ~90 documents against hundreds discovered. See `docs/STATUS.md`.
 
 Current design of record:
 `docs/superpowers/specs/2026-08-04-commissionwatch-production-design.md`

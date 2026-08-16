@@ -2578,11 +2578,17 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    keys are free to reissue — and the value must never appear in this repository or in an SSM
    command payload. **Operator action; cannot be delegated.**
 
-1. **Enable Gallatin on the live host and install the backup cron.** The code for both landed
-   2026-08-09; neither is switched on in production. `npm run sweep -- --adapter gallatin-civicplus
-   --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
-   same time — as of 2026-08-16 `backup.sh` exits non-zero and pages `ops.backup_offsite_missing`
-   every night it is unset, specifically so this line item cannot be silently deferred again.
+1. ~~**Enable Gallatin on the live host**~~ — **done 2026-08-16, and it took more than a switch.**
+   All three sources are now enabled and collecting. Gallatin had in fact been enabled and sweeping
+   for days while collecting **nothing**: its `discover` stage died on `AbortError: This operation
+   was aborted`, with no URL, no elapsed time and no retry behind it. It could not be reproduced by
+   probing the source from outside, because it was a single transient failure that nothing tried
+   twice. Two retries with backoff and it collected on the first attempt.
+
+   Still outstanding from this item: **install the backup cron** — the `17 4 * * *` entry from
+   `deploy/README.md` §5 — and set `BACKUP_S3_URI` at the same time. As of 2026-08-16 `backup.sh`
+   exits non-zero and pages `ops.backup_offsite_missing` every night it is unset, specifically so
+   this line item cannot be silently deferred again. **Operator action.**
 1b. **Fix the repetition loop that truncates a fifth of every document.** ~20% of every set of
    minutes is currently never read, and as of **2026-08-15 that share is measured rather than
    estimated**: 5 of 24 chunks unread (20.8%), and **every one of them `truncated-reply` — 100%,

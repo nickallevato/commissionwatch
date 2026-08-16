@@ -38,6 +38,75 @@ had toggled either was writing rows nothing consulted. See *Two switches that co
 
 ---
 
+### All three ingestion sources collect records, for the first time
+
+**Completeness: Shipped.** Verified against production 2026-08-16: `bozeman-granicus` 1,639
+records, `gallatin-civicplus` 43, `mt-cers` 137. Zero failed jobs, zero blocked.
+
+Found by reading production's own queue rather than reasoning about the code. Three unrelated
+defects, none of them the one being chased:
+
+**The archive could not converge.** `fetch` drained only inside a sweep, boxed at fifteen minutes,
+at Bozeman's published `Crawl-delay: 10` — about ninety documents a night, while each night's
+`discover` added hundreds. The queue held **1,639 pending fetches, the oldest three days old, and
+`drained_last_hour: 0`**. That zero was correct behaviour, which is why nothing had flagged it. The
+fix is not to fetch faster: the crawl-delay is a published commitment and is unchanged. It is to
+stop stopping. `FETCH_WORKER_ENABLED` gives `fetch` a standing loop — off in code, on in this
+deployment's compose, because what changes is daily volume against a county's vendor and that is a
+deployment's decision. A one-minute startup delay answers the crash-loop objection that had kept
+`fetch` out of the standing worker: a politeness delay is held per process, so restarts reset it.
+
+**Gallatin had collected nothing in its entire existence.** Its `discover` died on `AbortError:
+This operation was aborted` — no URL, no elapsed time, nothing to diagnose. A previous session had
+probed the source directly, could not reproduce it, and correctly concluded the defect was missing
+instrumentation. It was also a single transient failure that nothing retried. The transport now
+retries twice with backoff, honours `Retry-After` on 429 and 503 up to two minutes, **never backs
+off faster than it crawls**, and raises an error naming the URL, the elapsed time and the underlying
+failure verbatim. Gallatin collected on the first attempt afterwards.
+
+**Five Bozeman transcripts were blocked outright**, one of them 2,352 lines, because a cue ended 69
+to 391ms before it started — an encoder rounding artifact. `webvtt.ts` refuses to skip a cue it
+cannot read, on the sound principle that a transcript with a hole reads exactly like one without.
+Refusing an entire record to avoid mis-stating four hundred milliseconds of it is that principle
+inverted. There is a third answer: **repair the span, keep every character, and record what the file
+said** in `endMsAsPublished`. Those transcripts wrote 13,491 cues on the next pass.
+
+Supporting work, each of which was its own missing piece:
+
+- **`POST /jobs/unblock`.** `IngestionQueue.unblock` had existed since the queue was written with
+  nothing able to call it, so a job blocked by a defect stayed blocked after the defect was fixed.
+- **Abandoned runs close on a timer.** A deploy mid-sweep stranded `ingestion_runs` rows `running`
+  forever; the console reported "Sweeping" for a process replaced hours earlier. Recovery at boot
+  alone missed the common case — a run four minutes old at boot is under the threshold that protects
+  a live sweep — so it now also runs every five minutes.
+- **`mt-cers` could only ever see the same five candidates.** The cap sliced an alphabetically
+  ordered roster from the front, so candidate six of forty-two was unreachable by any number of
+  sweeps. The window rotates by the day: same cost per sweep, whole roster over a cycle.
+- **The state site was slowed from 2s to 5s before its first request.** `cers-ext.mt.gov` publishes
+  no `robots.txt`, so two seconds was a rate this project chose for a host that never agreed to it.
+- **The queue screen says whether anything drains `fetch`.** A deep, motionless queue and a broken
+  worker looked identical, which is the one distinction that screen exists to make.
+
+### Source health is two verdicts, not one
+
+**Completeness: Shipped.**
+
+`gallatin-civicplus` read **`healthy`** while holding zero records, ever. Both halves were true of
+different things: the machinery had completed a run, and the archive was empty. A single verdict has
+to pick one, and it picked the flattering one — on the public `/status` page as well as the console.
+
+`pipeline` now answers *does the machinery work* and `collection` answers *is there anything in the
+archive*, dated from the last run that landed a record rather than the last that exited cleanly.
+`assessCollection` never consults `last_success_at`, and its input type has no such field, so the
+conflation cannot be quietly rebuilt. Both are shown together — "Scraper" and "Archive" on the
+public page — and a source with a healthy scraper and an empty archive now reaches the console's
+attention list, which is exactly the case it could not previously see.
+
+The external monitor reads `lifetime_records` and **warns** on an enabled source that has never
+collected anything. That is not the concession its docstring refuses: silence is an inference the
+subject draws about itself, a lifetime count is a fact the monitor has no second source for. Warn
+rather than fail, because promoting it to a page is an operator's decision.
+
 ### Two switches that controlled nothing
 
 **Completeness: Shipped.**
