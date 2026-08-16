@@ -325,6 +325,77 @@ export class SourceScheduler {
   }
 
   /**
+   * Closes runs left `running` by a process that no longer exists.
+   *
+   * `IngestionQueue.recoverStalled` already does this for **jobs**, and its
+   * docblock names the failure exactly — "a claim is only reversible by the
+   * worker that made it, so a deploy in the middle of a job strands that row
+   * forever". The same sentence is true of `ingestion_runs`, and nothing acted
+   * on it. `runSweep` writes the run row before any work and closes it after,
+   * with no `finally`: kill the process in between and the row stays `running`
+   * with a null `finished_at` for as long as the database lives.
+   *
+   * Seen in production on 2026-08-16: both sources opened runs at 07:17Z, a
+   * deploy replaced the process at 12:33Z, and at 17:22Z `/api/ingestion/sources`
+   * still reported both as `running` with frozen counters. The console read
+   * "Sweeping" for a sweep that had not existed in five hours.
+   *
+   * **Source health is deliberately not touched.** A killed process says nothing
+   * about whether the source is healthy, and `updateSourceHealth` stamps
+   * `last_success_at` with `now()` — which for a run that died hours ago would
+   * be a fresher success than actually happened. Recording a false recency on
+   * the silence watch to tidy up a display is the wrong trade. The next real
+   * sweep sets health from evidence.
+   *
+   * The threshold is what makes this safe to run while a sweep is live: a run
+   * older than several times the sweep deadline cannot still be in progress.
+   */
+  async recoverAbandonedRuns(olderThanMs: number = this.sweepTimeoutMs * 2): Promise<number> {
+    if (!Number.isFinite(olderThanMs) || olderThanMs <= 0) {
+      throw new RangeError("recoverAbandonedRuns olderThanMs must be a positive number");
+    }
+    const rows: unknown = await this.db("ingestion_runs")
+      .where({ status: "running" })
+      .where(
+        "started_at",
+        "<",
+        this.db.raw("now() - (? * interval '1 millisecond')", [olderThanMs]),
+      )
+      .select("id", "counts", "error");
+    if (!Array.isArray(rows) || rows.length === 0) return 0;
+
+    let recovered = 0;
+    for (const row of rows) {
+      if (!isRecord(row) || typeof row.id !== "string") continue;
+      const counts = isRecord(row.counts) ? row.counts : {};
+      const work = SUCCESS_KEYS.reduce((total, key) => {
+        const value = counts[key];
+        return total + (typeof value === "number" ? value : 0);
+      }, 0);
+      // Work that reached the database is real whether or not the sweep lived to
+      // report it, so a run that ingested anything is `partial`, not `failed`.
+      const status: RunStatus = work > 0 ? "partial" : "failed";
+      const note =
+        "the process running this sweep stopped before it finished; " +
+        "closed on restart from the counts it had recorded";
+      const existing = typeof row.error === "string" && row.error !== "" ? `${row.error}\n` : "";
+      await this.db("ingestion_runs")
+        .where({ id: row.id, status: "running" })
+        .update({
+          status,
+          finished_at: this.db.fn.now(),
+          error: `${existing}${note}`,
+          updated_at: this.db.fn.now(),
+        });
+      recovered += 1;
+      this.logger.warn(
+        `SourceScheduler: run ${row.id} was abandoned by a stopped process; closed ${status}`,
+      );
+    }
+    return recovered;
+  }
+
+  /**
    * Schedules every enabled source. **Sweeps nothing.**
    *
    * The first execution of any source is its first cron tick. This is the
@@ -491,6 +562,11 @@ export class SourceScheduler {
       this.logger.info(`SourceScheduler: source ${sourceId} is disabled; nothing swept`);
       return this.remember({ kind: "skipped", reason: "disabled", sourceId });
     }
+
+    // Before opening a new run, close any that a dead process left open — a
+    // stuck `running` row is most visible on the sources screen, and this is the
+    // one moment that screen is about to change anyway.
+    await this.recoverAbandonedRuns();
 
     // The run row is written BEFORE any work, so a sweep that dies on its first
     // request is still visible as a sweep that happened and failed — not as a

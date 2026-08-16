@@ -421,3 +421,121 @@ describe("SourceScheduler — one sweep per source", () => {
     assert.equal(runs.length, 2);
   });
 });
+
+/**
+ * Runs abandoned by a process that stopped mid-sweep.
+ *
+ * `runSweep` opens the run row before any work and closes it after, with no
+ * `finally` in between — so a deploy, an OOM kill or any other death leaves the
+ * row `running` with a null `finished_at` permanently. Production did exactly
+ * that on 2026-08-16: two runs opened at 07:17Z were still reported `running`
+ * ten hours later, by a process built at 12:33Z that had never seen them.
+ */
+describe("SourceScheduler.recoverAbandonedRuns", () => {
+  async function insertRun(
+    startedMinutesAgo: number,
+    counts: Record<string, number>,
+    error: string | null = null,
+  ): Promise<string> {
+    const [row] = await db("ingestion_runs")
+      .insert({
+        source_id: sourceId,
+        status: "running",
+        counts: JSON.stringify(counts),
+        error,
+        started_at: db.raw("now() - (? * interval '1 minute')", [startedMinutesAgo]),
+      })
+      .returning("id");
+    return row.id;
+  }
+
+  it("closes an abandoned run that ingested something as partial, not failed", async () => {
+    // The records reached the database whether or not the sweep lived to report
+    // them. Calling this `failed` would throw away work that actually happened.
+    const runId = await insertRun(60, { discovered: 12, fetched: 30 });
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    assert.equal(await scheduler.recoverAbandonedRuns(30 * 60 * 1000), 1);
+
+    const row = await db("ingestion_runs").where({ id: runId }).first();
+    assert.equal(row.status, "partial");
+    assert.notEqual(row.finished_at, null);
+    assert.match(row.error, /stopped before it finished/);
+  });
+
+  it("closes an abandoned run that ingested nothing as failed", async () => {
+    const runId = await insertRun(60, {});
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    await scheduler.recoverAbandonedRuns(30 * 60 * 1000);
+
+    const row = await db("ingestion_runs").where({ id: runId }).first();
+    assert.equal(row.status, "failed");
+  });
+
+  it("keeps the errors the run had already recorded", async () => {
+    // Recovery explains why the row is being closed. It is not licence to erase
+    // what the sweep had already reported about itself.
+    const runId = await insertRun(60, {}, "robots.txt disallowed /Archive");
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    await scheduler.recoverAbandonedRuns(30 * 60 * 1000);
+
+    const row = await db("ingestion_runs").where({ id: runId }).first();
+    assert.match(row.error, /robots\.txt disallowed/);
+    assert.match(row.error, /stopped before it finished/);
+  });
+
+  it("leaves a run younger than the threshold alone", async () => {
+    // The guard seen to hold. Without an age threshold this would close the
+    // sweep that is running right now, mid-flight.
+    const runId = await insertRun(5, { discovered: 1 });
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    assert.equal(await scheduler.recoverAbandonedRuns(30 * 60 * 1000), 0);
+
+    const row = await db("ingestion_runs").where({ id: runId }).first();
+    assert.equal(row.status, "running");
+    assert.equal(row.finished_at, null);
+  });
+
+  it("does not touch source health, because a dead process is not a sick source", async () => {
+    // `updateSourceHealth` stamps `last_success_at` with now(). Applying it here
+    // would record a success fresher than anything that happened, and the
+    // silence watch reads that column.
+    await insertRun(60, { discovered: 5 });
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    await scheduler.recoverAbandonedRuns(30 * 60 * 1000);
+
+    const source = await db("ingestion_sources").where({ id: sourceId }).first();
+    assert.equal(source.last_success_at, null);
+    assert.equal(Number(source.consecutive_failures), 0);
+    assert.equal(source.health_status, "healthy");
+  });
+
+  it("refuses a threshold that is not a positive number", async () => {
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+    await assert.rejects(() => scheduler.recoverAbandonedRuns(0), RangeError);
+    await assert.rejects(() => scheduler.recoverAbandonedRuns(Number.NaN), RangeError);
+  });
+
+  it("closes an abandoned run as a side effect of the next sweep", async () => {
+    // The console reads the latest run. A stuck row is most visible there, and
+    // the sweep is the moment that screen changes anyway.
+    const stale = await insertRun(60, { discovered: 3 });
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    const outcome = await scheduler.sweepSource(sourceId);
+    assert.equal(outcome.kind, "ran");
+
+    const row = await db("ingestion_runs").where({ id: stale }).first();
+    assert.equal(row.status, "partial");
+    assert.notEqual(row.finished_at, null);
+    const stillRunning = await db("ingestion_runs")
+      .where({ source_id: sourceId, status: "running" })
+      .count({ total: "*" })
+      .first();
+    assert.equal(Number(stillRunning?.total), 0, "no run may be left open after a sweep");
+  });
+});

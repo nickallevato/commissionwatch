@@ -304,6 +304,22 @@ export async function startIngestion(
     });
   }
 
+  /**
+   * The same recovery for run rows, which the job-level one never covered.
+   *
+   * A deploy mid-sweep left `ingestion_runs` rows `running` forever, so the
+   * sources screen reported a sweep in progress for a process that had been
+   * replaced hours earlier. Requeuing the jobs without closing the run fixed the
+   * work and left the reporting wrong.
+   */
+  const closedRuns = await stack.scheduler.recoverAbandonedRuns();
+  if (closedRuns > 0) {
+    structuredLogger.info("Ingestion: closed run(s) abandoned by a stopped process", {
+      service: "ingestion",
+      closedRuns,
+    });
+  }
+
   await stack.scheduler.start();
 
   /**

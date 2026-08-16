@@ -246,6 +246,27 @@ Deliverable: have the monitor fail on `verdict: failing` (or on a run open past 
 `expected_interval_hours` to something derived from the cron rather than seven times it; fix the
 docstring. Probe what is actually hanging the run before designing the third of those.
 
+> **The "what is hanging the run" half is answered and fixed, 2026-08-16.** Nothing was hanging. A
+> third probe at 17:22Z found both runs still `running` — ten hours into a fifteen-minute sweep
+> deadline — while `/api/version` reported the process was **built at 12:33Z**. The process that
+> opened those runs had been replaced by a deploy five hours earlier and never closed them.
+>
+> `runSweep` writes the run row before any work and closes it after, with no `finally` between, so
+> any death in between strands the row permanently. `IngestionQueue.recoverStalled` already solved
+> exactly this for **jobs** — its docblock even names the failure, *"a claim is only reversible by
+> the worker that made it"* — and boot called it for jobs only. Requeuing the work while leaving the
+> run open fixed the pipeline and left the reporting wrong, which is why the console read "Sweeping"
+> for a sweep that had not existed since lunchtime.
+>
+> Fixed by `SourceScheduler.recoverAbandonedRuns`, called at boot beside `recoverStalled` and again
+> before each sweep opens a run. A recovered run is `partial` if it had ingested anything and
+> `failed` if it had not, its prior errors are kept, and **source health is deliberately not
+> touched** — `updateSourceHealth` stamps `last_success_at` with `now()`, which for a run that died
+> hours ago would feed the silence watch a success fresher than any that happened.
+>
+> The two monitor items above are untouched and still open. This closes the cause of the stuck row,
+> not the reason the monitor stayed green about it.
+
 ### 6. Dead code that nothing imports, found by the coverage baseline
 
 `backend/src/services/vote-events.ts` is a real service module. **Nothing under `backend/src`
