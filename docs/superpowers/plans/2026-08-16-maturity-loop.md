@@ -270,3 +270,26 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   6.9's agent stalled on a backgrounded test run — the third agent today to do that. Resumed with
   foreground-only instructions and a specific ask: if breaking the publication wall does **not** fail
   its test, say so, because that finding would matter more than the test.
+- **09:40Z** — Spent this tick diagnosing, and the finding is an environmental one worth keeping.
+
+  6.9's agent stalled four times "waiting for a test run". It was not a tooling habit: its own first
+  run never exited, every retry contended with it, and underneath both sat a **zombie
+  `test/feeds.test.ts` process running for 113,043 seconds — 31 hours** — from a session before
+  today, holding a database connection the whole time. Killed all of them, precisely by PID rather
+  than `pkill -f`, which cost me a running poll earlier today.
+
+  **My own measurement was also wrong for two attempts.** I piped the run to `grep`, so when
+  `timeout` killed it the buffered output was discarded and I read "no output" as "hangs before
+  producing anything". Writing to a file first showed the real error immediately:
+  `duplicate key value violates unique constraint "artifacts_sha256_unique"`. A killed run had never
+  reached `after()`, so its artifact row survived and poisoned every later run. Cleared it, and the
+  test **passed at once — exit 0**.
+
+  **Two real defects fell out**, both sent back: the suite is not idempotent, so one crashed run
+  poisons all future runs while the error points at a constraint rather than the cause; and a failed
+  `before()` leaves the pool undestroyed, so a broken fixture presents as a hang instead of a failure
+  in seconds. That second one is why four stalls looked like agent behaviour and were not.
+
+  The work is genuinely incomplete — 2 `it` blocks against a 7-step chain — so it is **not**
+  committed. Approve, public visibility, and the retraction half are all still missing, and the wall
+  mutation has still never been run.
