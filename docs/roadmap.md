@@ -3,6 +3,12 @@
 > Last updated: 2026-08-16. Statuses in Phases 1–3 were **stale for twelve days** —
 > several items reading "Planned" had shipped. Corrected against the tree and against
 > production on 2026-08-16. See *Gaps this roadmap does not name*, below.
+>
+> **Phases 6 and 7 were added later the same day**, from
+> [the maturity review](superpowers/specs/2026-08-16-maturity-review.md). That review's finding about
+> this document: Phases 1–5 are all *feature* phases, and there was nowhere in it to track
+> operations, security, data retention or sustainability — so roughly half of what it found was not
+> undone work but **untracked** work.
 
 ## Overview
 
@@ -125,6 +131,62 @@ tokens (the deep red accent `#B03A2E` goes muddy on a dark ground and needs `#E0
 observation that severity here is never carried by colour alone — `SeverityMark` uses a numeral and
 an `sr-only` span — which removes the usual expensive part of theming a status UI.
 
+## Phase 6 — Operational and security floor
+
+**Added 2026-08-16** from
+[the maturity review](superpowers/specs/2026-08-16-maturity-review.md), which assessed this project
+against SRE, OWASP ASVS, DORA and TMMi and found that **Phases 1–5 are all feature phases**. Every
+piece of operational and security work this project has done lives in `docs/STATUS.md` prose or in
+`deploy/README.md`, where it has no status, no owner and no place in a sequence. This phase is that
+place.
+
+**Starts:** immediately, in parallel with everything else. Nothing here waits on a feature phase.
+
+| # | Deliverable | Description | Status |
+|---|---|---|---|
+| 6.1 | Off-instance backup, and proof the cron runs | `BACKUP_S3_URI` is unset, so `deploy/backup.sh` writes its archive to the same instance that holds the database and the MinIO objects — a copy, not a backup. The `17 4 * * *` cron entry is also not confirmed installed. Deliverable: a bucket, `BACKUP_S3_URI` set, the cron installed, and a check that fails when the newest off-instance archive is older than its allowance. **`deploy/restore-drill.sh` already exists and has been run** — this is the missing leg, not the whole thing. Needs an operator decision on cost. | **Planned — rank 1** |
+| 6.2 | Dependency and supply-chain hygiene | No dependency scanning exists anywhere in the repo. Measured 2026-08-16: **backend 9 advisories (3 high), frontend 15 (7 high, 1 critical)** — mostly build-time, but including a react-router open redirect shipped in the public SPA, plus `qs` and `body-parser` DoS in the running API. Deliverable: an `npm audit` gate in `.gitea/workflows/deploy.yml` with an explicit, reasoned allow-list; a stated upgrade cadence; and a rotation cadence for secrets (one superseded OpenRouter key is still live in Parameter Store version history). SBOM and image scanning are the stretch half. | **Planned — rank 2** |
+| 6.3 | Host and resource checks in the external monitor | The monitor checks HTTP, database connectivity, sha agreement, release drift and ingestion staleness. It does not check disk, memory or database size — and on 2026-08-15 the deploy host filled its disk, the release failed, the site stayed up, and nothing alerted. Deliverable: disk, memory and table-growth checks in `external-monitor.ts`, using the same four-state `CheckState` including `blocked`. | **Planned** |
+| 6.4 | One owner for security headers, and HSTS on the document | Findings 1 and 2 of `superpowers/specs/2026-08-16-security-review.md`, both re-verified live on 2026-08-16 and both still open. Two layers set conflicting `X-Frame-Options` and `Referrer-Policy`; `GET /` carries no `Strict-Transport-Security`. Deliverable: one nominated owning layer, the others stripped, and a test that asserts the final header set through the real stack. | **Planned** |
+| 6.5 | An incident record, and the DORA four keys | MTTR cannot be computed today because no incident is recorded with a start and an end — the 2026-08-09 four-hour 502 and the 2026-08-15 disk exhaustion exist only as prose. Deployment frequency and change failure rate *are* computable from the Gitea API and nothing computes them (measured 2026-08-16: **15.7% change failure rate over the last 100 deploys, 48.8% all-time**). Deliverable: an incident log with timestamps and a postmortem template, plus a script that reports the four keys and separates a caught-bad-change failure from a flaky-pipeline failure. | **Planned** |
+| 6.6 | A stated SLO | Nothing in this repository defines what "up" means for this site, so nothing can say whether the four-hour outage was a breach. Deliverable: an availability and freshness objective published where a reader can see it — freshness matters more than uptime for a watchdog, since "denial of collection" is already named as a vulnerability class in `SECURITY.md`. | **Planned** |
+| 6.7 | Backend test coverage measurement | `frontend` has `test:coverage`; `backend` has none, so 2038 tests run against `backend/src` with no idea which modules they never touch. `error-handler.ts` had zero test references until 2026-08-14 and writing tests for it found two real defects; coverage is the instrument that finds the next one. Deliverable: a coverage run and a reported baseline. **Not** a coverage threshold gate — that buys assertion-free tests. | **Planned** |
+| 6.8 | Structured logging | No `pino`/`winston`/`sentry`/`opentelemetry` in either package; 139 raw `console.*` calls in `backend/src`. Nothing can answer "how many 500s did we serve yesterday, on which route." Deliverable: one structured logger with request ids, and error counts exposed where the monitor can read them. | **Planned** |
+| 6.9 | One end-to-end browser test of the review→publish path | No Playwright/Cypress/Puppeteer exists. The paths never exercised by a machine are the highest-stakes ones: operator sign-in → claims review → approve → the claim visible on a public page, and the nginx crawler/prerender split with its `Vary: User-Agent`. Each was verified by hand-curl once and is now protected by nothing. Deliverable: **one** test covering that path, not a suite. | **Planned** |
+| 6.10 | Rate limit and cache on the public read surface | Finding 3 of the security review: `/api/search` is unthrottled and uncached, on a 4 GB host shared with four other product stacks, so the blast radius is the operator's other products. **The number is an operator decision** — a limit set too low on a transparency site is its own kind of failure — and the finding is reasoned from the code path, not measured. Deliverable: the operator's number, a short `cache-control` on search, and a load test that turns the reasoning into a measurement. | **Planned — blocked on an operator decision** |
+
+## Phase 7 — Sustainability and stewardship
+
+**Added 2026-08-16.** The maturity review rated this the weakest category in the project — **Level 1
+of 5** — and it is the one where *Gaps* §5 below is half-right: it names the risk of an external
+source being withdrawn, and not the mirror image, which is this project's own promises.
+
+**Starts:** in parallel. 7.1 is coupled to *Gaps* §1 below — reviewer throughput and reviewer
+*count* are the same constraint seen from two ends.
+
+| # | Deliverable | Description | Status |
+|---|---|---|---|
+| 7.1 | A second reviewer, as a role | `git shortlog -sne --all` returns one human (43 commits) beside the agent identity (431). Every operator-only task in `docs/STATUS.md` — the four open decisions, the backup cron, the key rotation, reading the Montana statute — has exactly one person who can do it, and that person also reviews every claim. Production on 2026-08-16: 215 meetings, **1 published**; 64 claims, **0 approved**; nothing published since 2026-08-11. Making one reviewer twice as fast is a 2× improvement on a resource of size one. Deliverable: a reviewer role distinct from the single operator class, with its own permissions and its own onboarding document. Note this also closes the gap that authorisation *within* an authenticated session has never been tested, because today there is nothing to separate. | **Planned** |
+| 7.2 | An API stability and deprecation policy | This project publishes `/api/data`, `/api/data/ocd.json`, `/feed.xml`, `/feed.rss` and an MCP endpoint and invites people to build on them, with **no version prefix, no `Sunset` header support, and no stated stability tier**. The research is already done — the ProPublica Congress API is dead and Open States has been absorbed into commercial Plural (see *Gaps* §5). Deliverable: a published policy naming which endpoints are stable, what notice a withdrawal gets, and that a withdrawal is **announced on the corrections log rather than 404'd**. Decide it now, not at the moment of withdrawal. | **Planned** |
+| 7.3 | Retention policy — reader PII and internal ledgers | `PrivacyPage.tsx` states plainly that personal information given to the project "has no deletion schedule … indefinitely. That is not a considered retention policy." That honesty is why data governance still passes; it is not a policy. Separately, `record_corrections` holds 14,528 rows in the test database with DELETE forbidden by migration 031, and `export_snapshot_runs`/`export_snapshots` have no policy at all. Deliverable: a retention schedule for subscriber addresses, phone numbers and dispute-filer contact details; a subject-access and deletion path; and a decision on the append-only ledgers **before** something reads them in bounded batches. | **Planned** |
+| 7.4 | A funding and continuity statement | `SECURITY.md` says "volunteer watchdog project with no bounty programme"; nothing states who pays for the host, the domain, the model tokens, or the S3 bucket 6.1 needs — and cost is the stated blocker on 6.1, which makes a funding gap into an availability gap. Deliverable: a published statement of what running this costs, who pays, and what happens to the published record if it stops. The two cautionary tales this project already researched are both organisations that could not keep a public data service alive. | **Planned** |
+| 7.5 | An accessibility statement, and a language-access decision | WCAG 2.2 AA is a stated conformance target with computed contrast ratios — in a design spec no reader will ever open. Deliverable: an `/accessibility` page saying what is claimed, what is known non-conforming, and how to report a barrier; plus keyboard and screen-reader testing of the operator console, which 6.x's `axe-core` sweep cannot cover and which the reviewer-throughput work depends on. Record a language-access position at the same time — English-only is defensible for Bozeman and Gallatin and has never been written down, and Phase 4.2 will meet a jurisdiction that has a legal one. | **Planned** |
+
+### What Phase 6 and 7 deliberately do **not** contain
+
+Refusals and scope decisions, listed so they are not re-filed as gaps: audio recordings and
+transcription (reaching the media requires fingerprint spoofing — probed, refused, with a test
+asserting the media hosts never enter `allowedOrigins`); weakening the human review gate; on-call
+paging for a team of one; a bug bounty; a WAF or managed anti-bot layer; `.github/workflows`; an SSH
+deploy path; a Redis queue; adopting a local-meeting data standard (there is not one); a Legistar
+adapter; and internationalisation as a *feature*, as opposed to 7.5's decision to record.
+
+### Stale in `docs/STATUS.md`, corrected here
+
+`docs/STATUS.md` §2411 still lists installing the external monitor's cron as an outstanding operator
+task. **It is installed and firing** — verified 2026-08-16 against the Gitea Actions API: monitor
+runs land on a 15-minute tick at :00/:15/:30/:45, with 580 successful runs to date.
+
 ## Gaps this roadmap does not name
 
 Added 2026-08-16. Everything above describes **building capability**. The platform's actual
@@ -195,6 +257,19 @@ withdrawal.
 2. **Probe for a roster**, as its own piece of work, because a phase depends on it.
 3. **Schedule the four operator decisions**, even if the answer to some is "not yet".
 4. **Then** return to Phases 2 and 3.
+
+**Revised 2026-08-16 by the maturity review.** Two items belong ahead of all four, because they are
+about not losing what already exists rather than about making it move:
+
+0. **6.1 — get a backup off the instance.** The database, the object store and every backup archive
+   are on one host. The restore drill has been run; the copy has never left. This is the only
+   finding in the maturity review whose failure mode is unrecoverable.
+0b. **6.2 — start scanning dependencies.** 24 live advisories, found by running `npm audit` for the
+   first time, including a react-router open redirect in the shipped SPA. The finding is not the 24;
+   it is that nobody would have known.
+
+And one correction to item 1: the constraint is not only reviewer *speed*, it is reviewer *count*.
+See **7.1**.
 
 ## Design Principles
 
