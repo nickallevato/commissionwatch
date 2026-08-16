@@ -560,3 +560,17 @@ instruction, not about the agents** — and I had the evidence after the second 
   identical attempts have piled up for one source — while `enqueueExtraction` refuses exactly that
   with a 409. Recorded as gap 7, with the instruction to probe rather than reason from the error
   string.
+- **12:20Z** — Reviewer still working; no verdict file yet. Used the free slot for gap 7, but scoped
+  it to a **probe only, no code changes** — so it cannot collide with the verdict, and because this
+  project's own rule says to probe an external source before designing against it. An `AbortError`
+  has several plausible causes and reasoning from the string would pick the wrong fix.
+
+  Told it the conduct line explicitly: honest user agent, low rate, no concurrency, and **if the
+  source needs fingerprint spoofing, TLS manipulation, CAPTCHA solving or proxy rotation, stop and
+  report** — the answer there is a public-records request, not a workaround.
+
+  Also asked it to settle a sequencing question I do not want decided by accident: **fixing this
+  makes Gallatin collect for the first time**, which produces claims about named people and
+  therefore review-queue load. There are already 64 unreviewed claims and one reviewer. Whether the
+  fix should wait on reviewer throughput is a product decision, and it deserves a stated answer
+  rather than being discovered when the queue doubles.
