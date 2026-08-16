@@ -1,6 +1,8 @@
 # CommissionWatch — Roadmap
 
-> Last updated: 2026-08-04
+> Last updated: 2026-08-16. Statuses in Phases 1–3 were **stale for twelve days** —
+> several items reading "Planned" had shipped. Corrected against the tree and against
+> production on 2026-08-16. See *Gaps this roadmap does not name*, below.
 
 ## Overview
 
@@ -13,10 +15,10 @@ This roadmap outlines the implementation plan for CommissionWatch, an AI-powered
 | # | Deliverable | Description | Status |
 |---|---|---|---|
 | 1.1 | Repo setup + scaffolding | Public repo, monorepo structure, Docker Compose, CI | Done |
-| 1.2 | Public web dashboard (MVP) | React 18 + Vite single-page app — landing page, jurisdiction browser, meeting rundown viewer, agent status overview. Light editorial design, serif headlines, single red accent, mobile-responsive. | Planned |
+| 1.2 | Public web dashboard (MVP) | React 18 + Vite single-page app — landing page, jurisdiction browser, meeting rundown viewer, agent status overview. Light editorial design, serif headlines, single red accent, mobile-responsive. | Done |
 | 1.3 | Core agent orchestrator | Claude Code harness integration, zero-permission security model, explicit tool grants with tests | Done |
-| 1.4 | Meeting Monitor Agent | Scrape Bozeman city council agendas/minutes, parse PDF/HTML, generate quick rundown sheets, flag anomalies | Planned |
-| 1.5 | Data layer setup | PostgreSQL + pgvector schema, MinIO for document storage | Planned |
+| 1.4 | Meeting Monitor Agent | Scrape Bozeman city council agendas/minutes, parse PDF/HTML, generate quick rundown sheets, flag anomalies | Done |
+| 1.5 | Data layer setup | PostgreSQL + pgvector schema, MinIO for document storage | Done |
 | 1.6 | Docker Compose deployment | Full stack (backend, frontend, db, minio) running via `docker compose up` | Done |
 | 1.7 | AWS demo deployment | Single instance on AWS, DNS on Route53, <$20/mo target | Done |
 
@@ -57,11 +59,11 @@ This roadmap outlines the implementation plan for CommissionWatch, an AI-powered
 
 | # | Deliverable | Description | Status |
 |---|---|---|---|
-| 2.1 | Follow-the-Money Agent | OpenFEC + Montana campaign finance API integration | Planned |
-| 2.2 | Vote Tracker Agent | Record votes, detect patterns, cross-reference donors | Planned |
-| 2.3 | Cross-reference engine | Automated votes ↔ donations correlation | Planned |
+| 2.1 | Follow-the-Money Agent | OpenFEC + Montana campaign finance API integration | Partial — OpenFEC live; MT CERS adapter built, registered **disabled** |
+| 2.2 | Vote Tracker Agent | Record votes, detect patterns, cross-reference donors | Partial — schema and `vote_events` shipped; **0 votes recorded**, blocked on roster |
+| 2.3 | Cross-reference engine | Automated votes ↔ donations correlation | Built — `services/finance/correlation.ts`; no data to correlate yet |
 | 2.4 | Money trail visualizations | Interactive graphs showing donor → PAC → candidate → vote → contract flows | Planned |
-| 2.5 | Alert system | Email + webhook notifications for flagged items | Planned |
+| 2.5 | Alert system | Email + webhook notifications for flagged items | Built, **shipped dark** behind `EVENT_DRAIN_ENABLED`; email blocked on DNS |
 
 ## Phase 3 — Deep Intelligence
 
@@ -74,8 +76,8 @@ This roadmap outlines the implementation plan for CommissionWatch, an AI-powered
 | 3.1 | Member Profiler Agent | Build and maintain dossiers on commission members | Planned |
 | 3.2 | Document Digger Agent | Monitor public records, OCR, entity extraction, anomaly detection | Planned |
 | 3.3 | Deep Dive Reports | On-demand investigation reports triggered by pattern detection | Planned |
-| 3.4 | Vector search | Semantic search across all ingested documents via pgvector | Planned |
-| 3.5 | Jurisdiction expansion | Gallatin County + additional Montana jurisdictions | Planned |
+| 3.4 | Vector search | Semantic search across all ingested documents via pgvector | Done — migration 008 embeddings; full-text live at `/api/search` |
+| 3.5 | Jurisdiction expansion | Gallatin County + additional Montana jurisdictions | Partial — Gallatin adapter live and enabled; 0 records collected to date |
 
 ## Phase 4 — Scale & Community
 
@@ -98,9 +100,9 @@ This roadmap outlines the implementation plan for CommissionWatch, an AI-powered
 
 | # | Deliverable | Description | Status |
 |---|---|---|---|
-| 5.1 | One palette | Point `tailwind.config.ts` colours at the `--cw-*` custom properties, with a guard test, so the palette has one definition instead of two hand-synchronised copies. Worth doing on its own merits. | Planned |
-| 5.2 | Dark theme — operator console | `/admin/*` first: it is where a person spends hours, and it has a real component library rather than inline class strings. | Planned |
-| 5.3 | Dark theme — public site | Higher care: prerendered pages, and the light editorial identity is deliberate. Needs an explicit operator decision. | Planned |
+| 5.1 | One palette | Point `tailwind.config.ts` colours at the `--cw-*` custom properties, with a guard test, so the palette has one definition instead of two hand-synchronised copies. Worth doing on its own merits. | **Done 2026-08-16** |
+| 5.2 | Dark theme — operator console | `/admin/*` first: it is where a person spends hours, and it has a real component library rather than inline class strings. | **Done 2026-08-16** |
+| 5.3 | Dark theme — public site | Higher care: prerendered pages, and the light editorial identity is deliberate. Needs an explicit operator decision. | **Done 2026-08-16** — follows `prefers-color-scheme`, no toggle, nothing stored |
 
 **Dark theme (5.1–5.3), added 2026-08-16 at the operator's request.**
 
@@ -122,6 +124,77 @@ Two findings already in hand: a complete dark palette drafted and checked agains
 tokens (the deep red accent `#B03A2E` goes muddy on a dark ground and needs `#E0705E`), and the
 observation that severity here is never carried by colour alone — `SeverityMark` uses a numeral and
 an `sr-only` span — which removes the usual expensive part of theming a status UI.
+
+## Gaps this roadmap does not name
+
+Added 2026-08-16. Everything above describes **building capability**. The platform's actual
+constraint is no longer capability, and no phase above addresses it.
+
+### 1. Review throughput is the binding constraint, and nothing plans for it
+
+Measured in production on 2026-08-16:
+
+| | |
+|---|---:|
+| Meetings ingested | 212 |
+| Meetings published | **1** |
+| Agenda items ingested | 3,160 |
+| Agenda items public | **36** |
+| Claims extracted | 64 |
+| Claims approved | **0** |
+| Median days to publish | **28** |
+
+Every one of those gaps is the review gate working as designed — and the gate is a **person**. The
+pipeline can ingest faster than anyone can review, so building more ingestion widens the gap rather
+than closing it. **Phases 2 and 3 add capability behind a bottleneck that is already saturated.**
+
+This is not an argument for weakening the gate; the gate is the project. It is an argument that the
+next real deliverable is *making a reviewer faster* — batching, grouping by subject, keyboard
+review, and the governor pass actually being run so a person judges pre-sorted claims instead of raw
+ones. None of that is on this roadmap.
+
+### 2. The roster blocks more than it looks like it does
+
+`members` holds seed fixtures. No sourced roster could be found (Bozeman is a blanket Akamai 403,
+Granicus publishes no member list, minutes carry no roll call). Consequences the roadmap does not
+connect:
+
+- **2.2 Vote Tracker cannot complete** — `member_id` is never populated, so a vote cannot be attached
+  to a person.
+- **2.3 Cross-reference has nothing to cross-reference** — the code exists and is idle.
+- The office gate rejects 283 of 336 extractions, and **a sourced roster would not unlock them**: it
+  makes "Commissioner Bode" checkable, not "Dave".
+
+Sourcing a roster is a prerequisite for a whole phase and is filed nowhere as such.
+
+### 3. Delivery is built and cannot deliver
+
+Channels, routes, encryption, Discord, RSS and the record receipt all exist and are dark. Email is
+**blocked on DNS**, which is an infrastructure task with no owner and no line item.
+
+### 4. Operator decisions with no due date
+
+Four are open and each blocks something: whether `claim_publication` returns and how; whether a body
+whose minutes print no offices should be extracted; whether `dated_export_archive` is switched on
+(off, so the archive holds nothing); and the `/api/search` rate limit. They are specced. They are not
+scheduled.
+
+### 5. Sustainability is unplanned
+
+Two cautionary precedents found while surveying the field: the ProPublica Congress API is dead, and
+Open States has been absorbed into commercial Plural and is deprecating public tooling. This project
+publishes an open-data export, feeds and an MCP endpoint and invites people to build on them. **There
+is no stated policy for what happens if one is withdrawn** — the recommendation is that it be
+announced on the corrections log rather than 404'd, decided now rather than at the moment of
+withdrawal.
+
+### What I would put next, if the goal is a site that moves
+
+1. **Reviewer throughput** — grouping, batching, running the governor. Turns 64 claims from a wall
+   into five decisions.
+2. **Probe for a roster**, as its own piece of work, because a phase depends on it.
+3. **Schedule the four operator decisions**, even if the answer to some is "not yet".
+4. **Then** return to Phases 2 and 3.
 
 ## Design Principles
 
