@@ -3,7 +3,7 @@ import { BlockedError, type IngestionQueue } from "../ingestion/queue";
 import type { ExtractContext, StageResult } from "../ingestion/worker";
 import type { OpenRouterClient } from "./openrouter";
 import { ExtractionUnavailable, findMinutesArtifact, runExtraction } from "./run";
-import { classifyExtraction, summariseFailures } from "./runs";
+import { classifyExtraction, hasSuccessfulExtraction, summariseFailures } from "./runs";
 
 /**
  * Extraction as a queue stage.
@@ -196,4 +196,133 @@ export async function enqueueExtraction(
     meeting_id: meetingId,
     artifact_sha256: artifact.sha256,
   };
+}
+
+/**
+ * The hard ceiling on an operator-triggered batch enqueue.
+ *
+ * `docs/STATUS.md` item 1f refused a batch route until extraction was a queue
+ * stage rather than a loop in a request handler — that precondition is what
+ * `enqueueExtraction` above and `EXTRACT_CONCURRENCY` exist for. This ceiling
+ * is the second half: even queued, a run costs minutes against a
+ * rate-limited free model, so a batch request states a bounded number and an
+ * operator asking for more gets a 400 naming the ceiling, never a silent
+ * clamp. Silently narrowing the request to "what we felt like doing" is
+ * exactly the kind of quiet lie this project refuses everywhere else.
+ */
+export const MAX_EXTRACT_BATCH = 25;
+
+/** Why a meeting was not enqueued by a batch request. */
+export type BatchExtractionSkipReason = "already_queued" | "already_extracted" | "no_minutes_artifact";
+
+export interface BatchExtractionSkip {
+  meeting_id: string;
+  reason: BatchExtractionSkipReason;
+  detail: string;
+}
+
+export interface BatchExtractionResult {
+  enqueued: EnqueuedExtraction[];
+  skipped: BatchExtractionSkip[];
+}
+
+/**
+ * Classifies an `ExtractionUnavailable` as a skip reason, or says it is not
+ * one.
+ *
+ * `enqueueExtraction` throws 404 for "no minutes artifact" and 409 for
+ * "already queued" — see `findMinutesArtifact` and `queuedExtraction` above.
+ * Anything else it might one day throw (a 500 opening the run, say) is a
+ * real failure, not a benign skip, and returning `null` here is what makes
+ * the caller re-throw it instead of mislabelling it "already queued". A
+ * batch route that relabels a failure as a skip is exactly the disclosure
+ * bug this route exists to refuse.
+ */
+export function skipReasonFor(error: ExtractionUnavailable): BatchExtractionSkipReason | null {
+  if (error.statusCode === 404) return "no_minutes_artifact";
+  if (error.statusCode === 409) return "already_queued";
+  return null;
+}
+
+/**
+ * Queue up to `limit` meetings' minutes for extraction, oldest meeting first.
+ *
+ * A meeting is skipped, never silently dropped, for exactly one of three
+ * reasons: it already has a finished run that read something
+ * (`hasSuccessfulExtraction`), it already has an `extract` job pending or
+ * running (`enqueueExtraction`'s own 409), or it has no stored minutes yet
+ * (`enqueueExtraction`'s own 404). Every skip is returned with its reason —
+ * a response naming only what succeeded is the failure mode this project
+ * exists to refuse.
+ *
+ * Scans meetings oldest-first and stops as soon as `limit` have been
+ * enqueued, so a corpus with a real backlog does not pay for meetings past
+ * the point the request asked to reach. If nothing in the corpus is
+ * eligible, every meeting scanned comes back in `skipped` — an honest, if
+ * long, answer, not a truncated one.
+ *
+ * **How long, concretely.** `skipped` is bounded by how far into the backlog
+ * the scan must walk to find `limit` eligible meetings, not by the corpus
+ * size — but the worst case is real and worth stating rather than
+ * discovering. When little or nothing is left to extract, the scan walks the
+ * entire `meetings` table before giving up and every row becomes a `skipped`
+ * entry. Against production's ~520 meetings that is several hundred entries
+ * in one response.
+ *
+ * That is deliberate. The alternative — truncating the list — would report
+ * "we skipped 25 meetings" when the true answer is 500, and a caller cannot
+ * tell a short list from a shortened one. This is not measured against a
+ * corpus of that size: the suite's fixtures are a handful of meetings per
+ * test, so the number above is derived from the scan's shape and the corpus
+ * count in `docs/STATUS.md`, not observed.
+ *
+ * Enqueues through `enqueueExtraction`, the single path that opens an
+ * `ingestion_runs` row and puts a job on the queue. This function decides
+ * *which* meetings to try and reports what happened; it never inserts a job
+ * itself.
+ */
+export async function enqueueExtractionBatch(
+  db: Knex,
+  queue: IngestionQueue,
+  limit: number,
+): Promise<BatchExtractionResult> {
+  const rows: unknown = await db("meetings")
+    .orderBy([{ column: "date", order: "asc" }, { column: "id", order: "asc" }])
+    .select<Array<{ id: string }>>("id");
+  const meetingIds = Array.isArray(rows)
+    ? rows
+        .filter((row): row is { id: string } => isRecord(row) && typeof row.id === "string")
+        .map((row) => row.id)
+    : [];
+
+  const enqueued: EnqueuedExtraction[] = [];
+  const skipped: BatchExtractionSkip[] = [];
+
+  for (const meetingId of meetingIds) {
+    if (enqueued.length >= limit) break;
+
+    if (await hasSuccessfulExtraction(db, meetingId)) {
+      skipped.push({
+        meeting_id: meetingId,
+        reason: "already_extracted",
+        detail: "This meeting already has a finished extraction run that read something.",
+      });
+      continue;
+    }
+
+    try {
+      const result = await enqueueExtraction(db, queue, meetingId);
+      enqueued.push(result);
+    } catch (error) {
+      if (error instanceof ExtractionUnavailable) {
+        const reason = skipReasonFor(error);
+        if (reason === null) throw error;
+        skipped.push({ meeting_id: meetingId, reason, detail: error.message });
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return { enqueued, skipped };
 }

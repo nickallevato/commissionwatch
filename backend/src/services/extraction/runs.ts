@@ -340,3 +340,19 @@ export async function isExtracting(db: Knex, meetingId: string): Promise<boolean
     .first("id");
   return typeof row === "object" && row !== null;
 }
+
+/**
+ * True when this meeting has a finished run that read something.
+ *
+ * `succeeded` or `partial` — the same pair `extractionBacklog` counts as
+ * "read" in `distribution.ts`. A `failed` run is evidence the document was
+ * NOT read, so a meeting whose only run failed is still unextracted and stays
+ * eligible for the batch enqueuer to try again.
+ */
+export async function hasSuccessfulExtraction(db: Knex, meetingId: string): Promise<boolean> {
+  const row: unknown = await db("extraction_runs")
+    .where({ meeting_id: meetingId })
+    .whereIn("status", ["succeeded", "partial"])
+    .first("id");
+  return typeof row === "object" && row !== null;
+}

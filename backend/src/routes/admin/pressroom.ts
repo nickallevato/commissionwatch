@@ -19,7 +19,7 @@ import {
 } from "../../services/pressroom/meetings";
 import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services/pressroom/runs";
 import { ExtractionUnavailable } from "../../services/extraction/run";
-import { enqueueExtraction } from "../../services/extraction/stage";
+import { enqueueExtractionBatch, MAX_EXTRACT_BATCH, enqueueExtraction } from "../../services/extraction/stage";
 import { enqueueGovernance } from "../../services/governor/stage";
 import { enqueueLocation, LocationUnavailable } from "../../services/locate/stage";
 import { isExtracting, listRuns } from "../../services/extraction/runs";
@@ -358,6 +358,69 @@ router.post(
       res.json(result);
     } catch (err) {
       fail(res, err, next);
+    }
+  },
+);
+
+interface ExtractBatchBody {
+  limit?: unknown;
+}
+
+/**
+ * Queue up to `limit` meetings' minutes for extraction in one request.
+ *
+ * `docs/STATUS.md` item 1f refused a batch route until extraction became a
+ * queue stage — a batch runner had to be "a queue stage, not a loop in a
+ * route". `services/extraction/stage.ts` is that stage now, so this route is
+ * a thin caller of `enqueueExtractionBatch`: it validates the request and
+ * discloses the result, nothing more.
+ *
+ * `limit` is required and has no default. An operator spending minutes of a
+ * rate-limited free model's quota states the number; a bare POST would be
+ * guessing on their behalf. `MAX_EXTRACT_BATCH` is a hard ceiling enforced as
+ * a 400, never a silent clamp — see the constant's docblock for why.
+ *
+ * A sibling of `/meetings/publish` immediately above: both are batch actions
+ * addressed by a literal path segment under `/meetings`, not by `:id`, so
+ * neither is reachable by, nor shadows, the id-scoped routes below. Placed
+ * before them for the same reason `/meetings/publish` is.
+ */
+router.post(
+  "/meetings/extract-batch",
+  async (req: Request<Record<string, string>, unknown, ExtractBatchBody>, res, next) => {
+    try {
+      const live = requireStack(res);
+      if (live === null) return;
+
+      const { limit } = req.body ?? {};
+      if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) {
+        res.status(400).json({
+          error: "limit is required and must be a positive integer",
+          statusCode: 400,
+        });
+        return;
+      }
+      if (limit > MAX_EXTRACT_BATCH) {
+        res.status(400).json({
+          error: `limit must not exceed ${MAX_EXTRACT_BATCH} — a batch this large spends a rate-limited free model's quota an operator has not actually authorised`,
+          statusCode: 400,
+        });
+        return;
+      }
+
+      const result = await enqueueExtractionBatch(db, live.queue, limit);
+
+      res.status(202).json({
+        limit,
+        enqueued: result.enqueued,
+        skipped: result.skipped,
+        message:
+          `Queued ${result.enqueued.length} extraction job(s); skipped ${result.skipped.length} ` +
+          "meeting(s) (see skipped[].reason). Every claim any of them produce is held for review — " +
+          "nothing naming a person is published without an operator.",
+      });
+    } catch (err) {
+      next(err);
     }
   },
 );
