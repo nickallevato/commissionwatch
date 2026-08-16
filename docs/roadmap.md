@@ -187,6 +187,30 @@ adapter; and internationalisation as a *feature*, as opposed to 7.5's decision t
 task. **It is installed and firing** — verified 2026-08-16 against the Gitea Actions API: monitor
 runs land on a 15-minute tick at :00/:15/:30/:45, with 580 successful runs to date.
 
+### 6. Dead code that nothing imports, found by the coverage baseline
+
+`backend/src/services/vote-events.ts` is a real service module. **Nothing under `backend/src`
+imports it and no test loads it** — found on 2026-08-16 by 6.7's coverage run, which reports it among
+twelve `src` files never loaded by any test. Ten of the twelve are CLI scripts and the entrypoint,
+which is expected; this one is not.
+
+Two things follow, and the second is the sharper one.
+
+It is the third instance of this shape in a week: two feature flags in 0.5.0 that controlled nothing,
+`sweepExpiredSessions()` defined and never called, and now a whole module. **The repository is good at
+adding a thing and poor at noticing when nothing reaches it**, and each instance has been found by
+accident rather than by a check.
+
+And it exports `VOTE_OPTIONS` — a **third** hand-maintained copy of the `vote_value` vocabulary,
+beside the Postgres enum and the frontend's `VOTE_ORDER`. The drift guard added on 2026-08-16 asserts
+`pg_enum` against the frontend and does not know this copy exists, **so that guard is narrower than
+its name suggests.** A guard that covers two of three copies while reading as though it covers the
+vocabulary is worse than one that covers none, because it is trusted.
+
+Deliverable: decide whether `vote-events.ts` is deleted or wired, extend the drift guard to every
+copy of the vocabulary it claims to protect, and consider whether "exported but never imported" is
+worth a repository-wide check of its own — three findings in a week is a pattern, not a coincidence.
+
 ## Gaps this roadmap does not name
 
 Added 2026-08-16. Everything above describes **building capability**. The platform's actual

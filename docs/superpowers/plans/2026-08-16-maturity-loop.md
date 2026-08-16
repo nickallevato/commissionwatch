@@ -397,3 +397,24 @@ instruction, not about the agents** — and I had the evidence after the second 
   Told the 6.2 agent to **stop and report** rather than commit a gate the backend cannot pass today:
   a CI gate that fails on landing gets an allow-list bolted on within the hour, and then it is
   decoration.
+- **10:35Z** — Both slots verified and pushed. Backend **2168 / 527**, frontend **861 / 70**, both
+  clean. 6.2's backend gate, 6.7's coverage baseline, 7.3 and 6.6's reader-facing halves all landed.
+
+  **The coverage baseline earned its place immediately.** Its headline is 97.58% of lines; the useful
+  part is the caveat, that node only reports files a test actually loaded, so the figure describes
+  the covered subset rather than the repository. Twelve `src` files are never loaded at all.
+
+  Eleven are explicable. The twelfth, `services/vote-events.ts`, is a real service module — and
+  checking it found worse than low coverage: **nothing in `backend/src` imports it either.** Dead
+  code, no caller, no test. Third instance of this shape in a week after the two inert feature flags
+  and the uncalled session sweep, and all three were found by accident.
+
+  Worse for me specifically: it exports `VOTE_OPTIONS`, a **third** copy of the vote vocabulary. The
+  drift guard I had built this morning checks `pg_enum` against the frontend and does not know this
+  copy exists — **so my own guard is narrower than its name suggests**, which is the failure mode I
+  wrote that guard to prevent. Recorded as gap 6 rather than fixed in passing; deleting a module
+  deserves its own change.
+
+  Verified the re-scoped `StatusPage` test myself rather than accepting the explanation: it is bound
+  to `findByTestId("reading-unmeasured")`, so the narrowing is a tightening to what the guard was
+  always about, not a weakening to make a page pass.
