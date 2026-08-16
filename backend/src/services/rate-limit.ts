@@ -147,9 +147,28 @@ export class FixedWindowLimiter {
  * and needs a shared store, not a bigger number.
  *
  * Two tiers, because the costs differ by an order of magnitude.
+ *
+ * All three numbers below are read from the environment so an operator can
+ * raise one without a code deploy — restart the container with a changed
+ * value in Parameter Store / compose `environment:` and the new ceiling
+ * applies from the next request. `envInt` follows the same trap `governor/model.ts`
+ * documents for `GOVERNOR_MODEL`: a variable that is *set but empty* (which
+ * `- FOO=${FOO:-}` in a compose file does to every var nobody supplied a value
+ * for) must read as absent, not as the empty string coerced to `0` — a `0`
+ * limit would silently 429 every request on the tier.
  */
 
-const WINDOW_MS = 60_000;
+/** Exported so a test can prove the parsing rules without faking a whole deploy. */
+export function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const trimmed = raw.trim();
+  if (trimmed === "") return fallback;
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const WINDOW_MS = envInt("PUBLIC_RATE_LIMIT_WINDOW_MS", 60_000);
 
 /**
  * `/api/search` runs four full-text queries across a four-table join per
@@ -164,16 +183,23 @@ const WINDOW_MS = 60_000;
  * clear that with room and still refuse a scripted hammering, so it is set a
  * little over twice the largest honest burst rather than at the smallest number
  * that would technically work.
+ *
+ * `PUBLIC_RATE_LIMIT_EXPENSIVE` overrides it. This is also the number quoted
+ * in the 429 body and in `docs/superpowers/specs/2026-08-16-security-review.md`
+ * finding 3 — if it changes, that reasoning should be re-read, not just the
+ * constant.
  */
-const EXPENSIVE_LIMIT = 60;
+const EXPENSIVE_LIMIT = envInt("PUBLIC_RATE_LIMIT_EXPENSIVE", 60);
 
 /**
  * Ten a second for ordinary reads. A meeting page fans out to several endpoints
  * at once and a reader clicking through the archive will genuinely produce
  * dozens of requests a minute, so this is set where a human — or a polite
  * crawler — never reaches it and a loop does immediately.
+ *
+ * `PUBLIC_RATE_LIMIT_DEFAULT` overrides it.
  */
-const DEFAULT_LIMIT = 600;
+const DEFAULT_LIMIT = envInt("PUBLIC_RATE_LIMIT_DEFAULT", 600);
 
 const EXPENSIVE_PREFIXES = ["/api/search", "/api/data"];
 
@@ -264,8 +290,28 @@ export const publicRateLimit: RequestHandler = (
   // guessing. A 429 with no such header is an instruction to poll.
   res.setHeader("Retry-After", String(decision.retryAfterSeconds));
   res.status(429).json({
-    error: "Too many requests",
+    error: rateLimitMessage(req.path, decision.retryAfterSeconds),
     statusCode: 429,
     retryAfterSeconds: decision.retryAfterSeconds,
   });
 };
+
+/**
+ * A refusal on `/api/search` is the one a scripted client is most likely to
+ * hit, because a script that wants "everything" and calls search in a loop to
+ * get it is doing the slow, expensive way what `/api/data/*.csv` does in one
+ * request. Telling that caller about the export nudges it toward the route
+ * built for bulk reads instead of just making it retry search faster. Every
+ * other refusal gets the plain message — `/api/data` is already the bulk
+ * export, so pointing a throttled bulk reader at itself would be circular.
+ */
+function rateLimitMessage(path: string, retryAfterSeconds: number): string {
+  if (underPrefix(path, "/api/search")) {
+    return (
+      `Too many search requests — try again in ${retryAfterSeconds}s. ` +
+      "Pulling a large amount of data? /api/data offers the full published " +
+      "record as a one-request CSV or JSON export instead of repeated searches."
+    );
+  }
+  return "Too many requests";
+}

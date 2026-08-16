@@ -19,6 +19,17 @@ import { clampLimit, clampOffset, search } from "../services/search";
  */
 const router = Router();
 
+/**
+ * Public data, cached briefly. `/api/data/*.csv` follows the same convention
+ * at `public, max-age=300` (§ services/export). Search is shorter — 60s,
+ * matching the rate-limit window in `services/rate-limit.ts` — because a
+ * reader refining a query expects the *next* distinct query to hit fresh
+ * results, and a shared CDN/browser cache of a whole minute still collapses
+ * the exact repeat-request pattern (a page reload, a back-button) that costs
+ * the most for the least benefit to the reader.
+ */
+const CACHE_CONTROL = "public, max-age=60";
+
 interface SearchQuery {
   q?: string;
   limit?: string;
@@ -37,6 +48,7 @@ router.get("/", async (req: Request<unknown, unknown, unknown, SearchQuery>, res
       limit: clampLimit(req.query.limit),
       offset: clampOffset(req.query.offset),
     });
+    res.setHeader("Cache-Control", CACHE_CONTROL);
     res.json(result);
   } catch (err) {
     next(err);

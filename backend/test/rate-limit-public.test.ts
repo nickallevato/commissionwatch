@@ -1,10 +1,12 @@
-import { describe, it, after, beforeEach } from "node:test";
+import { describe, it, after, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../src/app";
 import db from "../src/config/database";
 import {
+  FixedWindowLimiter,
   PUBLIC_RATE_LIMITS,
+  envInt,
   limiterFor,
   resetPublicRateLimits,
 } from "../src/services/rate-limit";
@@ -166,6 +168,88 @@ describe("what is deliberately not limited", () => {
       const res = await request(app).get("/api/admin/session");
       assert.notEqual(res.status, 429);
     }
+  });
+});
+
+describe("/api/search specifics", () => {
+  it("carries Cache-Control on a successful response", async () => {
+    const res = await request(app).get("/api/search");
+    assert.equal(res.status, 200);
+    assert.equal(res.headers["cache-control"], "public, max-age=60");
+  });
+
+  it("points a throttled searcher at the bulk export instead of just refusing", async () => {
+    for (let i = 0; i < PUBLIC_RATE_LIMITS.expensive; i += 1) {
+      await request(app).get("/api/search");
+    }
+
+    const refused = await request(app).get("/api/search");
+    assert.equal(refused.status, 429);
+    assert.equal(refused.body.statusCode, 429);
+    assert.match(refused.body.error, /\/api\/data/);
+  });
+
+  it("leaves the plain message on a non-search refusal", async () => {
+    for (let i = 0; i <= PUBLIC_RATE_LIMITS.expensive; i += 1) {
+      await request(app).get(EXPENSIVE_PATH);
+    }
+    const refused = await request(app).get(EXPENSIVE_PATH);
+    assert.equal(refused.status, 429);
+    assert.equal(refused.body.error, "Too many requests");
+  });
+});
+
+describe("what the limiter stores about a client", () => {
+  it("keeps no identifier reachable from outside the class — only a count", () => {
+    const key = "203.0.113.7";
+    const limiter = new FixedWindowLimiter({ limit: 5, windowMs: 1000 });
+    limiter.check(key);
+    assert.equal(limiter.size, 1);
+
+    // The only public introspection is `size`, a count. There is no method
+    // that hands back a key or an identifier. Serialising the whole object —
+    // the way an incautious `console.log(limiter)` or crash reporter might —
+    // is the sharpest test of the docblock's promise: a `Map` does not
+    // survive `JSON.stringify`, so even that accident cannot surface the
+    // client string, only the limiter's own configuration.
+    const serialised = JSON.stringify(limiter);
+    assert.ok(!serialised.includes(key), `serialised limiter leaked the client key: ${serialised}`);
+    assert.equal(typeof (limiter as unknown as Record<string, unknown>).keys, "undefined");
+  });
+});
+
+describe("envInt · the operator override the numbers are read through", () => {
+  const VAR = "__RATE_LIMIT_TEST_VAR__";
+
+  afterEach(() => {
+    delete process.env[VAR];
+  });
+
+  it("uses the fallback when the variable is unset", () => {
+    delete process.env[VAR];
+    assert.equal(envInt(VAR, 60), 60);
+  });
+
+  it("uses the fallback when the variable is set but empty", () => {
+    // The compose-file trap `- FOO=${FOO:-}` sets every unconfigured var to
+    // "" rather than leaving it unset. Reading that as 0 would 429 the whole
+    // tier the moment nobody had explicitly set a value.
+    process.env[VAR] = "";
+    assert.equal(envInt(VAR, 60), 60);
+  });
+
+  it("honours a valid override", () => {
+    process.env[VAR] = "120";
+    assert.equal(envInt(VAR, 60), 120);
+  });
+
+  it("falls back on a non-numeric or non-positive value rather than misconfiguring the tier", () => {
+    process.env[VAR] = "not-a-number";
+    assert.equal(envInt(VAR, 60), 60);
+    process.env[VAR] = "0";
+    assert.equal(envInt(VAR, 60), 60);
+    process.env[VAR] = "-5";
+    assert.equal(envInt(VAR, 60), 60);
   });
 });
 

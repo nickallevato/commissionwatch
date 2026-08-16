@@ -69,6 +69,34 @@ That is not nothing — it is exactly the window a coffee-shop downgrade attack 
 
 ### 3. `/api/search` is unthrottled and uncached — *moderate, availability*
 
+> **CORRECTED 2026-08-16, later the same day. The first sentence of this finding was wrong, and the
+> method that produced it was wrong twice.**
+>
+> `/api/search` **was already rate limited** when this was written. `app.ts:97` applies
+> `publicRateLimit` as global middleware, with `/api/search` and `/api/data` on a 60/min expensive
+> tier and everything else on 600/min. It was added in `ad83ffa`, *"bound the public API"*, which
+> predates this review.
+>
+> Two mistakes produced the false finding, and both are worth naming because either alone would
+> have been enough:
+>
+> 1. **I grepped for the wrong symbol.** The search was for `FixedWindowLimiter`, the class, which
+>    appears only in `disputes.ts` and `mcp.ts`. The middleware that wires it to the public surface
+>    is `publicRateLimit`, and a grep for the implementation missed the caller.
+> 2. **The probe could not have detected the limit it was testing for.** Twelve consecutive requests
+>    were sent against a **sixty**-per-minute ceiling and all returned 200. That result is exactly
+>    what a working limiter produces. Reporting "unthrottled" from it was reading a negative result
+>    from a test with no power to find the thing.
+>
+> **What was genuinely missing** and has since been added: `Cache-Control` on `/api/search`
+> responses, environment configurability of the limits, and a 429 body that points a throttled
+> searcher at the bulk export rather than only refusing.
+>
+> The caching half of the original finding stands. The throttling half did not, and a security
+> review that reports a defence as absent is not a harmless error — it invites someone to build the
+> defence twice, and it discredits the findings beside it that were true.
+
+
 The rate limiter (`services/rate-limit.ts`) is applied in exactly two places:
 
 - `services/disputes.ts` — hourly and daily limits on dispute submission
