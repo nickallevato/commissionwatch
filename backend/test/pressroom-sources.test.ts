@@ -5,7 +5,8 @@ import app from "../src/app";
 import db from "../src/config/database";
 import {
   assessSilence,
-  assessVerdict,
+  assessPipeline,
+  assessCollection,
   listSources,
   readCounts,
   recordsIn,
@@ -81,7 +82,7 @@ describe("pressroom silence watch", () => {
   });
 });
 
-describe("pressroom source verdict", () => {
+describe("pressroom pipeline verdict", () => {
   const base = {
     enabled: true,
     lastSuccessAt: new Date("2026-08-10T00:00:00.000Z"),
@@ -91,35 +92,35 @@ describe("pressroom source verdict", () => {
   };
 
   it("reports a disabled source as disabled rather than hiding it", () => {
-    assert.equal(assessVerdict({ ...base, enabled: false }), "disabled");
+    assert.equal(assessPipeline({ ...base, enabled: false }), "disabled");
   });
 
   it("reports never_run ahead of anything else, for a source that never succeeded", () => {
     assert.equal(
-      assessVerdict({ ...base, lastSuccessAt: null, silence: "unknown" }),
+      assessPipeline({ ...base, lastSuccessAt: null, silence: "unknown" }),
       "never_run",
     );
   });
 
   it("prefers a named failure to an inference from silence", () => {
     assert.equal(
-      assessVerdict({ ...base, latestRunStatus: "failed", silence: "suspect" }),
+      assessPipeline({ ...base, latestRunStatus: "failed", silence: "suspect" }),
       "failing",
     );
   });
 
   it("reports suspect when the only evidence is silence", () => {
-    assert.equal(assessVerdict({ ...base, silence: "suspect" }), "suspect");
+    assert.equal(assessPipeline({ ...base, silence: "suspect" }), "suspect");
   });
 
   it("reports healthy only when nothing else applies", () => {
-    assert.equal(assessVerdict(base), "healthy");
+    assert.equal(assessPipeline(base), "healthy");
   });
 
   it("treats a partial run as a run, not a failure", () => {
     // Decision 4 reaches this far: a partial sweep landed work, so the source
     // is not failing on the strength of it.
-    assert.equal(assessVerdict({ ...base, latestRunStatus: "partial" }), "healthy");
+    assert.equal(assessPipeline({ ...base, latestRunStatus: "partial" }), "healthy");
   });
 });
 
@@ -190,7 +191,7 @@ describe("pressroom sources listing", () => {
     const rows = await listSources(db);
     const row = bySourceId(rows, disabled.sourceId);
     assert.equal(row.enabled, false);
-    assert.equal(row.verdict, "disabled");
+    assert.equal(row.pipeline, "disabled");
     assert.match(row.disabled_reason ?? "", /Akamai/);
   });
 
@@ -209,11 +210,40 @@ describe("pressroom sources listing", () => {
     assert.equal(bySourceId(rows, productive.sourceId).lifetime_records, 33);
   });
 
+  it("separates a working pipeline from an empty archive", async () => {
+    // `silent` has a last_success_at and no runs at all: something reported
+    // success and nothing was ever collected. Before the two axes existed this
+    // rendered as one word, and the word was about the machinery.
+    const rows = await listSources(db);
+    const row = bySourceId(rows, silent.sourceId);
+    assert.equal(row.lifetime_records, 0);
+    assert.equal(row.collection.verdict, "empty");
+    assert.equal(row.collection.last_record_at, null);
+    assert.equal(row.collection.hours_since_record, null);
+  });
+
+  it("dates the archive from the last run that landed a record, not the last clean exit", async () => {
+    const rows = await listSources(db);
+    const row = bySourceId(rows, productive.sourceId);
+    assert.equal(row.collection.verdict, "collecting");
+    assert.notEqual(row.collection.last_record_at, null);
+    // The partial run an hour ago collected 4 records, so it — not the older
+    // succeeded run — is what dates the archive.
+    assert.ok((row.collection.hours_since_record ?? 99) <= 2);
+  });
+
+  it("reports a disabled source as disabled on both axes", async () => {
+    const rows = await listSources(db);
+    const row = bySourceId(rows, disabled.sourceId);
+    assert.equal(row.pipeline, "disabled");
+    assert.equal(row.collection.verdict, "disabled");
+  });
+
   it("marks a source past its expected interval as suspect", async () => {
     const rows = await listSources(db);
     const row = bySourceId(rows, silent.sourceId);
     assert.equal(row.silence.verdict, "suspect");
-    assert.equal(row.verdict, "suspect");
+    assert.equal(row.pipeline, "suspect");
     assert.ok((row.silence.hours_since_success ?? 0) >= 71);
   });
 
@@ -242,5 +272,77 @@ describe("pressroom sources listing", () => {
       .post(`/api/admin/pressroom/sources/${disabled.sourceId}/sweep`)
       .set("Cookie", cookie)
       .expect(503);
+  });
+});
+
+/**
+ * The collection axis.
+ *
+ * Added 2026-08-16 after `gallatin-civicplus` read `healthy` while holding zero
+ * records — ever. The pipeline had completed a run and the archive was empty,
+ * and one word could only report one of those.
+ */
+describe("pressroom collection verdict", () => {
+  const now = new Date("2026-08-16T12:00:00.000Z");
+  const base = {
+    enabled: true,
+    lifetimeRecords: 40,
+    lastRecordAt: new Date("2026-08-16T06:00:00.000Z"),
+    expectedIntervalHours: 24,
+    now,
+  };
+
+  it("calls a source that has never landed a record empty, however cleanly it runs", () => {
+    // The case this axis exists for. A run that succeeded at collecting nothing
+    // is not a healthy source, and the pipeline verdict cannot say so.
+    assert.equal(assessCollection({ ...base, lifetimeRecords: 0, lastRecordAt: null }), "empty");
+  });
+
+  it("calls a source empty when the count is positive but no run is dated", () => {
+    // Defensive rather than expected: a lifetime total with no run behind it
+    // means the two disagree, and the safe reading of a disagreement about
+    // whether we hold anything is that we do not.
+    assert.equal(assessCollection({ ...base, lastRecordAt: null }), "empty");
+  });
+
+  it("calls a source stalled when the archive exists but stopped growing", () => {
+    assert.equal(
+      assessCollection({ ...base, lastRecordAt: new Date("2026-08-10T00:00:00.000Z") }),
+      "stalled",
+    );
+  });
+
+  it("calls a source collecting inside its stated interval", () => {
+    assert.equal(assessCollection(base), "collecting");
+  });
+
+  it("does not invent a deadline when none was stated", () => {
+    // The same refusal `assessSilence` makes. An absent expectation is not an
+    // expectation of daily.
+    assert.equal(
+      assessCollection({
+        ...base,
+        expectedIntervalHours: null,
+        lastRecordAt: new Date("2020-01-01T00:00:00.000Z"),
+      }),
+      "collecting",
+    );
+  });
+
+  it("reports a disabled source as disabled on this axis too", () => {
+    assert.equal(assessCollection({ ...base, enabled: false, lifetimeRecords: 0 }), "disabled");
+  });
+
+  it("never consults last_success_at, because a clean run that collected nothing is the bug", () => {
+    // Proved by construction: the input type has no such field, so a future
+    // edit cannot quietly reintroduce the conflation. This asserts the shape
+    // the compiler enforces, in the suite, where it is visible.
+    assert.deepEqual(Object.keys(base).sort(), [
+      "enabled",
+      "expectedIntervalHours",
+      "lastRecordAt",
+      "lifetimeRecords",
+      "now",
+    ]);
   });
 });

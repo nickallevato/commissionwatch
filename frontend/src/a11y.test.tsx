@@ -208,7 +208,8 @@ const HEALTHY_SOURCE: PressroomSource = {
   last_success_at: "2026-08-10T06:00:00.000Z",
   lifetime_records: 412,
   silence: { verdict: "ok", hours_since_success: 2, expected_interval_hours: 6 },
-  verdict: "healthy",
+  pipeline: "healthy",
+  collection: { verdict: "collecting", last_record_at: "2026-08-10T06:00:00.000Z", hours_since_record: 2 },
   latest_run: {
     id: "r1",
     status: "succeeded",
@@ -232,7 +233,8 @@ const DISABLED_SOURCE: PressroomSource = {
   last_success_at: null,
   lifetime_records: 0,
   silence: { verdict: "unknown", hours_since_success: null, expected_interval_hours: null },
-  verdict: "disabled",
+  pipeline: "disabled",
+  collection: { verdict: "disabled", last_record_at: null, hours_since_record: null },
   latest_run: null,
 };
 

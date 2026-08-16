@@ -21,7 +21,7 @@ afterAll(() => server.close());
 
 function source(
   id: string,
-  verdict: PressroomSource["verdict"],
+  pipeline: PressroomSource["pipeline"],
   lifetime: number,
 ): PressroomSource {
   return {
@@ -34,10 +34,14 @@ function source(
     expected_interval_hours: 6,
     consecutive_failures: 0,
     jurisdiction: { id: "j1", name: "Gallatin County", state: "MT" },
-    last_success_at: verdict === "never_run" ? null : "2026-08-10T06:00:00.000Z",
+    last_success_at: pipeline === "never_run" ? null : "2026-08-10T06:00:00.000Z",
     lifetime_records: lifetime,
     silence: { verdict: "ok", hours_since_success: 2, expected_interval_hours: 6 },
-    verdict,
+    pipeline,
+    collection:
+      lifetime > 0
+        ? { verdict: "collecting", last_record_at: "2026-08-10T06:00:00.000Z", hours_since_record: 2 }
+        : { verdict: "empty", last_record_at: null, hours_since_record: null },
     latest_run: null,
   };
 }
@@ -99,6 +103,17 @@ describe("AdminHomePage", () => {
     const verdict = await screen.findByTestId("press-verdict");
     expect(verdict).toHaveTextContent("2 of 3 sources");
     expect(verdict).toHaveTextContent("adapter_s2, adapter_s3");
+  });
+
+  it("names a source whose scraper is healthy and whose archive is empty", async () => {
+    // The case the single verdict could not express. Every run succeeded, the
+    // archive holds nothing, and the old dashboard called that "healthy" and
+    // left it off this list entirely.
+    server.use(sourcesHandler([source("s1", "healthy", 0)]), queueHandler(0, 0));
+    renderDashboard();
+
+    const verdict = await screen.findByTestId("press-verdict");
+    expect(verdict).toHaveTextContent("adapter_s1");
   });
 
   it("renders a lifetime total of zero in the failure treatment", async () => {

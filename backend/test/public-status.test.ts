@@ -142,7 +142,12 @@ interface PublicSource {
   adapter_key: string;
   enabled: boolean;
   disabled_reason: string | null;
-  verdict: string;
+  pipeline: string;
+  collection: {
+    verdict: string;
+    last_record_at: string | null;
+    hours_since_record: number | null;
+  };
   lifetime_records: number;
   last_success_at: string | null;
   silence: {
@@ -183,7 +188,7 @@ describe("GET /api/ingestion/sources", () => {
 
   it("lists a source that has never run rather than omitting it", async () => {
     const source = find(await getStatus(), NEVER_RUN_KEY);
-    assert.equal(source.verdict, "never_run");
+    assert.equal(source.pipeline, "never_run");
     assert.equal(source.latest_run, null);
     assert.equal(source.last_success_at, null);
     // Present and zero, not absent. An absence you can see is a commitment.
@@ -193,7 +198,7 @@ describe("GET /api/ingestion/sources", () => {
   it("lists a disabled source with the reason it is off", async () => {
     const source = find(await getStatus(), DISABLED_KEY);
     assert.equal(source.enabled, false);
-    assert.equal(source.verdict, "disabled");
+    assert.equal(source.pipeline, "disabled");
     assert.equal(source.disabled_reason, DISABLED_REASON);
   });
 
@@ -315,7 +320,8 @@ describe("GET /api/ingestion/sources", () => {
       last_success_at: null,
       lifetime_records: 0,
       silence: { verdict: "unknown", hours_since_success: null, expected_interval_hours: 24 },
-      verdict: "never_run",
+      pipeline: "never_run",
+      collection: { verdict: "empty", last_record_at: null, hours_since_record: null },
       latest_run: {
         id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         status: "failed",

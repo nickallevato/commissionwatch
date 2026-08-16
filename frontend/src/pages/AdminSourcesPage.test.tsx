@@ -24,7 +24,8 @@ const gallatin: PressroomSource = {
   last_success_at: "2026-08-10T06:00:00.000Z",
   lifetime_records: 412,
   silence: { verdict: "ok", hours_since_success: 2, expected_interval_hours: 6 },
-  verdict: "healthy",
+  pipeline: "healthy",
+  collection: { verdict: "collecting", last_record_at: "2026-08-10T06:00:00.000Z", hours_since_record: 2 },
   latest_run: {
     id: "r1",
     status: "succeeded",
@@ -49,7 +50,8 @@ const barren: PressroomSource = {
   last_success_at: "2026-08-09T00:00:00.000Z",
   lifetime_records: 0,
   silence: { verdict: "suspect", hours_since_success: 31, expected_interval_hours: 12 },
-  verdict: "suspect",
+  pipeline: "suspect",
+  collection: { verdict: "empty", last_record_at: null, hours_since_record: null },
   latest_run: null,
 };
 
@@ -66,7 +68,8 @@ const blocked: PressroomSource = {
   last_success_at: null,
   lifetime_records: 0,
   silence: { verdict: "unknown", hours_since_success: null, expected_interval_hours: null },
-  verdict: "disabled",
+  pipeline: "disabled",
+  collection: { verdict: "disabled", last_record_at: null, hours_since_record: null },
   latest_run: null,
 };
 
@@ -155,6 +158,25 @@ describe("AdminSourcesPage", () => {
     const facts = screen.getByTestId("facts-s2");
     expect(facts).toHaveTextContent("31 h ago");
     expect(facts).toHaveTextContent("expected every 12 h");
+  });
+
+  it("says the archive is empty beside the state of the machinery, not instead of it", async () => {
+    // Two pills, because they answer different questions. `barren` has run and
+    // collected nothing; one word had to choose which of those to report.
+    server.use(...allHandlers({}));
+    renderWithProviders(<AdminSourcesPage />);
+
+    expect(await screen.findByTestId("state-s2")).toHaveTextContent("Suspect");
+    expect(screen.getByTestId("archive-s2")).toHaveTextContent("No records");
+    expect(screen.getByTestId("archive-s1")).toHaveTextContent("Collecting");
+  });
+
+  it("leaves a disabled source one pill, because two would say the same thing", async () => {
+    server.use(...allHandlers({}));
+    renderWithProviders(<AdminSourcesPage />);
+
+    expect(await screen.findByTestId("state-s3")).toHaveTextContent("Off");
+    expect(screen.queryByTestId("archive-s3")).toBeNull();
   });
 
   it("does not call a healthy, within-interval source suspect", async () => {

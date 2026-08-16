@@ -404,13 +404,29 @@ export type SourceHealthStatus = "healthy" | "degraded" | "blocked";
  */
 export type SilenceVerdict = "ok" | "suspect" | "unknown";
 
+/**
+ * Two axes, because one word was answering two questions.
+ *
+ * `pipeline` is *does the machinery work*; `collection` is *is there anything in
+ * the archive*. A source can be `healthy`/`empty` — running perfectly,
+ * collecting nothing — which is exactly the state a single green word hid.
+ */
 /** Precedence: disabled → never_run → failing → suspect → healthy. */
-export type SourceVerdict =
+export type PipelineVerdict =
   | "disabled"
   | "never_run"
   | "failing"
   | "suspect"
   | "healthy";
+
+export type CollectionVerdict = "disabled" | "empty" | "stalled" | "collecting";
+
+export interface CollectionWatch {
+  verdict: CollectionVerdict;
+  /** When a run last landed a record, not when one last exited cleanly. */
+  last_record_at: string | null;
+  hours_since_record: number | null;
+}
 
 export interface IngestionRunSummary {
   id: string;
@@ -442,7 +458,8 @@ export interface PressroomSource {
   /** Summed across every run of the source. Zero is a failure state, not an empty table. */
   lifetime_records: number;
   silence: SilenceWatch;
-  verdict: SourceVerdict;
+  pipeline: PipelineVerdict;
+  collection: CollectionWatch;
   latest_run: IngestionRunSummary | null;
 }
 
@@ -825,7 +842,8 @@ export interface PublicStatusSource {
   last_success_at: string | null;
   lifetime_records: number;
   silence: SilenceWatch;
-  verdict: SourceVerdict;
+  pipeline: PipelineVerdict;
+  collection: CollectionWatch;
   latest_run: PublicStatusRun | null;
 }
 

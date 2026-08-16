@@ -22,7 +22,33 @@ import { CorrectionError, type CorrectionActor } from "./corrections";
 
 export type SilenceVerdict = "ok" | "suspect" | "unknown";
 
-export type SourceVerdict = "disabled" | "never_run" | "failing" | "suspect" | "healthy";
+/**
+ * **Two axes, because one word was answering two questions and getting one of
+ * them wrong.**
+ *
+ * On 2026-08-16 `gallatin-civicplus` read `healthy` while holding zero records —
+ * ever. Both halves of that were true of different things: the machinery had
+ * completed a run, and the dataset was empty. A single verdict has to pick one,
+ * and it picked the flattering one.
+ *
+ * So the pipeline verdict answers *"does the machinery work?"* and the
+ * collection verdict answers *"is there anything in the archive?"*. A source can
+ * be `healthy`/`empty` — running perfectly, collecting nothing, which is the
+ * worst case to render as one green word — or `failing`/`collecting`, a corpus
+ * that exists and a scraper that has since broken. Those want different
+ * responses from an operator, so they get different words.
+ */
+export type PipelineVerdict = "disabled" | "never_run" | "failing" | "suspect" | "healthy";
+
+/**
+ * What the archive holds, independent of whether tonight's run worked.
+ *
+ * `empty` is deliberately not called "healthy with no records". This project's
+ * whole premise is the published corpus, and a source that has never landed a
+ * record is not a source — it is a configuration that has never done its job,
+ * however cleanly it exits.
+ */
+export type CollectionVerdict = "disabled" | "empty" | "stalled" | "collecting";
 
 export type RunStatusValue = "running" | "succeeded" | "partial" | "failed";
 
@@ -52,7 +78,15 @@ export interface PressroomSource {
     hours_since_success: number | null;
     expected_interval_hours: number | null;
   };
-  verdict: SourceVerdict;
+  /** Does the machinery work? */
+  pipeline: PipelineVerdict;
+  /** Is there anything in the archive, and did it grow recently? */
+  collection: {
+    verdict: CollectionVerdict;
+    /** When a run last landed a record, not when one last exited cleanly. */
+    last_record_at: string | null;
+    hours_since_record: number | null;
+  };
   latest_run: LatestRun | null;
 }
 
@@ -140,7 +174,7 @@ export interface SilenceInput {
  * `unknown` when no expectation was stated, or when nothing has ever succeeded.
  * An absent expectation is not an expectation of zero, and claiming a source is
  * fine because nobody said what fine meant would be the same error in the
- * opposite direction. "Never succeeded" is reported by `verdict` as
+ * opposite direction. "Never succeeded" is reported by `pipeline` as
  * `never_run`, which is louder than `suspect` and should be.
  */
 export function assessSilence(input: SilenceInput): PressroomSource["silence"] {
@@ -171,7 +205,7 @@ export function assessSilence(input: SilenceInput): PressroomSource["silence"] {
   };
 }
 
-export interface VerdictInput {
+export interface PipelineInput {
   enabled: boolean;
   lastSuccessAt: Date | null;
   consecutiveFailures: number;
@@ -179,8 +213,40 @@ export interface VerdictInput {
   silence: SilenceVerdict;
 }
 
+export interface CollectionInput {
+  enabled: boolean;
+  lifetimeRecords: number;
+  lastRecordAt: Date | null;
+  expectedIntervalHours: number | null;
+  now: Date;
+}
+
 /**
- * One word for the state of a source.
+ * What the archive holds.
+ *
+ * Note what this deliberately does **not** consult: `last_success_at`. A run
+ * that succeeded at collecting nothing moves that column and tells us nothing
+ * about the corpus, and letting it in here would rebuild the exact conflation
+ * this second axis exists to break.
+ *
+ * `stalled` needs a stated interval, and without one the answer is
+ * `collecting` rather than an invented deadline — the same refusal
+ * `assessSilence` makes, for the same reason. The pipeline axis is where an
+ * unstated expectation shows up, as `unknown` silence.
+ */
+export function assessCollection(input: CollectionInput): CollectionVerdict {
+  if (!input.enabled) return "disabled";
+  if (input.lifetimeRecords <= 0 || input.lastRecordAt === null) return "empty";
+  const { expectedIntervalHours } = input;
+  if (expectedIntervalHours === null || expectedIntervalHours <= 0) return "collecting";
+  const hours = (input.now.getTime() - input.lastRecordAt.getTime()) / 3_600_000;
+  return hours > expectedIntervalHours ? "stalled" : "collecting";
+}
+
+/**
+ * One word for whether the machinery runs. **Not for whether it collects
+ * anything** — that is `assessCollection`, and keeping the two apart is the
+ * point.
  *
  * Precedence is deliberate and ordered by how much it tells the operator:
  *
@@ -191,7 +257,7 @@ export interface VerdictInput {
  * outranks both because a source that has never succeeded is not degraded, it
  * has never worked, and those want different responses.
  */
-export function assessVerdict(input: VerdictInput): SourceVerdict {
+export function assessPipeline(input: PipelineInput): PipelineVerdict {
   if (!input.enabled) return "disabled";
   if (input.lastSuccessAt === null) return "never_run";
   if (input.latestRunStatus === "failed" || input.consecutiveFailures > 0) return "failing";
@@ -244,7 +310,10 @@ export async function listSources(db: Knex, now: Date = new Date()): Promise<Pre
   if (ids.length === 0) return [];
 
   const [runRows, latestRows] = await Promise.all([
-    db("ingestion_runs").whereIn("source_id", ids).select("source_id", "counts"),
+    // `started_at` comes along because the collection axis needs to know when a
+    // record last landed, which is a different date from when a run last
+    // exited cleanly.
+    db("ingestion_runs").whereIn("source_id", ids).select("source_id", "counts", "started_at"),
     db("ingestion_runs")
       .whereIn("source_id", ids)
       .select("id", "source_id", "status", "started_at", "finished_at", "counts", "error")
@@ -255,10 +324,18 @@ export async function listSources(db: Knex, now: Date = new Date()): Promise<Pre
   ]);
 
   const lifetime = new Map<string, number>();
+  const lastRecord = new Map<string, Date>();
   for (const raw of Array.isArray(runRows) ? runRows : []) {
     if (!isRecord(raw)) continue;
     const sourceId = asString(raw.source_id);
-    lifetime.set(sourceId, (lifetime.get(sourceId) ?? 0) + recordsIn(readCounts(raw.counts)));
+    const records = recordsIn(readCounts(raw.counts));
+    lifetime.set(sourceId, (lifetime.get(sourceId) ?? 0) + records);
+    if (records <= 0) continue;
+    const startedAt = asIsoOrNull(raw.started_at);
+    if (startedAt === null) continue;
+    const at = new Date(startedAt);
+    const previous = lastRecord.get(sourceId);
+    if (previous === undefined || at > previous) lastRecord.set(sourceId, at);
   }
 
   const latest = new Map<string, LatestRun>();
@@ -303,6 +380,7 @@ export async function listSources(db: Knex, now: Date = new Date()): Promise<Pre
     });
 
     const latestRun = latest.get(id) ?? null;
+    const lastRecordAt = lastRecord.get(id) ?? null;
     const enabled = row.enabled === true;
 
     return {
@@ -322,13 +400,27 @@ export async function listSources(db: Knex, now: Date = new Date()): Promise<Pre
       last_success_at: usableLastSuccess === null ? null : usableLastSuccess.toISOString(),
       lifetime_records: lifetime.get(id) ?? 0,
       silence,
-      verdict: assessVerdict({
+      pipeline: assessPipeline({
         enabled,
         lastSuccessAt: usableLastSuccess,
         consecutiveFailures: asNumber(row.consecutive_failures, 0),
         latestRunStatus: latestRun === null ? null : latestRun.status,
         silence: silence.verdict,
       }),
+      collection: {
+        verdict: assessCollection({
+          enabled,
+          lifetimeRecords: lifetime.get(id) ?? 0,
+          lastRecordAt: lastRecordAt,
+          expectedIntervalHours,
+          now,
+        }),
+        last_record_at: lastRecordAt === null ? null : lastRecordAt.toISOString(),
+        hours_since_record:
+          lastRecordAt === null
+            ? null
+            : Math.max(0, Math.round(((now.getTime() - lastRecordAt.getTime()) / 3_600_000) * 10) / 10),
+      },
       latest_run: latestRun,
     };
   });

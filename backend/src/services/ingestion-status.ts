@@ -11,7 +11,8 @@ import {
   type PressroomSource,
   type RunStatusValue,
   type SilenceVerdict,
-  type SourceVerdict,
+  type PipelineVerdict,
+  type CollectionVerdict,
 } from "./pressroom/sources";
 
 /**
@@ -81,7 +82,16 @@ export interface PublicStatusSource {
     hours_since_success: number | null;
     expected_interval_hours: number | null;
   };
-  verdict: SourceVerdict;
+  /** Does the machinery work? */
+  pipeline: PipelineVerdict;
+  /** Is there anything in the archive? Published because an empty archive is a
+   * fact about the public record, not an embarrassment to hide behind a green
+   * pipeline. */
+  collection: {
+    verdict: CollectionVerdict;
+    last_record_at: string | null;
+    hours_since_record: number | null;
+  };
   latest_run: PublicStatusRun | null;
 }
 
@@ -250,7 +260,8 @@ export function toPublicSource(source: PressroomSource): PublicStatusSource {
     last_success_at: source.last_success_at,
     lifetime_records: source.lifetime_records,
     silence: source.silence,
-    verdict: source.verdict,
+    pipeline: source.pipeline,
+    collection: source.collection,
     latest_run:
       run === null
         ? null

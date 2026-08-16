@@ -39,7 +39,8 @@ function source(over: Partial<PublicStatusSource> = {}): PublicStatusSource {
       hours_since_success: 3,
       expected_interval_hours: 24,
     },
-    verdict: "healthy",
+    pipeline: "healthy",
+    collection: { verdict: "collecting", last_record_at: "2026-08-10T06:00:00.000Z", hours_since_record: 2 },
     latest_run: {
       status: "succeeded",
       started_at: "2026-08-09T07:17:00.000Z",
@@ -86,7 +87,8 @@ describe("StatusPage", () => {
       sources: [
         source({
           adapter_key: "mt-cers",
-          verdict: "never_run",
+          pipeline: "never_run",
+          collection: { verdict: "empty", last_record_at: null, hours_since_record: null },
           last_success_at: null,
           lifetime_records: 0,
           latest_run: null,
@@ -109,6 +111,29 @@ describe("StatusPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("says the scraper is healthy and the archive is empty, rather than one word for both", async () => {
+    // 2026-08-16: gallatin-civicplus read "Healthy" on this page while holding
+    // zero records, ever. Both halves were true of different things, and the
+    // page published the flattering one.
+    serve({
+      sources: [
+        source({
+          adapter_key: "gallatin-civicplus",
+          pipeline: "healthy",
+          collection: { verdict: "empty", last_record_at: null, hours_since_record: null },
+          lifetime_records: 0,
+        }),
+      ],
+    });
+    renderWithProviders(<StatusPage />);
+
+    expect(await screen.findByText("gallatin-civicplus")).toBeInTheDocument();
+    expect(screen.getByText("Healthy")).toBeInTheDocument();
+    expect(screen.getByText("Nothing collected")).toBeInTheDocument();
+    expect(screen.getByText("Scraper")).toBeInTheDocument();
+    expect(screen.getByText("Archive")).toBeInTheDocument();
+  });
+
   it("keeps a disabled source listed and prints the reason it is off", async () => {
     const reason =
       "bozemanmt.gov returns a blanket Akamai block to every client, including this one.";
@@ -117,7 +142,8 @@ describe("StatusPage", () => {
         source({
           adapter_key: "bozeman-granicus",
           enabled: false,
-          verdict: "disabled",
+          pipeline: "disabled",
+          collection: { verdict: "disabled", last_record_at: null, hours_since_record: null },
           disabled_reason: reason,
         }),
       ],
@@ -136,7 +162,8 @@ describe("StatusPage", () => {
       sources: [
         source({
           adapter_key: "quiet-adapter",
-          verdict: "suspect",
+          pipeline: "suspect",
+          collection: { verdict: "collecting", last_record_at: "2026-08-10T06:00:00.000Z", hours_since_record: 2 },
           silence: {
             verdict: "suspect",
             hours_since_success: 96.4,
@@ -179,7 +206,8 @@ describe("StatusPage", () => {
       sources: [
         source({
           adapter_key: "failing-adapter",
-          verdict: "failing",
+          pipeline: "failing",
+          collection: { verdict: "collecting", last_record_at: "2026-08-10T06:00:00.000Z", hours_since_record: 2 },
           latest_run: {
             status: "failed",
             started_at: "2026-08-09T07:17:00.000Z",
@@ -207,7 +235,8 @@ describe("StatusPage", () => {
       sources: [
         source({
           adapter_key: "partial-adapter",
-          verdict: "suspect",
+          pipeline: "suspect",
+          collection: { verdict: "collecting", last_record_at: "2026-08-10T06:00:00.000Z", hours_since_record: 2 },
           latest_run: {
             status: "partial",
             started_at: "2026-08-09T07:17:00.000Z",

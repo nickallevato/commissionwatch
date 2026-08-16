@@ -98,11 +98,21 @@ export function AdminHomePage() {
       source.last_success_at !== null && now - new Date(source.last_success_at).getTime() < DAY_MS,
   ).length;
   const records = list.reduce((total, source) => total + source.lifetime_records, 0);
+  /**
+   * Needs attention on **either** axis.
+   *
+   * A source whose scraper runs cleanly and collects nothing belongs on this
+   * list, and before the collection axis existed it could not get onto it —
+   * `healthy` was the whole answer. That is the case this panel most needed to
+   * surface and was the one case it could not see.
+   */
   const failing = list.filter(
     (source) =>
-      source.verdict === "never_run" ||
-      source.verdict === "failing" ||
-      source.verdict === "suspect",
+      source.pipeline === "never_run" ||
+      source.pipeline === "failing" ||
+      source.pipeline === "suspect" ||
+      source.collection.verdict === "empty" ||
+      source.collection.verdict === "stalled",
   );
 
   return (
@@ -202,19 +212,40 @@ export function AdminHomePage() {
                   className="flex flex-wrap items-baseline justify-between gap-3 py-2.5 text-[13px]"
                 >
                   <span className="font-semibold text-ink">{source.adapter_key}</span>
-                  <StatusPill
-                    tone={
-                      source.verdict === "healthy"
-                        ? "ok"
-                        : source.verdict === "suspect"
-                          ? "warn"
-                          : source.verdict === "disabled"
-                            ? "idle"
-                            : "bad"
-                    }
-                  >
-                    {source.verdict.replace(/_/g, " ")}
-                  </StatusPill>
+                  {/* Both axes, because the pill that says "healthy" beside an
+                      empty archive is the one that taught us to show two. */}
+                  <span className="flex flex-wrap items-baseline gap-1.5">
+                    <StatusPill
+                      tone={
+                        source.pipeline === "healthy"
+                          ? "ok"
+                          : source.pipeline === "suspect"
+                            ? "warn"
+                            : source.pipeline === "disabled"
+                              ? "idle"
+                              : "bad"
+                      }
+                    >
+                      {source.pipeline.replace(/_/g, " ")}
+                    </StatusPill>
+                    <StatusPill
+                      tone={
+                        source.collection.verdict === "collecting"
+                          ? "ok"
+                          : source.collection.verdict === "stalled"
+                            ? "warn"
+                            : source.collection.verdict === "disabled"
+                              ? "idle"
+                              : "bad"
+                      }
+                    >
+                      {source.collection.verdict === "empty"
+                        ? "no records"
+                        : source.collection.verdict === "stalled"
+                          ? "no new records"
+                          : source.collection.verdict}
+                    </StatusPill>
+                  </span>
                 </li>
               ))}
             </ul>

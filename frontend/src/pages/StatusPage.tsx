@@ -55,7 +55,19 @@ import type {
  * chrome. `PressroomUI` carries the console's, and this is not the console.
  */
 
-const VERDICT_LABEL: Record<PublicStatusSource["verdict"], string> = {
+/**
+ * **Two verdicts, shown together, because they answer different questions.**
+ *
+ * On 2026-08-16 a source read "Healthy" on this page while its archive held
+ * zero records — ever. Both halves were true of different things: the scraper
+ * ran, and it had never collected anything. Showing only the first is how a
+ * transparency site publishes a green word about an empty shelf.
+ *
+ * Labelled "Scraper" and "Archive" rather than "pipeline" and "collection": a
+ * reader who has never seen the schema should not have to learn ours to read
+ * the page that exists to be readable.
+ */
+const VERDICT_LABEL: Record<PublicStatusSource["pipeline"], string> = {
   disabled: "Disabled",
   never_run: "Never run",
   failing: "Failing",
@@ -77,12 +89,32 @@ const RUN_STATUS_LABEL: Record<IngestionRunStatus, string> = {
 };
 
 /** Only `healthy` gets the green. Everything else is red or plain. */
-const VERDICT_CLASS: Record<PublicStatusSource["verdict"], string> = {
+const VERDICT_CLASS: Record<PublicStatusSource["pipeline"], string> = {
   disabled: "text-muted",
   never_run: "text-accent",
   failing: "text-accent",
   suspect: "text-accent",
   healthy: "text-pass",
+};
+
+/**
+ * What the archive holds. "Nothing collected" is stated in words as well as in
+ * the zero beside it, because a reader scanning a column of numbers can miss a
+ * 0 and nobody misses a sentence.
+ */
+const COLLECTION_LABEL: Record<PublicStatusSource["collection"]["verdict"], string> = {
+  disabled: "Not collecting",
+  empty: "Nothing collected",
+  stalled: "Nothing new",
+  collecting: "Collecting",
+};
+
+/** `collecting` is the only good state here, and `empty` is the loud one. */
+const COLLECTION_CLASS: Record<PublicStatusSource["collection"]["verdict"], string> = {
+  disabled: "text-muted",
+  empty: "text-accent",
+  stalled: "text-accent",
+  collecting: "text-pass",
 };
 
 function formatStamp(value: string | null): string {
@@ -595,8 +627,13 @@ function SourceRow({ source }: { source: PublicStatusSource }) {
 
       <td role="cell" className="block px-0 py-2 sm:table-cell sm:px-4 sm:py-4">
         <CellLabel>State</CellLabel>
-        <span className={`text-sm font-semibold ${VERDICT_CLASS[source.verdict]}`}>
-          {VERDICT_LABEL[source.verdict]}
+        <span className="block text-xs uppercase tracking-wide text-muted">Scraper</span>
+        <span className={`text-sm font-semibold ${VERDICT_CLASS[source.pipeline]}`}>
+          {VERDICT_LABEL[source.pipeline]}
+        </span>
+        <span className="mt-1.5 block text-xs uppercase tracking-wide text-muted">Archive</span>
+        <span className={`text-sm font-semibold ${COLLECTION_CLASS[source.collection.verdict]}`}>
+          {COLLECTION_LABEL[source.collection.verdict]}
         </span>
         {!source.enabled && (
           // Rule 1. The reason is in the open, not behind a disclosure: this is

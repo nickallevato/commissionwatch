@@ -123,8 +123,15 @@ const RAIL: readonly RailGroup[] = [
   },
 ];
 
-/** The verdicts that mean a source is not doing its job. */
-const FAILING: ReadonlySet<PressroomSource["verdict"]> = new Set([
+/**
+ * The pipeline verdicts that mean a source is not doing its job.
+ *
+ * The count beside them also includes an empty or stalled **archive**, which
+ * this set cannot express: a scraper can be `healthy` on every run and still
+ * have collected nothing, and that source needs an operator more than a
+ * `suspect` one does.
+ */
+const FAILING: ReadonlySet<PressroomSource["pipeline"]> = new Set([
   "never_run",
   "failing",
   "suspect",
@@ -155,7 +162,14 @@ export function PressroomLayout() {
         if (!res.ok) return;
         const body = (await res.json()) as { data: PressroomSource[] };
         if (ignore) return;
-        setFailing(body.data.filter((source) => FAILING.has(source.verdict)).length);
+        setFailing(
+          body.data.filter(
+            (source) =>
+              FAILING.has(source.pipeline) ||
+              source.collection.verdict === "empty" ||
+              source.collection.verdict === "stalled",
+          ).length,
+        );
       } catch {
         // Deliberately silent. See above.
       }

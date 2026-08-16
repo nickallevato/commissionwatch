@@ -29,7 +29,7 @@ function emptySources() {
   return http.get("/api/admin/pressroom/sources", () => HttpResponse.json({ data: [], total: 0 }));
 }
 
-function source(id: string, verdict: PressroomSource["verdict"]): PressroomSource {
+function source(id: string, pipeline: PressroomSource["pipeline"]): PressroomSource {
   return {
     id,
     adapter_key: `adapter_${id}`,
@@ -43,7 +43,8 @@ function source(id: string, verdict: PressroomSource["verdict"]): PressroomSourc
     last_success_at: null,
     lifetime_records: 0,
     silence: { verdict: "unknown", hours_since_success: null, expected_interval_hours: null },
-    verdict,
+    pipeline,
+    collection: { verdict: "collecting", last_record_at: "2026-08-10T06:00:00.000Z", hours_since_record: 2 },
     latest_run: null,
   };
 }

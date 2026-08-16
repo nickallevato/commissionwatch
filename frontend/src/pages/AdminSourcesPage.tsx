@@ -515,6 +515,32 @@ function sourceState(source: PressroomSource): { text: string; tone: Severity | 
     : { text: "Idle", tone: "plain" };
 }
 
+/**
+ * The archive, as its own pill.
+ *
+ * `sourceState` above is entirely about the machinery — Off, Sweeping, Idle,
+ * how many consecutive failures. None of it can say the archive is empty, and
+ * on 2026-08-16 a source sat at "Sweeping" and "0 collected, ever" with nothing
+ * in the status line connecting those two facts.
+ *
+ * `null` for a disabled source: the Off pill has already said it, and two pills
+ * saying the same thing is how an operator learns to stop reading pills.
+ */
+function collectionState(
+  source: PressroomSource,
+): { text: string; tone: Severity | "plain" } | null {
+  switch (source.collection.verdict) {
+    case "disabled":
+      return null;
+    case "empty":
+      return { text: "No records", tone: "bad" };
+    case "stalled":
+      return { text: "No new records", tone: "warn" };
+    case "collecting":
+      return { text: "Collecting", tone: "ok" };
+  }
+}
+
 function SourceItem({
   source,
   queue,
@@ -541,6 +567,7 @@ function SourceItem({
   onToggleConfirm: (reason: string) => void;
 }) {
   const state = sourceState(source);
+  const archive = collectionState(source);
   const zero = source.lifetime_records === 0;
   const queueStat = queue?.by_source.find((s) => s.adapter_key === source.adapter_key) ?? null;
 
@@ -555,6 +582,11 @@ function SourceItem({
         <StatusPill tone={state.tone} testId={`state-${source.id}`}>
           {state.text}
         </StatusPill>
+        {archive !== null && (
+          <StatusPill tone={archive.tone} testId={`archive-${source.id}`}>
+            {archive.text}
+          </StatusPill>
+        )}
         <span className="ml-auto font-mono text-[12px] tabular text-muted" data-testid={`cron-${source.id}`}>
           {source.jurisdiction.name}, {source.jurisdiction.state} · cron {source.cron_expression}
         </span>
@@ -587,6 +619,11 @@ function SourceItem({
                 : `last sweep ${source.silence.hours_since_success} h ago`}
               {source.latest_run && source.latest_run.status !== "running" && ` · ${source.latest_run.status}`}
             </span>
+            {source.collection.hours_since_record !== null && (
+              <span data-testid={`last-record-${source.id}`}>
+                last record {source.collection.hours_since_record} h ago
+              </span>
+            )}
             {source.expected_interval_hours !== null && <span>expected every {source.expected_interval_hours} h</span>}
             {!queueError && oldestJobAge !== null && <span>oldest job {oldestJobAge}</span>}
             {queueError && source.latest_run && (
@@ -609,7 +646,7 @@ function SourceItem({
           type="button"
           onClick={onSweep}
           disabled={sweeping}
-          className={`${source.verdict === "never_run" ? ACTION_PRIMARY : ACTION} ${ACTION_SMALL} ${FOCUS_RING}`}
+          className={`${source.pipeline === "never_run" ? ACTION_PRIMARY : ACTION} ${ACTION_SMALL} ${FOCUS_RING}`}
           aria-label={`Sweep now: ${source.adapter_key}`}
         >
           {sweeping ? "Sweeping…" : "Sweep now"}

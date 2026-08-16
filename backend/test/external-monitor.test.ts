@@ -489,6 +489,7 @@ describe("external monitor — source staleness", () => {
         enabled: false,
         expected_interval_hours: 168,
         last_success_at: null,
+        lifetime_records: 12,
       },
       NOW,
     );
@@ -498,7 +499,7 @@ describe("external monitor — source staleness", () => {
 
   it("is quiet about an enabled source with no declared interval", () => {
     const outcome = evaluateSource(
-      { adapter_key: "mt-cers", enabled: true, expected_interval_hours: null, last_success_at: null },
+      { adapter_key: "mt-cers", enabled: true, expected_interval_hours: null, last_success_at: null, lifetime_records: 12 },
       NOW,
     );
     assert.equal(outcome.state, "pass");
@@ -512,6 +513,7 @@ describe("external monitor — source staleness", () => {
         enabled: true,
         expected_interval_hours: 168,
         last_success_at: null,
+        lifetime_records: 12,
       },
       NOW,
     );
@@ -526,12 +528,47 @@ describe("external monitor — source staleness", () => {
         enabled: true,
         expected_interval_hours: 24,
         last_success_at: "2026-08-08T04:00:00.000Z",
+        lifetime_records: 12,
       },
       NOW,
     );
     assert.equal(outcome.state, "fail");
     assert.match(outcome.detail, /stale/);
     assert.match(outcome.detail, /48 h ago/);
+  });
+
+  it("warns about an enabled source that has collected nothing, ever", () => {
+    // The 2026-08-16 case. Enabled, inside its interval, last sweep an hour
+    // ago, zero records — and this monitor printed PASS, because every question
+    // it asked was about the machinery rather than the archive.
+    const outcome = evaluateSource(
+      {
+        adapter_key: "gallatin-civicplus",
+        enabled: true,
+        expected_interval_hours: 24,
+        last_success_at: "2026-08-09T22:00:00.000Z",
+        lifetime_records: 0,
+      },
+      NOW,
+    );
+    assert.equal(outcome.state, "warn");
+    assert.match(outcome.detail, /never collected a record/);
+  });
+
+  it("does not read an absent lifetime_records as an empty archive", () => {
+    // An older feed that does not publish the field is unknown, not zero.
+    // Reporting unknown as empty would be this monitor inventing a finding.
+    const outcome = evaluateSource(
+      {
+        adapter_key: "gallatin-civicplus",
+        enabled: true,
+        expected_interval_hours: 24,
+        last_success_at: "2026-08-09T22:00:00.000Z",
+        lifetime_records: null,
+      },
+      NOW,
+    );
+    assert.equal(outcome.state, "pass");
   });
 
   it("passes an enabled source inside its interval", () => {
@@ -541,6 +578,7 @@ describe("external monitor — source staleness", () => {
         enabled: true,
         expected_interval_hours: 24,
         last_success_at: "2026-08-09T22:00:00.000Z",
+        lifetime_records: 12,
       },
       NOW,
     );
@@ -555,6 +593,7 @@ describe("external monitor — source staleness", () => {
         enabled: true,
         expected_interval_hours: 24,
         last_success_at: "last tuesday",
+        lifetime_records: 12,
       },
       NOW,
     );
@@ -571,14 +610,16 @@ describe("external monitor — the sources feed", () => {
         enabled: false,
         expected_interval_hours: 168,
         last_success_at: null,
+        lifetime_records: 12,
       },
       {
         adapter_key: "gallatin-civicplus",
         enabled: false,
         expected_interval_hours: 168,
         last_success_at: null,
+        lifetime_records: 12,
       },
-      { adapter_key: "mt-cers", enabled: false, expected_interval_hours: null, last_success_at: null },
+      { adapter_key: "mt-cers", enabled: false, expected_interval_hours: null, last_success_at: null, lifetime_records: 12 },
     ]);
     const summary = summarise(evaluateSources(response(200, body), NOW));
     assert.equal(summary.failed, false);
@@ -593,12 +634,14 @@ describe("external monitor — the sources feed", () => {
         enabled: false,
         expected_interval_hours: 168,
         last_success_at: null,
+        lifetime_records: 12,
       },
       {
         adapter_key: "gallatin-civicplus",
         enabled: true,
         expected_interval_hours: 24,
         last_success_at: "2026-08-01T04:00:00.000Z",
+        lifetime_records: 12,
       },
     ]);
     const summary = summarise(evaluateSources(response(200, body), NOW));

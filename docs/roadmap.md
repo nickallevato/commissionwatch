@@ -264,8 +264,15 @@ docstring. Probe what is actually hanging the run before designing the third of 
 > touched** — `updateSourceHealth` stamps `last_success_at` with `now()`, which for a run that died
 > hours ago would feed the silence watch a success fresher than any that happened.
 >
-> The two monitor items above are untouched and still open. This closes the cause of the stuck row,
-> not the reason the monitor stayed green about it.
+> **Partly closed on the monitor side too, 2026-08-16.** `evaluateSource` now reads
+> `lifetime_records` and **warns** on an enabled source that has never collected a record — the
+> Gallatin case, which was passing because every question the monitor asked was about the machinery.
+> Reading that field is not the concession the docstring refuses: `silence.verdict` is an inference
+> the subject draws about itself, while a lifetime count is a fact the monitor has no second source
+> for. It is `warn` rather than `fail` because promoting it to a page is an operator's decision.
+>
+> Still open here: failing on `verdict: failing`, failing on a run open past a bounded age, and
+> `expected_interval_hours` of 168 against a nightly cron.
 
 ### 6. Dead code that nothing imports, found by the coverage baseline
 

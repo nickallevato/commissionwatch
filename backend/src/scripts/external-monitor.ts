@@ -768,6 +768,17 @@ export interface MonitoredSource {
   enabled: boolean;
   expected_interval_hours: number | null;
   last_success_at: string | null;
+  /**
+   * Records the source has landed across its whole life.
+   *
+   * Read from the feed rather than recomputed, and that is not the same
+   * concession as reading `silence.verdict`. Silence is an *inference* the
+   * subject draws about itself, which this monitor refuses on principle. A
+   * lifetime count is a **fact** the monitor has no other way to obtain — there
+   * is no second source for it — and refusing to look at it does not make the
+   * monitor more independent, only blinder.
+   */
+  lifetime_records: number | null;
 }
 
 function readSource(value: unknown, index: number): { ok: true; source: MonitoredSource } | { ok: false; reason: string } {
@@ -802,6 +813,18 @@ function readSource(value: unknown, index: number): { ok: true; source: Monitore
     return { ok: false, reason: `source ${adapterKey} has a non-string last_success_at` };
   }
 
+  const rawLifetime = value.lifetime_records;
+  let lifetime: number | null;
+  if (rawLifetime === null || rawLifetime === undefined) {
+    // Absent rather than zero. An older feed that does not publish the field is
+    // unknown, and unknown must not be reported as an empty archive.
+    lifetime = null;
+  } else if (typeof rawLifetime === "number" && Number.isFinite(rawLifetime)) {
+    lifetime = rawLifetime;
+  } else {
+    return { ok: false, reason: `source ${adapterKey} has a non-numeric lifetime_records` };
+  }
+
   return {
     ok: true,
     source: {
@@ -809,6 +832,7 @@ function readSource(value: unknown, index: number): { ok: true; source: Monitore
       enabled,
       expected_interval_hours: interval,
       last_success_at: lastSuccess,
+      lifetime_records: lifetime,
     },
   };
 }
@@ -848,6 +872,27 @@ export function evaluateSource(source: MonitoredSource, now: Date): CheckOutcome
   const interval = source.expected_interval_hours;
   if (interval === null || interval <= 0) {
     return { name, state: "pass", detail: "enabled, no expected interval declared — nothing to measure against" };
+  }
+
+  /**
+   * An enabled source that has swept and collected nothing, ever.
+   *
+   * Deliberately **warn, not fail**, and deliberately checked before staleness:
+   * on 2026-08-16 `gallatin-civicplus` was enabled, inside its interval, and
+   * held zero records — and this monitor printed PASS, because every question
+   * it asked was about the machinery. The archive being empty is the condition
+   * this product exists to notice, and it was the one thing nothing watched.
+   *
+   * `warn` rather than `fail` because promoting it to a page is an operator's
+   * decision about what is worth waking up for, and a monitor that starts
+   * paging on its own authority is one that gets muted.
+   */
+  if (source.lifetime_records === 0) {
+    return {
+      name,
+      state: "warn",
+      detail: "enabled and has never collected a record — the scraper may run cleanly and gather nothing",
+    };
   }
 
   if (source.last_success_at === null) {
