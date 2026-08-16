@@ -596,9 +596,9 @@ export function AdminReviewPage() {
                   </p>
                 )}
 
-                <h3 className="mt-6 font-display text-base font-semibold text-ink">
+                <h2 className="mt-6 font-display text-base font-semibold text-ink">
                   What this rests on
-                </h3>
+                </h2>
                 {citable ? (
                   <ul className="mt-2 divide-y divide-rule border-y border-rule">
                     {item.citations.map((citation) => (

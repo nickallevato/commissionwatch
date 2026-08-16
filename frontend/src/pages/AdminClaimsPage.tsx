@@ -675,9 +675,9 @@ export function AdminClaimsPage() {
                   extracted {formatStamp(claim.created_at)}
                 </p>
 
-                <h3 className="mt-6 font-display text-base font-semibold text-ink">
+                <h2 className="mt-6 font-display text-base font-semibold text-ink">
                   The sentence that would publish
-                </h3>
+                </h2>
                 {/* `render.text`, from the API. This is the string approval
                   pins; assembling one here from the subject and the action
                   would pin bytes nobody read. */}
@@ -725,9 +725,9 @@ export function AdminClaimsPage() {
                   decision is a note nobody read. */}
                 <GovernorVerdict item={item} claimId={claimId} />
 
-                <h3 className="mt-6 font-display text-base font-semibold text-ink">
+                <h2 className="mt-6 font-display text-base font-semibold text-ink">
                   The quote, in the document it came from
-                </h3>
+                </h2>
                 <Citation
                   citation={{
                     artifact_sha256: item.citation.artifact_sha256,

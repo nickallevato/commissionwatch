@@ -11,9 +11,10 @@ import { Link } from "react-router";
  * A stated conformance target that nobody publishes is a private intention,
  * not a commitment. This page exists because WCAG 2.2 AA was already a real
  * target — `src/a11y.test.tsx` already runs axe-core over the public routes
- * in CI, and contrast ratios were already computed rather than eyeballed —
- * but none of that was said anywhere a reader could find it. Checked against
- * the code on the date below rather than described from memory.
+ * and, as of this revision, the operator console's review screens too — and
+ * contrast ratios were already computed rather than eyeballed — but none of
+ * that was said anywhere a reader could find it. Checked against the code on
+ * the date below rather than described from memory.
  */
 
 const REVISED = "August 16, 2026";
@@ -78,8 +79,9 @@ export function AccessibilityPage() {
           <div className="border-l-2 border-accent pl-4">
             <p className="label-sm">The short version</p>
             <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
-              The target is WCAG 2.2 AA, measured by an automated scan on every
-              public route in continuous integration, not held as a
+              The target is WCAG 2.2 AA, measured by an automated scan on
+              every public route and on the operator console&rsquo;s own
+              review screens in continuous integration, not held as a
               certification. One known failure is stated below rather than
               fixed quietly and forgotten: two severity colours in the light
               theme do not clear AA contrast for normal text on their own, and
@@ -141,10 +143,19 @@ export function AccessibilityPage() {
             </Body>
             <Body>
               The automated scan covers the public site — everything reachable
-              without signing in. It does not cover the operator console
-              behind the login wall, which is a tool for this project&rsquo;s
-              own maintainers and is not the surface a reader is asked to
-              trust.
+              without signing in — and, separately, the screens of the
+              operator console behind the login wall that a reviewer actually
+              works from: the dashboard, the ingestion sources board, and the
+              two decision queues from which a generated finding or a quoted
+              claim about a named person becomes public. That second sweep
+              renders the console&rsquo;s own chrome and a signed-in session,
+              the same way the public scan renders the reader&rsquo;s
+              masthead, and it also checks something axe cannot: that the
+              approve and reject controls on the claim queue, and its
+              collapsible per-subject groups, are reachable and operable by
+              keyboard alone, not only by a mouse. It does not yet cover every
+              admin screen — only the ones a reviewer&rsquo;s work runs
+              through.
             </Body>
           </section>
 
@@ -181,10 +192,13 @@ export function AccessibilityPage() {
               replace it.
             </Body>
             <Body>
-              The automated route scan covers only the public site. The
-              operator console — everything behind the login wall — is not
-              swept by it, because it is an internal tool rather than the
-              surface this project asks a reader to trust.
+              The automated route scan covers the public site and the
+              operator console&rsquo;s own review screens — dashboard,
+              sources, the finding queue, the claim queue — but not every
+              screen behind the login wall. A console page outside that set
+              has not been checked by this suite, even though it is an
+              internal tool rather than the surface this project asks a
+              reader to trust.
             </Body>
           </section>
 
