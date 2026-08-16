@@ -49,6 +49,21 @@ depending on which header and which browser, and no test in this repository woul
 portable choice, since it travels with the code and is testable — and strip them at the edge. Then
 assert the final header set in a test that fetches through the real stack.
 
+> **CLOSED and VERIFIED IN PRODUCTION, 2026-08-16 09:50Z.** Findings 1 and 2 are both fixed and the
+> fix is measured against the live site rather than read from config — which matters, because the
+> change was to nginx and nothing in the test suite can see a merged HTTP response.
+>
+> | Measure | Before | After |
+> |---|---|---|
+> | HSTS on `GET /` | **absent** | `max-age=31536000; includeSubDomains` |
+> | `X-Frame-Options` on `/api/health` | **2** (`SAMEORIGIN` + `DENY`) | **1** (`DENY`) |
+> | CSP / Referrer-Policy / X-Content-Type-Options | duplicated | one each, on both surfaces |
+>
+> nginx owns them; Helmet no longer emits the five it duplicated. **One duplicate remains and is
+> deliberate**: two `Server` headers, because stock `nginx:alpine` carries no headers-more module and
+> suppressing it needs a custom image. That is version disclosure, not a security control, and it is
+> recorded rather than quietly dropped.
+
 ### 2. HSTS is on `/api/*` but not on the HTML document — *low*
 
 ```
