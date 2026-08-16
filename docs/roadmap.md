@@ -191,9 +191,60 @@ adapter; and internationalisation as a *feature*, as opposed to 7.5's decision t
 
 ### Stale in `docs/STATUS.md`, corrected here
 
-`docs/STATUS.md` §2411 still lists installing the external monitor's cron as an outstanding operator
-task. **It is installed and firing** — verified 2026-08-16 against the Gitea Actions API: monitor
-runs land on a 15-minute tick at :00/:15/:30/:45, with 580 successful runs to date.
+Three claims in the files `CLAUDE.md` names as read-this-first are contradicted by production. All
+three understate the project, which is its habitual error direction, and all three are still wrong in
+their own file — this section is a correction living in a third place, which is not a fix.
+
+1. `docs/STATUS.md` §2411 still lists installing the external monitor's cron as an outstanding
+   operator task. **It is installed and firing** — verified 2026-08-16 against the Gitea Actions API:
+   monitor runs land on a 15-minute tick at :00/:15/:30/:45, **617 runs** back to 2026-08-09T22:30,
+   including overnight stretches where four consecutive runs share one `head_sha` with no commit
+   between them, which no push can produce.
+2. `.gitea/workflows/monitor.yml:21` opens with `⚠ THE SCHEDULE DOES NOT FIRE ON THIS GITEA.
+   Measured, not assumed.` **It fires.** Gitea labels scheduled runs `event: push`, which is very
+   likely how the original 2026-08-10 measurement was misread. That comment block is the most
+   emphatic claim in this repository and it has been wrong for a week.
+3. `CLAUDE.md:22` says the live source is *"registered **disabled** until an operator enables it"*
+   and `docs/STATUS.md:2582` says *"neither is switched on in production."* **Both
+   `bozeman-granicus` and `gallatin-civicplus` return `enabled: true`** from
+   `/api/ingestion/sources` and are sweeping nightly. Half of STATUS next-step #1 is done.
+
+Deliverable: correct the three files themselves, and delete this section when they are.
+
+### 8. A stuck production sweep is green on the monitor
+
+Found 2026-08-16 by maturity review 3, by probing `/api/ingestion/sources` **twice, 25 minutes
+apart** — the second probe is the finding.
+
+| Source | enabled | verdict | lifetime records | latest run |
+|---|---|---|---:|---|
+| `bozeman-granicus` | true | **`failing`** | 1147 | `running` since 07:17Z, 44 records / **30 failures**, `finished_at: null` |
+| `gallatin-civicplus` | true | `healthy` | **0** | `running` since 07:17Z, 0 records / 1 failure |
+
+Byte-identical across both probes: the counters did not advance in 25 minutes, and the run has been
+open for over five hours on a nightly sweep. The external monitor reported
+`PASS source:bozeman-granicus: last successful sweep 28.7 h ago, within 168 h`.
+
+Three causes compound:
+
+1. **`evaluateSource` reads only staleness and discards the feed's own `verdict`.** The refusal is
+   argued in its docstring — *"the point of an external monitor is not to ask the subject how it
+   thinks it is doing"* — and that argument is right about `silence`, which is an inference. It is
+   wrong about `verdict: failing`, which is a **count of consecutive failure rows**: a fact the
+   monitor has no other way to see, not an opinion.
+2. **`expected_interval_hours` is 168 against a `17 7 * * *` cron.** A source that sweeps nightly gets
+   a seven-day silence allowance. Bozeman could stop entirely on a Monday and stay green until the
+   following Monday.
+3. **`evaluateSource`'s docstring is stale**: *"Bozeman, Gallatin and MT CERS are registered and
+   switched off."* Two of the three are on — see the section above.
+
+**This is an alerting gap, not a truthfulness gap, and the distinction is the point.** `StatusPage`
+renders the verdict, so a reader on the public `/status` page sees "failing" for Bozeman. Nothing
+false is published. That is why maturity review 3 did not treat it as blocking.
+
+Deliverable: have the monitor fail on `verdict: failing` (or on a run open past a bounded age); set
+`expected_interval_hours` to something derived from the cron rather than seven times it; fix the
+docstring. Probe what is actually hanging the run before designing the third of those.
 
 ### 6. Dead code that nothing imports, found by the coverage baseline
 
@@ -331,6 +382,28 @@ about not losing what already exists rather than about making it move:
 
 And one correction to item 1: the constraint is not only reviewer *speed*, it is reviewer *count*.
 See **7.1**.
+
+**Closed 2026-08-16 by maturity review 3** (`docs/superpowers/specs/2026-08-16-maturity-review-3.md`).
+Items 0 and 0b above are now partly overtaken:
+
+- **0 (6.1)** — the copy still has not left the instance and that is still the only finding whose
+  failure mode is unrecoverable, but *"nothing can tell whether a backup has ever run"* is closed.
+  `ops_event_log` (migration 107) records every `ops.*` event unconditionally, `/api/health` publishes
+  `backup.lastSuccessAt`, and the external monitor judges it. Verified against production: the check
+  read the real state (`null`) and said so. **Installing the cron and setting `BACKUP_S3_URI` are the
+  remaining halves, and both are operator actions.** One caveat recorded rather than buried: the
+  never-recorded case reports `blocked`, and `blocked` does not fail a monitor run, so today the fact
+  is *published* but not *paged*.
+- **0b (6.2)** — closed. `npm audit` reports **0 vulnerabilities** in `backend/`, with and without
+  `--omit=dev`, down from 24 at the first review and 6 at the second. `backend/AUDIT-ALLOWLIST.md`
+  records the mechanism and currently has no entries. It is referenced by no test and no CI step,
+  so it is a convention rather than a gate — worth one assertion the day it gains a first row.
+
+**All seven maturity categories now pass**, up from three at the first review. The loop stopped here
+on the reviewer's own call, not the coordinator's. What remains is a person (7.1), three operator
+decisions (the prerender flag, the backup cron, the bucket), and Level-4-to-5 polish no reader will
+feel. The next thing that moves the public record is a claim being approved — not a fifteenth
+engineering item.
 
 ## Design Principles
 
