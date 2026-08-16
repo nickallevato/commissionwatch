@@ -642,6 +642,87 @@ describe("AdminClaimsPage", () => {
       "The claims queue could not be loaded.",
     );
   });
+
+  // -------------------------------------------------------------------------
+  // Grouping — 64 held claims across five subjects in production is a wall as
+  // a flat list. Grouped by `claim.subject_name`, it is five decisions.
+  // -------------------------------------------------------------------------
+
+  it("groups claims by subject, each with its own count", async () => {
+    install(
+      queue([
+        makeItem(),
+        makeItem({ claim: { ...makeItem().claim, id: SECOND_ID, subject_name: "Blair Madgic" } }),
+        makeItem({ claim: { ...makeItem().claim, id: THIRD_ID } }),
+      ]),
+    );
+    renderPage();
+
+    const averyGroup = await screen.findByTestId("group-avery-sample");
+    const blairGroup = await screen.findByTestId("group-blair-madgic");
+    // Two of Avery Sample's claims land in one group, not two.
+    expect(screen.getByTestId("group-count-avery-sample").textContent).toContain("2");
+    expect(screen.getByTestId("group-count-blair-madgic").textContent).toContain("1");
+    expect(averyGroup.textContent).toContain("Avery Sample");
+    expect(blairGroup.textContent).toContain("Blair Madgic");
+    // Both subjects' claims are visible — grouping re-shapes the page, it
+    // does not hide anyone's claim.
+    expect(screen.getAllByRole("button", { name: "Approve and publish" })).toHaveLength(3);
+  });
+
+  it("counts a group's own overdue claims in the accent colour, not just the page total", async () => {
+    install(
+      queue([
+        makeItem({ claim: { ...makeItem().claim, overdue: true } }),
+        makeItem({
+          claim: { ...makeItem().claim, id: SECOND_ID, subject_name: "Blair Madgic", overdue: false },
+        }),
+      ]),
+    );
+    renderPage();
+
+    const averyCount = await screen.findByTestId("group-count-avery-sample");
+    expect(averyCount.textContent).toContain("1 overdue");
+    const blairCount = screen.getByTestId("group-count-blair-madgic");
+    expect(blairCount.textContent).not.toContain("overdue");
+  });
+
+  it("collapses a group to hide its claims, and expands it back", async () => {
+    install(queue([makeItem()]));
+    renderPage();
+
+    await screen.findByTestId(`render-text-${CLAIM_ID}`);
+    const toggle = screen.getByRole("button", { name: "Avery Sample" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    const user = userEvent.setup();
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The claim itself is gone from the DOM, not merely visually hidden —
+    // this is what makes a subject "quiet" while another is worked through.
+    expect(screen.queryByTestId(`render-text-${CLAIM_ID}`)).toBeNull();
+    // The count stays on the page even while collapsed: a quieted group is
+    // still a checkable fact, not a blank.
+    expect(screen.getByTestId("group-count-avery-sample")).toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByTestId(`render-text-${CLAIM_ID}`)).toBeInTheDocument();
+  });
+
+  it("reports the number of subjects waiting, on the page's own stamp", async () => {
+    install(
+      queue([
+        makeItem(),
+        makeItem({ claim: { ...makeItem().claim, id: SECOND_ID, subject_name: "Blair Madgic" } }),
+      ]),
+    );
+    renderPage();
+
+    await screen.findByTestId(`render-text-${CLAIM_ID}`);
+    expect(screen.getByText(/2 subjects/)).toBeInTheDocument();
+  });
 });
 
 describe("AdminClaimsPage when the queue cannot be read", () => {

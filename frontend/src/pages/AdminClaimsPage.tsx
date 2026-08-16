@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FlagBar, PressroomCard, WorkTitle } from "@/components/PressroomUI";
 import { Absence } from "@/components/ui/Absence";
@@ -344,6 +344,45 @@ const DECIDED: Record<ClaimDecision, string> = {
     "Withdrawn. The meeting page now shows a tombstone at the same anchor saying what it read.",
 };
 
+/**
+ * One subject's claims, grouped client-side.
+ *
+ * Production holds 64 claims across five subjects, all in one meeting — a flat
+ * list of 64 rows is a wall. `/api/admin/claims/queue` returns a flat array and
+ * carries no per-subject breakdown (see `ClaimQueueResponse`), so grouping
+ * happens here, in the order subjects first appear in the API's own ordering —
+ * this page does not re-sort the queue, only re-shapes how it is drawn.
+ */
+interface ClaimGroup {
+  subject: string;
+  items: ClaimReviewItem[];
+}
+
+function groupBySubject(items: readonly ClaimReviewItem[]): ClaimGroup[] {
+  const groups: ClaimGroup[] = [];
+  const bySubject = new Map<string, ClaimGroup>();
+  for (const item of items) {
+    const subject = item.claim.subject_name;
+    let group = bySubject.get(subject);
+    if (!group) {
+      group = { subject, items: [] };
+      bySubject.set(subject, group);
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  return groups;
+}
+
+/** A stable, DOM-safe id for a subject name — test hooks and `aria-controls`. */
+function subjectSlug(subject: string): string {
+  const slug = subject
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug === "" ? "unknown" : slug;
+}
+
 export function AdminClaimsPage() {
   const [status, setStatus] = useState<ClaimQueueStatus>("held");
   const [listing, setListing] = useState<ClaimQueueResponse | null>(null);
@@ -352,6 +391,10 @@ export function AdminClaimsPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
   const [reasonById, setReasonById] = useState<Record<string, string>>({});
+  /** Which subjects are collapsed. Absent means expanded — the default, so a
+   *  single-subject queue (every fixture in this suite bar the grouping tests)
+   *  reads exactly as it did before grouping existed. */
+  const [collapsedSubjects, setCollapsedSubjects] = useState<Record<string, boolean>>({});
 
   // Fetching and applying are separated for the reason AdminReviewPage gives:
   // an effect body that calls setState synchronously causes a cascading render,
@@ -435,6 +478,11 @@ export function AdminClaimsPage() {
   }
 
   const items = listing?.data ?? [];
+  // Keyed on `listing` rather than the `items` alias above, so the memo's
+  // dependency is a value that actually changes reference only when a new
+  // fetch lands — the lint rule this dodges is right that `?? []` would
+  // otherwise hand `useMemo` a fresh array every render.
+  const groups = useMemo(() => groupBySubject(listing?.data ?? []), [listing]);
 
   return (
     <>
@@ -442,7 +490,11 @@ export function AdminClaimsPage() {
         title="Claims"
         stamp={
           listing
-            ? `${listing.counts.held} awaiting review · ${listing.counts.overdue} overdue`
+            ? `${listing.counts.held} awaiting review · ${listing.counts.overdue} overdue${
+                groups.length > 0
+                  ? ` · ${groups.length} subject${groups.length === 1 ? "" : "s"}`
+                  : ""
+              }`
             : undefined
         }
       />
@@ -547,8 +599,50 @@ export function AdminClaimsPage() {
       ) : items.length === 0 ? (
         <Absence reason="none-exist" subject={EMPTY_SUBJECT[status]} />
       ) : (
-        <div className="mt-8 space-y-6">
-          {items.map((item) => {
+        <div className="mt-8 space-y-10">
+          {groups.map((group) => {
+            const slug = subjectSlug(group.subject);
+            const collapsed = collapsedSubjects[group.subject] ?? false;
+            const overdueInGroup = group.items.filter((item) => item.claim.overdue).length;
+
+            return (
+              <section key={group.subject} aria-label={group.subject} data-testid={`group-${slug}`}>
+                <div className="flex flex-wrap items-baseline justify-between gap-3 border-b-[3px] border-double border-rule pb-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCollapsedSubjects((current) => ({
+                        ...current,
+                        [group.subject]: !collapsed,
+                      }))
+                    }
+                    aria-expanded={!collapsed}
+                    aria-controls={`group-items-${slug}`}
+                    className={`flex items-baseline gap-2 text-left ${focusRing}`}
+                  >
+                    <span aria-hidden="true" className="text-muted">
+                      {collapsed ? "▸" : "▾"}
+                    </span>
+                    <span className="font-display text-lg font-semibold text-ink">
+                      {group.subject}
+                    </span>
+                  </button>
+                  <span data-testid={`group-count-${slug}`} className="label-sm text-ink-soft">
+                    <span className="figure text-ink">{group.items.length}</span>{" "}
+                    {status === "held" ? "waiting" : STATUS_LABEL[status].toLowerCase()}
+                    {overdueInGroup > 0 && (
+                      <>
+                        {" · "}
+                        <span className="figure font-semibold text-accent">{overdueInGroup}</span>{" "}
+                        <span className="font-semibold text-accent">overdue</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+
+                {!collapsed && (
+                  <div id={`group-items-${slug}`} className="mt-6 space-y-6">
+                    {group.items.map((item) => {
             const claim = item.claim;
             const claimId = claim.id;
             const held = claim.status === "held";
@@ -775,6 +869,11 @@ export function AdminClaimsPage() {
                   retracted_at={claim.retracted_at}
                 />
               </PressroomCard>
+            );
+                    })}
+                  </div>
+                )}
+              </section>
             );
           })}
         </div>

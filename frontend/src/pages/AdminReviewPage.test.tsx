@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -237,6 +237,41 @@ describe("AdminReviewPage", () => {
     expect(screen.getByRole("button", { name: "Approve and publish" })).toBeDisabled();
     // Rejecting an unsourced finding is still available: it is a decision.
     expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+  });
+
+  // ---------------------------------------------------------------------
+  // Age against the window — rule 6: an age without its expectation is not
+  // checkable, so every finding's elapsed time is shown next to the policy's
+  // own review window rather than as a bare "31 h ago".
+  // ---------------------------------------------------------------------
+
+  it("shows a finding's age against the policy's own review window, not a bare figure", async () => {
+    // CITED was raised 2026-08-10T00:00:00Z; 31 hours later is well inside
+    // the fixture's 72-hour window.
+    vi.setSystemTime(new Date("2026-08-11T07:00:00.000Z"));
+    server.use(queueHandler(listing([CITED])));
+    renderPage();
+
+    const age = await screen.findByTestId(`age-${CITED.finding.id}`);
+    expect(age).toHaveTextContent("31 h");
+    expect(age).toHaveTextContent("72 h");
+    expect(age).toHaveTextContent("window");
+    vi.useRealTimers();
+  });
+
+  it("marks an overdue finding's age in the accent colour, and a fresh one plainly", async () => {
+    // UNSOURCED is fixed overdue: true regardless of the clock, so its age
+    // reads in the one accent this page spends.
+    vi.setSystemTime(new Date("2026-08-11T07:00:00.000Z"));
+    server.use(queueHandler(listing([CITED, UNSOURCED])));
+    renderPage();
+
+    const overdueAge = await screen.findByTestId(`age-${UNSOURCED.finding.id}`);
+    expect(overdueAge.querySelector("span")?.className).toContain("text-accent");
+
+    const freshAge = screen.getByTestId(`age-${CITED.finding.id}`);
+    expect(freshAge.querySelector("span")?.className).not.toContain("text-accent");
+    vi.useRealTimers();
   });
 
   it("marks an overdue request as still held", async () => {

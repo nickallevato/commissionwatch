@@ -503,12 +503,16 @@ export function AdminPlaceLinksPage() {
   }
 
   const items = listing?.data ?? [];
+  // Counted over the whole table (see `PlaceLinkQueueResponse`), so this is a
+  // real denominator for the stamp — rule 6: `0 of 64`, never a bare number
+  // where one exists.
+  const totalLinks = listing ? listing.counts.held + listing.counts.approved + listing.counts.rejected : 0;
 
   return (
     <>
       <WorkTitle
         title="Place links"
-        stamp={listing ? `${listing.counts.held} awaiting review` : undefined}
+        stamp={listing ? `${listing.counts.held} of ${totalLinks} awaiting review` : undefined}
       />
 
       <p className="mt-6 max-w-prose text-sm leading-relaxed text-ink-soft">
@@ -599,6 +603,15 @@ export function AdminPlaceLinksPage() {
           strongest claim `Absence` can make. Stating it on a failed fetch is
           the exact substitution that grammar of nothing exists to refuse. */
         <Absence reason="request-failed" subject="The place-link queue" />
+      ) : totalLinks === 0 ? (
+        /* Distinct from a filter turning up nothing: the whole table is empty,
+          across every status. Production is here today — 0 held, 0 approved,
+          0 rejected — and "the record shows no place links" would overclaim a
+          fact about the record. Nothing has reached the geocoding stage yet. */
+        <Absence reason="not-yet-ingested" subject="place links">
+          When one exists, this is where an address a document names becomes a pin on the public
+          map — quoted in place, at a stated precision. Nothing has reached that stage yet.
+        </Absence>
       ) : items.length === 0 ? (
         <Absence reason="none-exist" subject={EMPTY_SUBJECT[status]} />
       ) : (

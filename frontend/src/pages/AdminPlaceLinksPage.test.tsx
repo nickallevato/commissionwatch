@@ -181,6 +181,18 @@ describe("AdminPlaceLinksPage", () => {
     expect(screen.getByText(/Counted over every link, not over the page below/)).toBeInTheDocument();
   });
 
+  it("puts the awaiting-review figure over its own denominator on the stamp", async () => {
+    // Rule 6: never a bare number where a denominator exists — "4 of 15", not
+    // a lone "4" that could mean 4 of 4 or 4 of four hundred.
+    install({
+      ...queue([makeItem()]),
+      counts: { held: 4, approved: 9, rejected: 2 },
+    });
+    renderPage();
+
+    expect(await screen.findByText("4 of 15 awaiting review")).toBeInTheDocument();
+  });
+
   it("asks for held links first and passes both filters to the API", async () => {
     const asked = recordQueries(queue([makeItem()]));
     renderPage();
@@ -507,7 +519,10 @@ describe("AdminPlaceLinksPage", () => {
   });
 
   it("says what an empty queue means for the filter that produced it", async () => {
-    install(queue([]));
+    // Held is empty but the table is not — 9 links exist, just not in this
+    // status — so this is a filtered absence, not "nothing has been
+    // geocoded", and the wording must say so.
+    install({ ...queue([]), counts: { held: 0, approved: 9, rejected: 0 } });
     renderPage();
 
     expect(await screen.findByText(/no place links awaiting review/i)).toBeInTheDocument();
@@ -523,5 +538,38 @@ describe("AdminPlaceLinksPage", () => {
       "The place-link queue could not be loaded.",
     );
     expect(screen.queryByText(/The record shows no/)).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------
+  // The empty state is most of this page's job today — production is 0
+  // held / 0 approved / 0 rejected, and three different reasons a screen can
+  // show nothing must not collapse into one sentence.
+  // ---------------------------------------------------------------------
+
+  it("says nothing has been geocoded yet when the whole table is empty, not that the record shows none", async () => {
+    // The exact shape of production right now: not a filter turning up
+    // nothing, the table itself is empty. "The record shows no place links"
+    // would claim a fact nobody has checked; this is a pipeline stage that
+    // has not produced anything, which is a different and weaker claim.
+    install(queue([]));
+    renderPage();
+
+    const absence = await screen.findByText(/No sweep has collected place links yet\./);
+    expect(absence.textContent).not.toMatch(/^The record shows no/);
+    // Says what it would put on the map, per rule 1: answer the question the
+    // page exists to answer, even when the answer is "nothing yet".
+    expect(absence.textContent).toContain("becomes a pin on the public map");
+  });
+
+  it("distinguishes a merely-filtered absence from a table with nothing in it at all", async () => {
+    // Same held=0, but 4 approved links exist — the table has real rows, this
+    // filter alone is empty. The "not-yet-ingested" wording must not appear.
+    install({ ...queue([]), counts: { held: 0, approved: 4, rejected: 0 } });
+    renderPage();
+
+    expect(
+      await screen.findByText("The record shows no place links awaiting review."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No sweep has collected place links yet.")).toBeNull();
   });
 });

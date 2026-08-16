@@ -134,6 +134,18 @@ function formatStamp(value: string | null): string {
   return formatTimestamp(value);
 }
 
+/**
+ * Hours since an ISO instant, floored, or `null` for a timestamp that does not
+ * parse. Arithmetic on an instant, not a calendar rendering — `lib/dates.ts`
+ * carries no duration formatter, so this stays local to the page, matching the
+ * precedent `AdminSourcesPage.tsx`'s `agoLabel` set.
+ */
+function hoursSince(iso: string, nowMs: number): number | null {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  return Math.max(0, Math.floor((nowMs - then) / 3_600_000));
+}
+
 function shortHash(sha256: string): string {
   return sha256.slice(0, 12);
 }
@@ -152,6 +164,13 @@ export function AdminReviewPage() {
   const [busy, setBusy] = useState("");
   const [reasonById, setReasonById] = useState<Record<string, string>>({});
   const [draftById, setDraftById] = useState<Record<string, string>>({});
+  /**
+   * When this round of data was read. Doubles as "now" for every finding's
+   * age-against-window figure, so they never drift against each other or
+   * against a live clock mid-render — the same reasoning `AdminSourcesPage`
+   * gives for its own `readAt`.
+   */
+  const [readAt, setReadAt] = useState<number | null>(null);
 
   // Fetching and applying are separated so the effect can await the request and
   // touch state only in the continuation — an effect body that calls setState
@@ -178,6 +197,7 @@ export function AdminReviewPage() {
     } else {
       setError("The review queue could not be loaded.");
     }
+    setReadAt(Date.now());
     setLoading(false);
   }, []);
 
@@ -302,6 +322,10 @@ export function AdminReviewPage() {
   }
 
   const items = listing?.data ?? [];
+  // `readAt` is set in the same call that clears `loading`, so by the time any
+  // card below renders it is never null — the fallback keeps this a pure
+  // expression rather than a `Date.now()` call during render.
+  const nowMs = readAt ?? 0;
 
   return (
     <>
@@ -534,6 +558,32 @@ export function AdminReviewPage() {
                   {formatStamp(item.finding.created_at)} · window closes{" "}
                   {formatStamp(item.request.expires_at)}
                 </p>
+
+                {/* Rule 6: an age without its expectation is not checkable.
+                  "31 h" alone says nothing; against the policy's own window it
+                  is a fact an operator can act on. */}
+                {listing &&
+                  (() => {
+                    const hours = hoursSince(item.finding.created_at, nowMs);
+                    if (hours === null) return null;
+                    return (
+                      <p
+                        data-testid={`age-${flagId}`}
+                        className="mt-1 text-[12.5px] text-ink-soft"
+                      >
+                        <span
+                          className={`figure ${
+                            item.request.overdue ? "font-semibold text-accent" : "text-ink"
+                          }`}
+                        >
+                          {hours} h
+                        </span>{" "}
+                        against a{" "}
+                        <span className="figure text-ink">{listing.policy.review_window_hours} h</span>{" "}
+                        window
+                      </p>
+                    );
+                  })()}
 
                 {item.finding.meeting_id && (
                   <p className="mt-2">
