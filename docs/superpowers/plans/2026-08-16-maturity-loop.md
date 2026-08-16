@@ -516,3 +516,26 @@ instruction, not about the agents** — and I had the evidence after the second 
   Two of the five must-land items dispatched: the backup freshness check with `deploy/Caddyfile`,
   and the `PrivacyPage` contradiction. The remaining three all touch `backend/package.json` and go
   together next tick, to keep that file to one writer.
+- **11:50Z** — Items 1 and 2 verified and pushed (`0cb66ac`); backend **2217 / 534** clean, and I
+  confirmed `deploy/Caddyfile` is gone and the new public field carries a timestamp only.
+
+  Dispatched items **4 and 5** together, because both touch `backend/package.json` and that file has
+  been the one recurring collision point all day. Told the agent **not to simply re-sync** the two
+  test lists: `test` and `test:coverage` are now two hand-maintained copies of the same thing, and
+  re-syncing recreates the trap with a fresh copy. It fixes it structurally or guards it.
+
+  Also told it `npm audit fix` but **never `--force`** — force performs major upgrades, and the
+  react-router migration needed a deliberate two-step precisely because that class of change is not
+  safe to take unreviewed.
+
+  Second slot took the reviewer's smaller findings, and one of them is a check on **my own
+  decision**: the incidents README says the push cadence was fixed by batching, and the reviewer
+  measured cancelled runs going **29% → 33%**. The agent is measuring before and after against the
+  Gitea API, with instructions to say plainly if my batching made things worse, or that the sample
+  is too small to tell — rather than picking whichever number flatters the call I made.
+
+  And I asked for something beyond the three corrections. **Stale figures have been found four times
+  today and at least four roadmap statuses were wrong, several of them mine — every instance caught
+  by a reviewer or by accident, never by a check.** So it is to propose what would make this class of
+  drift self-detecting, and to be honest about whether the checkable subset is worth a guard or
+  whether these documents should simply stop quoting numbers they cannot verify.
