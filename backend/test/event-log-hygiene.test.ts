@@ -11,6 +11,7 @@ import {
   nonTestConnectionUrl,
   truncateEvents,
 } from "./helpers/events";
+import { testFilesFromTestScript } from "./helpers/run-coverage";
 
 /**
  * The suite whose subject is the run itself.
@@ -61,7 +62,7 @@ const TEST_DIR = __dirname;
  */
 const NOT_IN_NPM_TEST = new Set(["test/storage.integration.test.ts"]);
 
-function npmScript(name: "test" | "test:storage" | "pretest" | "posttest"): string {
+function npmScript(name: "test" | "test:storage" | "test:coverage" | "pretest" | "posttest"): string {
   const parsed: unknown = JSON.parse(readFileSync(PACKAGE_JSON, "utf8"));
   if (typeof parsed !== "object" || parsed === null || !("scripts" in parsed)) {
     throw new Error("package.json has no scripts block");
@@ -121,6 +122,48 @@ describe("every suite on disk is in the run", () => {
     for (const file of NOT_IN_NPM_TEST) {
       assert.ok(storage.includes(file), `${file} is exempt from npm test but no script runs it`);
     }
+  });
+
+  /**
+   * `test:coverage` used to be a second hand-typed copy of this same file
+   * list, and it had already drifted (missing `test/logger.test.ts`,
+   * `test/request-context.test.ts`, `test/admin-errors.test.ts`) before
+   * anyone noticed — the coverage baseline was blind to the newest code in
+   * the tree while this very guard was green, because this guard only ever
+   * read the `test` script. `test:coverage` now derives its file list from
+   * `test` at run time (`test/helpers/run-coverage.ts`) instead of restating
+   * it, so there is exactly one list to keep in sync. These two assertions
+   * hold that in place: the script still delegates rather than reverting to
+   * an inline list, and the derivation actually reproduces the same file set
+   * this test already verified against disk.
+   */
+  it("test:coverage delegates to the single-source file list instead of restating it", () => {
+    const coverageScript = npmScript("test:coverage");
+    assert.match(
+      coverageScript,
+      /run-coverage\.ts/,
+      "test:coverage no longer runs test/helpers/run-coverage.ts — if it now " +
+        "lists .test.ts files inline again, the two-list drift this guard " +
+        "exists to prevent is back.",
+    );
+    assert.doesNotMatch(
+      coverageScript,
+      /\.test\.ts/,
+      "test:coverage's script string names a .test.ts file directly — it " +
+        "should derive the list from the `test` script, not restate it.",
+    );
+  });
+
+  it("test:coverage's derived file list matches the test script's, exactly", () => {
+    const script = npmScript("test");
+    const listed = new Set(script.split(/\s+/).filter((token) => token.endsWith(".test.ts")));
+    const derived = new Set(testFilesFromTestScript());
+    assert.deepEqual(
+      [...derived].sort(),
+      [...listed].sort(),
+      "test/helpers/run-coverage.ts derived a different file list than " +
+        "package.json's test script actually contains.",
+    );
   });
 });
 
