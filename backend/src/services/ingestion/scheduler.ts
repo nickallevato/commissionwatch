@@ -616,24 +616,75 @@ export class SourceScheduler {
    * work appeared to have been done. The global claim is correct and is what
    * makes a backlog finish across runs; what was missing was the sweep
    * counting its own labour.
+   *
+   * A second, sharper trap sits behind that one: the same unfiltered claim
+   * that lets a backlog finish across runs also lets it starve a *new*
+   * source's very first job. `CLAIM_SQL` orders oldest-first with no run
+   * filter, so a source with a large standing backlog (Bozeman) can occupy
+   * every claim in a sweep meant for a different, brand-new source
+   * (Gallatin) — whose own `discover` job, being the newest row in the
+   * table, is claimed last and never reached before the deadline. That sweep
+   * then reports `outstanding: 1` forever and, because `processed` climbed
+   * from the *other* source's work, classifies as `partial` — healthy —
+   * while the new source has never ingested a single record.
+   *
+   * The fix is two phases inside the same deadline, not a different claim:
+   *
+   *   Phase 1 — this run's own jobs first, via the run-scoped claim
+   *   (`CLAIM_RUN_SQL`). This is what guarantees a new source's `discover`
+   *   actually executes, however large another source's backlog is.
+   *
+   *   Phase 2 — once phase 1 has nothing more of its own to claim, whatever
+   *   deadline budget remains goes to the original, unscoped claim, so a
+   *   large archive still fills in across sweeps exactly as before.
    */
   private async drain(runId: string): Promise<number> {
     const deadline = Date.now() + this.sweepTimeoutMs;
     let processed = 0;
+
+    // Phase 1: this run's own jobs first, so a new source's discover job is
+    // never starved by an older source's backlog.
     for (;;) {
-      const outstanding = await this.countOutstanding(runId);
-      if (outstanding === 0) return processed;
+      const ownOutstanding = await this.countOutstanding(runId);
+      if (ownOutstanding === 0) break;
       if (Date.now() > deadline) {
-        throw new SweepDeadlineReached(outstanding, this.sweepTimeoutMs, processed);
+        throw new SweepDeadlineReached(ownOutstanding, this.sweepTimeoutMs, processed);
       }
+      const tick = await this.options.worker.runOnce({ runId });
+      processed += tick.completed;
+      if (tick.claimed === 0) {
+        // Own jobs remain, but none are claimable right now (e.g. waiting on
+        // a retry backoff). Fall through to phase 2; the next drain picks
+        // them up once they are due.
+        break;
+      }
+    }
+
+    // Phase 2: help drain the global backlog with whatever budget remains —
+    // the original, unscoped claim, run for as long as there is deadline left
+    // and something claimable. Not gated on this run's own outstanding count:
+    // once phase 1 has finished this run's own work, leftover budget is spent
+    // helping another source's backlog rather than sitting idle, which is how
+    // a large archive keeps filling in across sweeps.
+    for (;;) {
+      if (Date.now() > deadline) break;
       const tick = await this.options.worker.runOnce();
       processed += tick.completed;
       if (tick.claimed === 0) {
-        // Everything left is waiting on a retry backoff. Nothing more this
-        // sweep can usefully do; the jobs stay queued for the next one.
-        return processed;
+        // Nothing claimable anywhere right now — everything left is waiting
+        // on a retry backoff. Nothing more this sweep can usefully do.
+        break;
       }
     }
+
+    // Only this run's own outstanding work can make a sweep `partial` rather
+    // than `succeeded`; a global backlog left behind after helping is not
+    // this run's failure to report.
+    const outstanding = await this.countOutstanding(runId);
+    if (outstanding > 0 && Date.now() > deadline) {
+      throw new SweepDeadlineReached(outstanding, this.sweepTimeoutMs, processed);
+    }
+    return processed;
   }
 
   private async countOutstanding(runId: string): Promise<number> {

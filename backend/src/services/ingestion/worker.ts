@@ -303,9 +303,13 @@ export class IngestionWorker {
   /**
    * One poll: claim a batch, run each job, record run counts. Exposed so a
    * caller (or a test) can drive the worker deterministically without a loop.
+   *
+   * `options.runId`, when given, restricts the claim to that run's own jobs —
+   * see `CLAIM_RUN_SQL` in `queue.ts`. Omitted (every existing caller,
+   * including the standing loop above) claims globally exactly as before.
    */
-  async runOnce(): Promise<TickResult> {
-    const jobs = await this.queue.claim(this.batchSize, undefined, this.stages);
+  async runOnce(options?: { runId?: string }): Promise<TickResult> {
+    const jobs = await this.queue.claim(this.batchSize, undefined, this.stages, options?.runId);
     if (jobs.length === 0) return { ...EMPTY_TICK };
 
     const tick: TickResult = { ...EMPTY_TICK, claimed: jobs.length };

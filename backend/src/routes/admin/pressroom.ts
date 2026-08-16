@@ -18,6 +18,7 @@ import {
   MEETING_PAGE_MAX,
 } from "../../services/pressroom/meetings";
 import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services/pressroom/runs";
+import { readQueueStats, readRunWork } from "../../services/pressroom/queue-stats";
 import { ExtractionUnavailable } from "../../services/extraction/run";
 import { enqueueExtractionBatch, MAX_EXTRACT_BATCH, enqueueExtraction } from "../../services/extraction/stage";
 import { enqueueGovernance } from "../../services/governor/stage";
@@ -203,6 +204,34 @@ router.post("/sources/:id/sweep", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// The queue
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /queue` — the shared queue's current shape.
+ *
+ * Jobs are claimed globally and oldest-first, so the queue rather than the
+ * source is the thing that behaves, and nothing in the product could see it.
+ * That blind spot is what let `gallatin-civicplus` read **Healthy** for days
+ * while it had ingested nothing at all: every sweep it ran drained
+ * `bozeman-granicus`'s older backlog instead of its own single `discover` job.
+ *
+ * Placed before `/runs/:id` and the other id-scoped routes for the same reason
+ * `/meetings/publish` is: `queue` is a literal segment and must not be read as
+ * an id.
+ *
+ * No verdict is returned — see the note in `queue-stats.ts` on why "starved" is
+ * the console's word to compose and not this endpoint's to assert.
+ */
+router.get("/queue", async (_req, res, next) => {
+  try {
+    res.json(await readQueueStats(db));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Runs
 // ---------------------------------------------------------------------------
 
@@ -216,7 +245,13 @@ router.get("/runs/:id", async (req, res, next) => {
       res.status(404).json({ error: "Run not found", statusCode: 404 });
       return;
     }
-    res.json(detail);
+
+    // `counts.processed` is every job this sweep completed, whichever run
+    // enqueued it. `work.own_completed` is how much of that was its own, and the
+    // difference is what it did for somebody else's backlog. A sweep reporting
+    // healthy `processed` and zero own work is a sweep that never started its
+    // source — the shape nobody could see until this was returned.
+    res.json({ ...detail, work: await readRunWork(db, id) });
   } catch (err) {
     next(err);
   }

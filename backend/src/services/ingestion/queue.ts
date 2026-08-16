@@ -566,6 +566,51 @@ const CLAIM_STAGES_SQL = `
   LIMIT ?
 `;
 
+/**
+ * The same claim, restricted to one run.
+ *
+ * `CLAIM_SQL` is deliberately global — no `run_id` filter — because that is
+ * what lets an archive larger than one sweep finish across many runs: the
+ * oldest pending job anywhere gets claimed first, whichever run enqueued it.
+ * That global claim must stay exactly as it is.
+ *
+ * What it does not do on its own is guarantee a *new* source's first job ever
+ * runs. Two sources sharing a queue, one with a large standing backlog, means
+ * the global claim can spend an entire sweep on the older source's rows while
+ * the newer source's own `discover` job — the newest row in the table — sits
+ * unclaimed until its deadline, then reports `outstanding: 1` forever. This is
+ * the run-scoped half of the fix: `SourceScheduler.drain` claims a run's own
+ * jobs first, with this query, before falling back to the unscoped claim to
+ * help drain everyone else's backlog.
+ */
+const CLAIM_RUN_SQL = `
+  SELECT id
+  FROM ingestion_jobs
+  WHERE status = 'pending' AND next_attempt_at <= now() AND run_id = ?
+  ORDER BY next_attempt_at
+  FOR UPDATE SKIP LOCKED
+  LIMIT ?
+`;
+
+/**
+ * The run-scoped claim, further restricted to named stages.
+ *
+ * `= ANY(?)` for the same reason as `CLAIM_STAGES_SQL`: the stage set is
+ * small and fixed, but building SQL by concatenating an array only has to be
+ * wrong once.
+ */
+const CLAIM_RUN_STAGES_SQL = `
+  SELECT id
+  FROM ingestion_jobs
+  WHERE status = 'pending'
+    AND next_attempt_at <= now()
+    AND run_id = ?
+    AND stage = ANY(?)
+  ORDER BY next_attempt_at
+  FOR UPDATE SKIP LOCKED
+  LIMIT ?
+`;
+
 export class IngestionQueue {
   readonly maxAttempts: number;
   readonly baseBackoffMs: number;
@@ -669,12 +714,18 @@ export class IngestionQueue {
    * Pass `executor` to claim inside a transaction you control — the claim is
    * only durable once that transaction commits, and the rows stay locked
    * against other claimers until then.
+   *
+   * Pass `runId` to restrict the claim to one run's own jobs — see
+   * `CLAIM_RUN_SQL` for why that exists alongside the unscoped claim, not
+   * instead of it.
    */
   async claim(
     limit: number,
     executor?: QueryExecutor,
     /** Restrict the claim to these stages. Omitted means any stage. */
     stages?: readonly IngestionStage[],
+    /** Restrict the claim to this run. Omitted means any run. */
+    runId?: string,
   ): Promise<ClaimedJob[]> {
     if (!Number.isInteger(limit) || limit <= 0) {
       throw new RangeError("claim limit must be a positive integer");
@@ -686,20 +737,25 @@ export class IngestionQueue {
       throw new RangeError("claim stages, when given, must name at least one stage");
     }
     if (executor) {
-      return this.claimIn(executor, limit, stages);
+      return this.claimIn(executor, limit, stages, runId);
     }
-    return this.db.transaction((trx) => this.claimIn(trx, limit, stages));
+    return this.db.transaction((trx) => this.claimIn(trx, limit, stages, runId));
   }
 
   private async claimIn(
     executor: QueryExecutor,
     limit: number,
     stages?: readonly IngestionStage[],
+    runId?: string,
   ): Promise<ClaimedJob[]> {
     const selected =
-      stages === undefined
-        ? await executor.raw(CLAIM_SQL, [limit])
-        : await executor.raw(CLAIM_STAGES_SQL, [[...stages], limit]);
+      runId === undefined
+        ? stages === undefined
+          ? await executor.raw(CLAIM_SQL, [limit])
+          : await executor.raw(CLAIM_STAGES_SQL, [[...stages], limit])
+        : stages === undefined
+          ? await executor.raw(CLAIM_RUN_SQL, [runId, limit])
+          : await executor.raw(CLAIM_RUN_STAGES_SQL, [runId, [...stages], limit]);
     const selectedRows: unknown[] = Array.isArray(selected?.rows)
       ? selected.rows
       : [];
