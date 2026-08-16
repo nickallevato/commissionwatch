@@ -19,6 +19,7 @@ import { BotPage } from "./pages/BotPage";
 import { MetricsPage } from "./pages/MetricsPage";
 import { MethodologyPage } from "./pages/MethodologyPage";
 import { PrivacyPage } from "./pages/PrivacyPage";
+import { AccessibilityPage } from "./pages/AccessibilityPage";
 import { PublicRecordsPage } from "./pages/PublicRecordsPage";
 import { CorrectionsPage } from "./pages/CorrectionsPage";
 import { DisputePage } from "./pages/DisputePage";
@@ -88,6 +89,7 @@ export function App() {
           <Route path="findings" element={<FindingsPage />} />
           <Route path="methodology" element={<MethodologyPage />} />
           <Route path="privacy" element={<PrivacyPage />} />
+          <Route path="accessibility" element={<AccessibilityPage />} />
           {/* P7. The statutory route the Methodology page promises, as a page.
             Unauthenticated by design: a reader exercising a public right does
             not sign in to this project first. */}

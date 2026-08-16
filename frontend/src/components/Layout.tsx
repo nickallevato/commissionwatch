@@ -223,6 +223,15 @@ export function Layout() {
             >
               Privacy
             </Link>
+            {/* Roadmap 7.5. Beside Privacy for the same reason: a stated
+              conformance target nobody can find is a private intention, not a
+              commitment, and this is the account of how this site checks it. */}
+            <Link
+              to="/accessibility"
+              className={`text-[11px] font-semibold uppercase tracking-label text-muted hover:text-ink ${focusRing}`}
+            >
+              Accessibility
+            </Link>
           </nav>
         </div>
       </footer>

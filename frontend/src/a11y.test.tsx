@@ -73,6 +73,7 @@ const PUBLIC_ROUTES = [
   "/calendar",
   "/methodology",
   "/privacy",
+  "/accessibility",
   "/public-records",
   "/corrections",
   "/status",
