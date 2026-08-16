@@ -10,23 +10,35 @@
 
 @layer base {
   /* Mirrors of the Tailwind palette, for inline styles and SVG fills where a
-     utility class cannot be used. Keep in sync with tailwind.config.ts. */
+     utility class cannot be used. Keep in sync with tailwind.config.ts — or
+     rather, tailwind.config.ts keeps in sync with THIS: these variables are
+     the single source, and Tailwind's colour tokens resolve through them
+     (see the `rgb(var(--cw-*) / <alpha-value>)` form there).
+     Stored as space-separated RGB channel triples, not hex, so Tailwind's
+     opacity modifiers (`bg-accent/20`) can compute against them — a
+     `var()` holding a hex string can't be alpha-blended. */
   :root {
-    --cw-paper: #fffdf8;
-    --cw-paper-sunk: #f6f3ea;
-    --cw-ink: #16161a;
-    --cw-ink-soft: #3a3a40;
-    --cw-accent: #b03a2e;
-    --cw-rule: #e8e3d8;
-    --cw-muted: #6e6a62;
+    --cw-paper: 255 253 248;
+    --cw-paper-sunk: 246 243 234;
+    --cw-ink: 22 22 26;
+    --cw-ink-soft: 58 58 64;
+    --cw-accent: 176 58 46;
+    /* Near-white/tinted accent washes — used as row and highlight
+       backgrounds. Not in the production palette table; given dark
+       counterparts in the media query below because a wash sized for a
+       light ground glows on a dark one. */
+    --cw-accent-50: 252 243 241;
+    --cw-accent-100: 248 227 223;
+    --cw-rule: 232 227 216;
+    --cw-muted: 110 106 98;
 
-    --cw-sev5: #b03a2e;
-    --cw-sev4: #b03a2e;
-    --cw-sev3: #c2860c;
-    --cw-sev2: #8a857c;
-    --cw-sev1: #8a857c;
-    --cw-pass: #1e6b45;
-    --cw-fail: #b03a2e;
+    --cw-sev5: 176 58 46;
+    --cw-sev4: 176 58 46;
+    --cw-sev3: 194 134 12;
+    --cw-sev2: 138 133 124;
+    --cw-sev1: 138 133 124;
+    --cw-pass: 30 107 69;
+    --cw-fail: 176 58 46;
 
     --cw-font-display: "Iowan Old Style", Georgia, "Times New Roman", Times,
       serif;
@@ -38,14 +50,44 @@
     color-scheme: light;
   }
 
+  /* Dark counterparts, driven purely by the reader's system preference — no
+     toggle, no stored state. Redefines colour variables only; every
+     component keeps its existing Tailwind classes and changes nothing.
+     Every variable here also has a light definition on bare :root above —
+     a token that only exists in one block is the classic unreadable-theme
+     bug. */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --cw-paper: 23 23 26;
+      --cw-paper-sunk: 33 33 38;
+      --cw-ink: 241 238 231;
+      --cw-ink-soft: 198 194 185;
+      --cw-accent: 224 112 94;
+      --cw-accent-50: 36 26 25;
+      --cw-accent-100: 58 33 31;
+      --cw-rule: 51 50 58;
+      --cw-muted: 148 143 134;
+
+      --cw-sev5: 224 112 94;
+      --cw-sev4: 224 112 94;
+      --cw-sev3: 217 163 60;
+      --cw-sev2: 138 133 124;
+      --cw-sev1: 138 133 124;
+      --cw-pass: 93 174 132;
+      --cw-fail: 224 112 94;
+
+      color-scheme: dark;
+    }
+  }
+
   html {
-    background-color: var(--cw-paper);
+    background-color: rgb(var(--cw-paper));
     -webkit-text-size-adjust: 100%;
   }
 
   body {
-    background-color: var(--cw-paper);
-    color: var(--cw-ink);
+    background-color: rgb(var(--cw-paper));
+    color: rgb(var(--cw-ink));
     font-family: var(--cw-font-sans);
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
@@ -65,13 +107,13 @@
     font-weight: 600;
     line-height: 1.12;
     letter-spacing: -0.02em;
-    color: var(--cw-ink);
+    color: rgb(var(--cw-ink));
   }
 
   /* A rule, not a box. */
   hr {
     border: 0;
-    border-top: 1px solid var(--cw-rule);
+    border-top: 1px solid rgb(var(--cw-rule));
   }
 
   code,
@@ -83,12 +125,12 @@
   }
 
   ::selection {
-    background-color: #f8e3df;
-    color: var(--cw-ink);
+    background-color: rgb(var(--cw-accent-100));
+    color: rgb(var(--cw-ink));
   }
 
   :focus-visible {
-    outline: 2px solid var(--cw-accent);
+    outline: 2px solid rgb(var(--cw-accent));
     outline-offset: 2px;
   }
 }
@@ -104,7 +146,7 @@
     line-height: 1.4;
     letter-spacing: 0.15em;
     text-transform: uppercase;
-    color: var(--cw-accent);
+    color: rgb(var(--cw-accent));
   }
 
   /* Uppercase muted micro-label: column heads, metadata keys, strap items. */
@@ -116,7 +158,7 @@
     line-height: 1.4;
     letter-spacing: 0.15em;
     text-transform: uppercase;
-    color: var(--cw-muted);
+    color: rgb(var(--cw-muted));
   }
 
   /*
@@ -139,13 +181,13 @@
   /* 1px ink rule. Put it on an <hr> or an empty <div>; it draws on top. */
   .rule-hi {
     border: 0;
-    border-top: 1px solid var(--cw-ink);
+    border-top: 1px solid rgb(var(--cw-ink));
   }
 
   /* 2px ink rule — the masthead rule. */
   .rule-hi-strong {
     border: 0;
-    border-top: 2px solid var(--cw-ink);
+    border-top: 2px solid rgb(var(--cw-ink));
   }
 
   /* Citation chip: source attribution as a small pill. */
@@ -155,14 +197,14 @@
     gap: 0.25rem;
     max-width: 100%;
     padding: 0.125rem 0.5rem;
-    border: 1px solid var(--cw-rule);
+    border: 1px solid rgb(var(--cw-rule));
     border-radius: 9999px;
-    background-color: var(--cw-paper);
+    background-color: rgb(var(--cw-paper));
     font-family: var(--cw-font-sans);
     font-size: 0.625rem;
     line-height: 1.5;
     letter-spacing: 0.04em;
-    color: var(--cw-muted);
+    color: rgb(var(--cw-muted));
     text-decoration: none;
     white-space: nowrap;
     overflow: hidden;
@@ -171,8 +213,8 @@
 
   a.cite:hover,
   a.cite:focus-visible {
-    border-color: var(--cw-ink);
-    color: var(--cw-ink);
+    border-color: rgb(var(--cw-ink));
+    color: rgb(var(--cw-ink));
   }
 
   /* Serif display treatment. The size below is a default — add any `text-*`
@@ -183,7 +225,7 @@
     font-size: clamp(1.75rem, 1.15rem + 2.2vw, 3.25rem);
     line-height: 1.12;
     letter-spacing: -0.02em;
-    color: var(--cw-ink);
+    color: rgb(var(--cw-ink));
     text-wrap: balance;
   }
 }
