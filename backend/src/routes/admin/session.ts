@@ -10,14 +10,48 @@ import { IDLE_SESSION_MS } from '../../services/auth/operators';
 const router = Router();
 
 /**
- * Secure is on everywhere except local development. The production site is
- * HTTPS-only behind Caddy; a Secure cookie sent over plain http during
- * `npm run dev` is simply never stored, which presents as a broken login.
+ * Whether the session cookie carries `Secure`.
+ *
+ * `SESSION_COOKIE_SECURE=false` exists so the console can be used over plain
+ * HTTP in local development. In production it is not a preference — a session
+ * cookie without `Secure` is sent over plain HTTP, and an operator session
+ * token is the credential that approves what this site publishes about named
+ * people.
+ *
+ * So the downgrade is **refused** in production rather than honoured or
+ * quietly ignored. The reasoning is the same as `assertFreeModel`'s in the
+ * OpenRouter client: the cost of the misconfiguration is worse than the cost of
+ * the outage it causes. A console that will not issue a session is a visible
+ * problem somebody fixes in minutes; a session token travelling in the clear is
+ * invisible until it is used.
+ *
+ * Ignoring the variable and carrying on would be the tempting middle path, and
+ * it is the worst of the three: the deployment would be secure while its
+ * configuration said otherwise, and the next person to read that configuration
+ * would believe it.
+ *
+ * As of 2026-08-16 this refusal cannot fire on the live deployment — the
+ * variable is set nowhere in `deploy/` or `.gitea/`, so production falls
+ * through to the `NODE_ENV` default and is already secure. It is a guard
+ * against a future edit, not a fix for a present defect.
  */
-function cookieSecure(): boolean {
-  if (process.env.SESSION_COOKIE_SECURE === 'true') return true;
-  if (process.env.SESSION_COOKIE_SECURE === 'false') return false;
-  return process.env.NODE_ENV === 'production';
+export function cookieSecure(): boolean {
+  const configured = process.env.SESSION_COOKIE_SECURE;
+  const production = process.env.NODE_ENV === 'production';
+
+  if (configured === 'false' && production) {
+    throw new Error(
+      'SESSION_COOKIE_SECURE=false with NODE_ENV=production: refusing to issue an ' +
+        'operator session cookie without the Secure flag. That cookie is the credential ' +
+        'that approves what this site publishes about named people, and without Secure it ' +
+        'travels over plain HTTP. Unset SESSION_COOKIE_SECURE in production; it exists only ' +
+        'so the console can be used over HTTP in local development.',
+    );
+  }
+
+  if (configured === 'true') return true;
+  if (configured === 'false') return false;
+  return production;
 }
 
 interface SignInBody {
