@@ -124,6 +124,25 @@ jobs:
           set -o pipefail
           npm ci 2>&1 | tee -a /tmp/ci-output.txt
 
+      # --omit=dev: a build-time advisory in a dev dependency (a linter, a test
+      # runner) never ships to a reader — it runs on a developer's machine or in
+      # this CI container, not in the bundle served at commissionwatch.bmux.sh.
+      # Failing the build on that would train everyone to ignore this check.
+      # Only what ships to the public SPA counts here.
+      #
+      # --audit-level=high: moderates don't block. The moderates open as of
+      # 2026-08-16 (react-router / @remix-run/router open-redirect class) were
+      # fixed by taking the latest 6.x react-router-dom rather than tolerated —
+      # this gate is for the next thing that shows up, not an excuse to leave
+      # today's known-fixed issues sitting unaddressed. A high or critical
+      # advisory in a production dependency should break the build.
+      - name: Audit production dependencies
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high --omit=dev 2>&1 | tee -a /tmp/ci-output.txt
+
       - name: Typecheck
         working-directory: frontend
         shell: bash
