@@ -114,6 +114,13 @@ export interface ProbeResult {
   body: string;
   error: string | null;
   attempts: number;
+  /**
+   * Response header names lower-cased, values as sent. Empty when the
+   * request never produced a response. Added for the `prerender` check,
+   * which has to read `Vary` — every earlier check only ever needed the
+   * body, so this stayed absent until one did.
+   */
+  headers: Record<string, string>;
 }
 
 /**
@@ -984,6 +991,178 @@ export function evaluateResources(health: ProbeResult): CheckOutcome {
   return { name, state: "pass", detail };
 }
 
+/* ── Probe 6: prerender split ───────────────────────────────────────── */
+
+/**
+ * The route this check probes.
+ *
+ * `frontend/nginx.conf`'s prerender consumer writes one document per
+ * `/meetings/{id}`, `/findings/{id}`, `/officials/{id}` and `/source/{sha}` —
+ * every one of those needs a real, currently-published record to exist, which
+ * this monitor cannot assume (production has run with zero, one, or many
+ * published meetings across its life). `/data` is the one prerendered route
+ * with a fixed path — see the consumer's route list — so it is reachable the
+ * same way on every run, whether or not anything has been published yet.
+ */
+export const PRERENDER_CHECK_PATH = "/data";
+
+/**
+ * The identity sent to ask nginx's `map $http_user_agent $prerender_prefix`
+ * (`frontend/nginx.conf`) for the crawler branch.
+ *
+ * This is deliberately not a literal `Googlebot` string — see `MONITOR_USER_AGENT`
+ * for why this monitor names itself honestly rather than impersonating anything.
+ * It has to contain the literal substring `googlebot`, because that is what the
+ * map's `~*(googlebot|...)` regex tests for and nginx does the matching, not
+ * this file — so the string is built to be both: self-identifying as
+ * CommissionWatchMonitor, and a fact about testing "the googlebot branch",
+ * rather than a claim to be Google's crawler.
+ */
+export const PRERENDER_CRAWLER_USER_AGENT =
+  "CommissionWatchMonitor/1.0 (+https://commissionwatch.bmux.sh; googlebot-branch prerender probe; admin@bmux.sh)";
+
+/** One reading of `PRERENDER_CHECK_PATH`, taken under each identity. */
+export interface PrerenderReading {
+  browser: ProbeResult;
+  crawler: ProbeResult;
+}
+
+/**
+ * True when a response is the Vite-built SPA shell rather than a prerendered
+ * document.
+ *
+ * `id="root"` is the element `frontend/src/main.tsx` mounts React onto. Every
+ * SPA response carries it — it is `frontend/index.html`, byte for byte, for
+ * any route the dev server or nginx's fallback serves. No prerendered document
+ * ever will: `renderDocument` (`backend/src/services/prerender/document.ts`)
+ * writes `<body><main>…</main><footer>…</footer></body>` and nothing else,
+ * because it deliberately does not know the frontend's hashed bundle names —
+ * see that file's header comment. It does emit a `<script type="application/ld+json">`
+ * block (structured data), so "contains a `<script>` tag" is not usable as the
+ * discriminator; the mount point is.
+ *
+ * **Rot risk, stated rather than assumed away:** this breaks only if the SPA's
+ * root element id changes. That change breaks React mounting for every visitor
+ * on every route in the same commit — the loudest possible failure — so it is
+ * not a thing that rots quietly the way a scraped CSS class name would.
+ */
+function isSpaShell(body: string): boolean {
+  return body.includes('id="root"');
+}
+
+/** Whether a response tells a cache in front of it to key on User-Agent. */
+function variesOnUserAgent(probe: ProbeResult): boolean {
+  const vary = probe.headers["vary"];
+  if (vary === undefined) return false;
+  return vary
+    .split(",")
+    .map((token) => token.trim().toLowerCase())
+    .includes("user-agent");
+}
+
+/**
+ * Is the crawler/browser split actually happening, and if it is, is the one
+ * header that makes it safe behind a shared cache present?
+ *
+ * Four outcomes, matched to the four this monitor already distinguishes
+ * elsewhere:
+ *
+ * - **`pass`, split off.** Both identities get the SPA shell. This is
+ *   `PRERENDER_ENABLED` unset, or the consumer's volume empty, or this
+ *   backend predating the feature entirely — and none of those are a defect.
+ *   Prerendering may be shipped dark; a monitor that failed on "off" would be
+ *   wrong about a state the operator chose on purpose.
+ * - **`pass`, split on.** The crawler identity gets a document without the
+ *   SPA's mount point, the browser identity gets the shell, and both
+ *   responses carry `Vary: User-Agent`. The split is doing its job safely.
+ * - **`fail`, the dangerous one.** The split is on — the two identities get
+ *   different markup — but `Vary: User-Agent` is missing from one or both
+ *   responses. That is the exact failure `frontend/nginx.conf`'s own comment
+ *   names: a cache between here and a reader can now serve a crawler's
+ *   unstyled document to the next human who asks for the same URL, or the
+ *   SPA shell to the next crawler. This is a `fail`, not a `warn`, because
+ *   unlike a slow deploy this has no self-correcting window — it stays wrong
+ *   until someone fixes the config.
+ * - **`blocked`, everything else.** The route could not be read at all, or
+ *   the two responses disagree in a shape this check does not recognise (for
+ *   instance the crawler identity getting the shell while the browser
+ *   identity does not — no known nginx config produces that, and guessing
+ *   at what it means would be inventing a fact from a `map` this check did
+ *   not write). `blocked` is never `pass`, so an unrecognised shape never
+ *   reads as "the split works".
+ */
+export function evaluatePrerender(reading: PrerenderReading): CheckOutcome {
+  const name = "prerender";
+
+  const browserFailure = transportFailure(reading.browser);
+  if (browserFailure !== null) {
+    return {
+      name,
+      state: "blocked",
+      detail: `browser-identity probe of ${PRERENDER_CHECK_PATH}: ${browserFailure}. Not a pass`,
+    };
+  }
+  const crawlerFailure = transportFailure(reading.crawler);
+  if (crawlerFailure !== null) {
+    return {
+      name,
+      state: "blocked",
+      detail: `crawler-identity probe of ${PRERENDER_CHECK_PATH}: ${crawlerFailure}. Not a pass`,
+    };
+  }
+
+  const browserIsShell = isSpaShell(reading.browser.body);
+  const crawlerIsShell = isSpaShell(reading.crawler.body);
+  const browserVaries = variesOnUserAgent(reading.browser);
+  const crawlerVaries = variesOnUserAgent(reading.crawler);
+
+  if (browserIsShell && crawlerIsShell) {
+    return {
+      name,
+      state: "pass",
+      detail:
+        `both the browser and crawler identity get the SPA shell at ${PRERENDER_CHECK_PATH} — the prerender ` +
+        `split is not currently serving crawlers a prerendered document. Not a failure: prerendering may be ` +
+        `deliberately off`,
+    };
+  }
+
+  if (!crawlerIsShell && browserIsShell) {
+    if (!crawlerVaries || !browserVaries) {
+      const missingFrom =
+        !crawlerVaries && !browserVaries
+          ? "the crawler and browser responses"
+          : !crawlerVaries
+            ? "the crawler response"
+            : "the browser response";
+      return {
+        name,
+        state: "fail",
+        detail:
+          `the prerender split is active at ${PRERENDER_CHECK_PATH} — the crawler identity got a document ` +
+          `without the SPA's mount point and the browser identity got the SPA shell — but Vary: User-Agent is ` +
+          `missing from ${missingFrom}. A cache in front of this site could now serve one audience's response ` +
+          `to the other`,
+      };
+    }
+    return {
+      name,
+      state: "pass",
+      detail:
+        `the prerender split is active: the crawler identity gets the prerendered document, the browser ` +
+        `identity gets the SPA shell, and Vary: User-Agent is present on both responses at ${PRERENDER_CHECK_PATH}`,
+    };
+  }
+
+  return {
+    name,
+    state: "blocked",
+    detail:
+      `${PRERENDER_CHECK_PATH} answered in a shape this check does not recognise ` +
+      `(browser got the shell: ${browserIsShell}, crawler got the shell: ${crawlerIsShell}) — not a pass`,
+  };
+}
+
 /* ── Reporting ──────────────────────────────────────────────────────── */
 
 export interface Summary {
@@ -1064,15 +1243,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function attempt(url: string): Promise<{ status: number; body: string } | { error: string }> {
+async function attempt(
+  url: string,
+  userAgent: string,
+): Promise<{ status: number; body: string; headers: Record<string, string> } | { error: string }> {
   try {
     const response = await fetch(url, {
-      headers: { "User-Agent": MONITOR_USER_AGENT, Accept: "application/json" },
+      headers: { "User-Agent": userAgent, Accept: "application/json" },
       redirect: "follow",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     const body = await response.text();
-    return { status: response.status, body };
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      headers[key.toLowerCase()] = value;
+    });
+    return { status: response.status, body, headers };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
@@ -1084,22 +1270,27 @@ async function attempt(url: string): Promise<{ status: number; body: string } | 
  * Retried only on a transport error or a 5xx — the shapes a restarting
  * container makes. A 4xx is not retried: it will say the same thing the second
  * time, and hammering a site we are worried about is not monitoring it.
+ *
+ * `userAgent` defaults to the monitor's own honest identity. The `prerender`
+ * check is the one caller that overrides it — see `PRERENDER_CRAWLER_USER_AGENT`
+ * — to ask nginx's `map $http_user_agent $prerender_prefix` the question this
+ * check exists to answer.
  */
-export async function probe(url: string): Promise<ProbeResult> {
-  let last = await attempt(url);
+export async function probe(url: string, userAgent: string = MONITOR_USER_AGENT): Promise<ProbeResult> {
+  let last = await attempt(url, userAgent);
   let attempts = 1;
 
   const retryable = "error" in last || last.status >= 500;
   if (retryable) {
     await sleep(RETRY_DELAY_MS);
-    last = await attempt(url);
+    last = await attempt(url, userAgent);
     attempts = 2;
   }
 
   if ("error" in last) {
-    return { url, status: null, body: "", error: last.error, attempts };
+    return { url, status: null, body: "", error: last.error, attempts, headers: {} };
   }
-  return { url, status: last.status, body: last.body, error: null, attempts };
+  return { url, status: last.status, body: last.body, error: null, attempts, headers: last.headers };
 }
 
 /**
@@ -1148,6 +1339,8 @@ export async function main(): Promise<number> {
   const apiVersion = await probe(`${baseUrl}/api/version`);
   const webVersion = await probe(`${baseUrl}/version.json`);
   const sources = await probe(`${baseUrl}/api/ingestion/sources`);
+  const prerenderBrowser = await probe(`${baseUrl}${PRERENDER_CHECK_PATH}`);
+  const prerenderCrawler = await probe(`${baseUrl}${PRERENDER_CHECK_PATH}`, PRERENDER_CRAWLER_USER_AGENT);
 
   // Both of these may re-read before they believe a mismatch — see
   // `DEFAULT_SETTLE_ATTEMPTS`. They re-probe rather than reusing the readings
@@ -1174,6 +1367,7 @@ export async function main(): Promise<number> {
     evaluateResources(health),
     version,
     drift,
+    evaluatePrerender({ browser: prerenderBrowser, crawler: prerenderCrawler }),
     ...evaluateSources(sources, now),
   ];
 

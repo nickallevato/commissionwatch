@@ -5,11 +5,13 @@ import {
   DISCORD_CONTENT_LIMIT,
   DEFAULT_MAX_DRIFT_MINUTES,
   evaluateHealth,
+  evaluatePrerender,
   evaluateReleaseDrift,
   evaluateResources,
   evaluateSource,
   evaluateSources,
   evaluateVersion,
+  PRERENDER_CHECK_PATH,
   readReleaseExpectation,
   readSettlePolicy,
   resolveReleaseDrift,
@@ -36,13 +38,13 @@ import {
  */
 
 /** A response that arrived, with a body. */
-function response(status: number, body: string): ProbeResult {
-  return { url: "https://example.test/probe", status, body, error: null, attempts: 1 };
+function response(status: number, body: string, headers: Record<string, string> = {}): ProbeResult {
+  return { url: "https://example.test/probe", status, body, error: null, attempts: 1, headers };
 }
 
 /** A request that never produced a response at all. */
 function unreachable(error: string): ProbeResult {
-  return { url: "https://example.test/probe", status: null, body: "", error, attempts: 2 };
+  return { url: "https://example.test/probe", status: null, body: "", error, attempts: 2, headers: {} };
 }
 
 const HEALTHY_BODY = JSON.stringify({
@@ -200,6 +202,131 @@ describe("external monitor — resource pressure", () => {
   it("blocks on a malformed /api/health body rather than reading it as fine", () => {
     const outcome = evaluateResources(response(200, "<html>it worked!</html>"));
     assert.equal(outcome.state, "blocked");
+  });
+});
+
+/**
+ * The prerender split — `frontend/nginx.conf`'s `map $http_user_agent
+ * $prerender_prefix`, verified from outside because nothing in this repo
+ * puts nginx in the request path. Probed at `/data`, the one prerendered
+ * route with a fixed path, so the check works whether or not any meeting is
+ * currently published.
+ *
+ * Fixture bodies stand in for the two real shapes production can answer
+ * with: the Vite-built SPA shell (`id="root"`, a `<script type="module">`
+ * pointing at a hashed bundle) and `renderDocument`'s prerendered document
+ * (no mount point, a `<script type="application/ld+json">` block instead —
+ * proof that "has a `<script>` tag" is not the discriminator this check uses).
+ */
+const SPA_SHELL_BODY =
+  '<!doctype html><html lang="en"><head><title>CommissionWatch</title>' +
+  '<script type="module" crossorigin src="/assets/index-DVi2iEZg.js"></script>' +
+  '<link rel="stylesheet" crossorigin href="/assets/index-Cb2jez4Z.css"></head>' +
+  '<body class="bg-paper text-ink"><div id="root"></div></body></html>';
+
+const PRERENDERED_BODY =
+  '<!doctype html><html lang="en"><head><title>Bulk data — CommissionWatch</title>' +
+  '<script type="application/ld+json">{"@context":"https://schema.org"}</script></head>' +
+  '<body><main><h1>Bulk data</h1></main><footer><a href="/bot">About this dataset</a></footer></body></html>';
+
+describe("external monitor — prerender split", () => {
+  it("passes when the split is off: both identities get the SPA shell", () => {
+    const outcome = evaluatePrerender({
+      browser: response(200, SPA_SHELL_BODY),
+      crawler: response(200, SPA_SHELL_BODY),
+    });
+    assert.equal(outcome.state, "pass");
+    assert.match(outcome.detail, /not currently serving crawlers/);
+    assert.match(outcome.detail, /deliberately off/);
+  });
+
+  it("passes when the split is active and both responses carry Vary: User-Agent", () => {
+    const outcome = evaluatePrerender({
+      browser: response(200, SPA_SHELL_BODY, { vary: "User-Agent" }),
+      crawler: response(200, PRERENDERED_BODY, { vary: "User-Agent" }),
+    });
+    assert.equal(outcome.state, "pass");
+    assert.match(outcome.detail, /split is active/);
+    assert.match(outcome.detail, new RegExp(PRERENDER_CHECK_PATH.replace("/", "\\/")));
+  });
+
+  it("treats Vary as present among other values, case-insensitively", () => {
+    const outcome = evaluatePrerender({
+      browser: response(200, SPA_SHELL_BODY, { vary: "Accept-Encoding, user-agent" }),
+      crawler: response(200, PRERENDERED_BODY, { vary: "user-agent" }),
+    });
+    assert.equal(outcome.state, "pass");
+  });
+
+  it("FAILS — not warns — when the split is active but Vary: User-Agent is missing from the crawler response", () => {
+    const outcome = evaluatePrerender({
+      browser: response(200, SPA_SHELL_BODY, { vary: "User-Agent" }),
+      crawler: response(200, PRERENDERED_BODY),
+    });
+    assert.equal(outcome.state, "fail");
+    assert.match(outcome.detail, /Vary: User-Agent is missing/);
+    assert.match(outcome.detail, /crawler response/);
+    assert.match(outcome.detail, /cache in front/);
+  });
+
+  it("fails when Vary: User-Agent is missing from the browser response instead", () => {
+    const outcome = evaluatePrerender({
+      browser: response(200, SPA_SHELL_BODY),
+      crawler: response(200, PRERENDERED_BODY, { vary: "User-Agent" }),
+    });
+    assert.equal(outcome.state, "fail");
+    assert.match(outcome.detail, /browser response/);
+  });
+
+  it("fails — the case this monitor was built for — when the split is active and Vary is on neither response", () => {
+    const outcome = evaluatePrerender({
+      browser: response(200, SPA_SHELL_BODY),
+      crawler: response(200, PRERENDERED_BODY),
+    });
+    assert.equal(outcome.state, "fail");
+    assert.match(outcome.detail, /crawler and browser responses/);
+  });
+
+  it("blocks when the browser-identity probe could not be read", () => {
+    const outcome = evaluatePrerender({
+      browser: unreachable("connect ECONNREFUSED 10.0.0.1:443"),
+      crawler: response(200, PRERENDERED_BODY, { vary: "User-Agent" }),
+    });
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /browser-identity probe/);
+    assert.match(outcome.detail, /ECONNREFUSED/);
+  });
+
+  it("blocks when the crawler-identity probe could not be read", () => {
+    const outcome = evaluatePrerender({
+      browser: response(200, SPA_SHELL_BODY, { vary: "User-Agent" }),
+      crawler: response(502, "Bad Gateway"),
+    });
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /crawler-identity probe/);
+    assert.match(outcome.detail, /HTTP 502/);
+  });
+
+  it("blocks — never passes — on a shape this check does not recognise", () => {
+    // The crawler identity got the shell and the browser identity got the
+    // prerendered document — the inverse of what any nginx config here
+    // produces. Not a state this check invents a story for.
+    const outcome = evaluatePrerender({
+      browser: response(200, PRERENDERED_BODY, { vary: "User-Agent" }),
+      crawler: response(200, SPA_SHELL_BODY, { vary: "User-Agent" }),
+    });
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /does not recognise/);
+  });
+
+  it("counts as blocked, not as a pass, in the run summary", () => {
+    const outcome = evaluatePrerender({
+      browser: unreachable("timeout"),
+      crawler: response(200, PRERENDERED_BODY, { vary: "User-Agent" }),
+    });
+    const summary = summarise([outcome]);
+    assert.equal(summary.failed, false);
+    assert.equal(summary.blocked.length, 1);
   });
 });
 
