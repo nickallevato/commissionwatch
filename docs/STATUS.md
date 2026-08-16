@@ -1,6 +1,12 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-15, after a long parallel build that took the product from *a corpus with
+> Last updated: 2026-08-16, after the second autonomous loop — **0.5.0, in which the switch panel
+> built in 0.4.0 was audited against the code behind it and two of its six switches turned out to
+> control nothing.** Backend **2033 tests / 488 suites**, frontend **737 / 64**, both packages
+> typecheck- and build-clean. The deploy host's disk was cleared by the operator at ~22:15Z on
+> 2026-08-15, so the 0.4.0 backlog is deployed and production tracks head again. **Three operator
+> decisions were created and none were taken autonomously** — see § 2026-08-16 immediately below.
+> Before that: 2026-08-15, after a long parallel build that took the product from *a corpus with
 > nowhere to go* to **a claim an operator can approve, a reader can see, and a citation that opens
 > the document it cites** — see § 2026-08-15 immediately below. Backend **1600 tests / 375 suites**,
 > frontend **572 / 54**, both packages typecheck- and lint-clean, deployed at `febae02`.
@@ -34,6 +40,88 @@
 > Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
 > 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
+
+## 2026-08-16 — 0.5.0: the switch panel audited against the code behind it
+
+**Read this first.** Two of the six switches shipped in 0.4.0 controlled nothing. They are gone, and
+a guard now fails the build if a seventh ever joins them.
+
+### What is now true
+
+- **Every feature key has a reader.** `feature-registry-audit.test.ts` scans `backend/src` and fails
+  on any key in `FEATURES` that no file outside `manifest.ts` names. It reproduced the defect
+  **unprompted on its first run**, failing with both key names before either was removed. Its stated
+  limitation: it proves a key is *named* outside the manifest, not that the naming is on a live code
+  path — a key referenced only from dead code would pass.
+- **`claim_publication` and `generated_narrative` are removed from the manifest.** Neither was ever
+  read, which is why removal changes no behaviour. The console now shows four switches and all four
+  do something.
+- **The monitor reports release drift**, comparing the live sha against what should be live, with a
+  fourth `CheckState` — `blocked` — for every case where the answer could not be determined.
+  Verified in production on its first run (monitor 29063).
+- **Both the drift and version checks settle** before believing a mismatch: 3 re-reads 10s apart,
+  matching the 30s the host's own deploy script allows a swap to become visible. A match costs zero
+  re-reads.
+- **The dated archive records itself hourly**, gated on `dated_export_archive` and **currently off**,
+  so it writes a skip row every cycle and takes no snapshots. The console renders that ledger and
+  distinguishes four kinds of empty.
+- **The test event log is clean and stays clean**: 620 rows → 31 after a clean run → **0**, with a
+  `posttest` check that fails the run and names any suite that leaks.
+
+### ⛔ OPERATOR DECISIONS THIS RELEASE CREATED
+
+1. **Should `claim_publication` come back, and how?** Approved claims are public through **six**
+   surfaces — `feeds/entries.ts`, `export/datasets.ts`, `public-corrections.ts`, and
+   `listPublicClaims` via `GET /api/meetings/:id/claims`, reused whole by `prerender/pages.ts` and
+   `delivery/mcp.ts`. All six are correctly walled by `whereClaimPublic`. Wiring a gate default-off
+   would **silently withdraw material that is public right now**, including from feeds readers have
+   subscribed to. Three options, with costs, in
+   `docs/superpowers/specs/2026-08-16-claim-publication-gate-design.md`. **A prerendered page is a
+   file already written to disk**, so any such switch must enqueue a re-render to take effect at all.
+2. **Should a body whose minutes print no offices be extracted?** 283 of 336 surviving extraction
+   rejections are `not-an-official`. See `docs/superpowers/specs/2026-08-16-office-gate-design.md`.
+   The recommendation is to stop extracting that body and surface the per-body breakdown — neither
+   changes what is published. **Sourcing the roster does not unlock these**, which is the thing most
+   likely to be misread: a roster makes "Commissioner Bode" checkable, not "Dave".
+3. **`dated_export_archive` is still off**, so the archive still holds no data. The loop is live and
+   writing skip rows, which is now visible on the console instead of being silent.
+
+### The defects worth remembering
+
+- **The type system did not catch removing two feature keys.** `FeatureKey` is a literal union, but
+  every reference was a runtime string — supertest path params and `findFeatureDefinition(key:
+  string)` — so backend typecheck passed with the keys gone and tests still naming them. The runtime
+  tests caught it. **A literal-union key type only protects call sites that use the type.**
+- **`node --test` sorts the files it is given.** A leak check placed in a test file listed last ran
+  114th of 403 suites and would have reported every not-yet-run suite as clean — a guard that passes
+  because it looked too early. It lives in `posttest` now.
+- **Nothing verified that a test file appears in `package.json`'s explicit test list** — the trap
+  that makes a guard never run at all. Now audited.
+- **A leak is invisible to the suite that causes it.** Reverting the disputes teardown leaves that
+  suite green at 33 pass while `posttest` exits 1 and names the 25 rows.
+- **Backticks and double quotes in `git commit -m` are shell syntax**, and a commit with words
+  silently eaten still exits 0. Use `-F`.
+- **A limit on rows described as a limit on days.** `SNAPSHOT_RUN_DAYS = 30` bounded row count while
+  its name and doc comment promised days; one day can produce five rows. The console had already
+  hedged its heading because of it.
+
+### Still not done, and known — new in 0.5.0
+
+- **Body lists are still hardcoded.** Moving them into `ingestion_sources.config` was planned and
+  **deliberately dropped** — it buys adding a body without a deploy, and no body is waiting. Recorded
+  as a decision, not an oversight.
+- **`record_corrections` holds 14,528 rows in the test database** and grows every run. Migration 031
+  forbids DELETE, which is the feature, so suites key on ids they generate. Not a hazard today —
+  nothing reads it in bounded batches — but it is the same growth shape as the event log was, and it
+  deserves a decision before something does.
+- **No retention policy on `export_snapshot_runs` or `export_snapshots`.** Bounded at a few rows per
+  day, so nothing is urgent; migration 105 already flags that `row_ids` as jsonb will not scale past
+  this corpus.
+- **The drift check can be switched off by an unrelated YAML edit** — it reports BLOCKED and the run
+  stays green, which is correct (blocked must not page). A test now asserts both workflow files still
+  supply and forward the variables, but that is a guard, not a guarantee.
+
+---
 
 ## 2026-08-15 (evening) — 0.4.0: a switch an operator can reach, and a deploy that did not land
 

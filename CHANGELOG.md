@@ -20,6 +20,290 @@ reads as finished. The scale:
 
 ---
 
+## [0.5.0] — 2026-08-16
+
+The release in which the switch panel built in 0.4.0 was audited against the code behind it, and two
+of its six switches turned out to control nothing.
+
+**Deployment status: landing.** The 0.4.0 backlog that could not deploy — the extraction
+de-duplication, the taxonomy mirror guard, the From-address fix, the dated archive — reached
+production at **22:15Z on 2026-08-15**, when the operator cleared the deploy host's disk. Production
+has been tracking head through this release.
+
+### Breaking
+
+**Two feature keys are gone from the manifest**: `claim_publication` and `generated_narrative`. No
+behaviour changes, because neither was ever read — that is why they were removed. An operator who
+had toggled either was writing rows nothing consulted. See *Two switches that controlled nothing*.
+
+---
+
+### Two switches that controlled nothing
+
+**Completeness: Shipped.**
+
+`claim_publication` and `generated_narrative` shipped in the 0.4.0 manifest and appeared nowhere else
+in the codebase. The console rendered both, an operator could type a reason, `setFlag` wrote the row
+and the audit trail — and no code under `backend/src` ever asked. This is 0.4.0's F1j again, a flag
+that reaches no loop, except **F1j was found by building the console and these two survived it.**
+
+Both descriptions asserted otherwise, which is the part that makes it a defect rather than dead code:
+
+- `claim_publication` said it decides "whether approved claims are shown". **Approved claims are
+  already shown**, through six surfaces, none gated: `feeds/entries.ts`, `export/datasets.ts`,
+  `public-corrections.ts`, and `listPublicClaims` via `GET /api/meetings/:id/claims`, which
+  `prerender/pages.ts` and `delivery/mcp.ts` reuse whole. All six go through `whereClaimPublic`.
+  **The wall was doing the work; only the switch was fiction.**
+- `generated_narrative` described a findings composer. There is no composer.
+
+**They were removed rather than wired, and the reason is the interesting part.** Wiring
+`claim_publication` would have been a live-content change wearing a wiring fix's clothes: registry
+resolution falls off to **off**, so the gate would arrive off and the next deploy would silently
+withdraw claims that are public right now — from syndication feeds readers have already subscribed
+to, from an open-data export somebody may have forked, and from the corrections log, which is the
+surface a person uses to see that a claim about them was changed. It would also break the property
+0.4.0 rests on, that with no registry row behaviour is byte-identical.
+
+Giving that one key a default of *on* breaks the opposite invariant: a `publishes` key that defaults
+on is a key that publishes when the registry is unreachable.
+
+So the manifest records what each key claimed and what must exist before it returns, and
+`docs/superpowers/specs/2026-08-16-claim-publication-gate-design.md` puts three options to the
+operator. **The console now shows four switches and all four do something.**
+
+### The guard that would have caught it
+
+**Completeness: Shipped.**
+
+Every key in `FEATURES` must be named by a file outside `manifest.ts`. The failure message says what
+is actually wrong: *a key with no reader is a switch that lies about what it controls.* There is
+deliberately **no second list of "wired keys"** — that list is the thing that goes stale, and it is
+how the first list got wrong.
+
+It reproduced the defect **unprompted on its first run**, failing with both key names before either
+was removed. Mutation-verified three ways: a new key with no consumer fails by name; a consumer
+removed from a wired key fails by name; and breaking the matcher so it finds nothing fails **loudly**
+rather than comparing two empty sets — *"the scan cannot find `event_drain` in the manifest that
+declares it — the matcher is broken."*
+
+**Its limitation is stated in its own docblock**: it proves a key is *named* outside the manifest,
+not that the naming sits on a live code path. A key referenced only from dead code would pass.
+
+### The release stopped landing and the monitor reported green
+
+**Completeness: Shipped — verified in production on its first run.**
+
+On 2026-08-15 the deploy host filled its disk. `deploy-aws` failed twice; every check job stayed
+green; production kept serving the previous good sha and answering `/api/health` 200, which is the
+pipeline behaving correctly. **Nothing alerted**, because the monitor asks whether the site is up.
+
+The run list makes it sharper than "nothing alerted": the monitor reported **success every fifteen
+minutes across the entire window**. It was not silent about the drift — it was emitting the green
+signal an operator would cite to conclude nothing was wrong.
+
+`release-drift` compares the live sha against what should be live, in the same `CheckOutcome` shape
+as the existing checks, through the same summariser and the same message. No second mechanism. The
+expected head comes from the runner, **never from anything the site serves** — that is the silent
+self-comparison that would pass forever.
+
+The load-bearing addition is a fourth `CheckState`, **`blocked`**. An unreadable `/api/version`, a
+payload with no sha, unparseable JSON, an unstamped `sha: "unknown"`, a missing expected head and a
+garbage threshold all report BLOCKED — never PASS, and never the drift wording. A blocked outcome
+never names a live sha it did not read. Shas that differ with no usable commit time report blocked
+**with both shas**, because the difference is known and only its age is not.
+
+Threshold `MONITOR_MAX_DRIFT_MINUTES`, default 30, measured off three real green pipelines (11.3,
+11.7 and 12.5 minutes end to end) rather than guessed.
+
+**First production run, monitor 29063:**
+
+```
+WARN  release-drift: live f815d36 vs expected head e83eb5e, committed 1.8 min ago
+      — within the 30-min allowance, so a deploy is probably still in flight
+```
+
+### A finishing deploy is not a failed one
+
+**Completeness: Shipped.**
+
+Reviewing the drift check found a race its own tests could not: `deploy.yml` runs it at a zero
+allowance, and the health step before it exits on the **first** 200 — which can come from the old
+container mid-swap. A good deploy could read a stale sha and turn the pipeline red. Raising the
+threshold cannot fix it, because drift age is measured from **commit** time, already ~12 minutes old
+when `deploy-aws` finishes.
+
+The settle is 3 re-reads, 10s apart, and the number is the host's own: `deploy-aws-ssm.sh` already
+gives the swap 10 polls × 3s = 30s to become visible before it exits 0. **A match costs zero
+re-reads**, so the ordinary periodic run is unchanged.
+
+It cannot launder a stale release: a verdict flips only on observing a *different, matching* sha, and
+an unreadable later read never overturns a mismatch already read cleanly. The message says how many
+re-reads happened, so a settled deploy is legible as distinct from a first-read match.
+
+### The dated archive records itself
+
+**Completeness: Shipped dark** — the loop is live and `dated_export_archive` is off, so it writes a
+skip row every cycle and no snapshots.
+
+`dated_export_archive` shipped in 0.4.0 with a writer nothing calls: `npm run export:snapshot` is
+manual, and no scheduler, queue stage or cron invoked it. A feature whose only entry point is a human
+remembering a command gets exactly one snapshot, taken the day someone tested it — and this archive
+is **forward-only**, because publication state is one mutable column, so a day nobody recorded can
+never be reconstructed.
+
+It runs beside the drain and the prerender consumer, **not** on the ingestion queue: a snapshot is
+neither per-document work nor an ingestion source, and hanging it there would have meant inventing a
+fake `ingestion_sources` row — a non-source in the table the **public status page** reads.
+
+**Hourly, not a daily cron.** A daily cron fires at one instant, so a container restarting at that
+instant loses the day permanently. Hourly polling plus a same-day guard makes "one snapshot per UTC
+day" a property of the data rather than of the timer, and a restart costs at most an hour of lateness.
+
+The flag is read **per cycle**. Latching it in the constructor is the 0.4.0 bug that made a toggle
+reach only one of six features, and the mutation test for it fails by name.
+
+**A skipped cycle is written down**, with a count and a last-seen time. The mutation worth
+remembering is the silent-skip one: snapshot behaviour is byte-identical and only the disclosure
+disappears, so without that test the feature would look correct while going dark.
+
+### The console says which kind of empty it is
+
+**Completeness: Shipped.**
+
+The ledger renders inside the `dated_export_archive` card, between the last-change line and the
+control — evidence before the action, in the row it is evidence about.
+
+The empty case is the whole job, and it has **four** meanings, each with its own sentence: the field
+is absent (a backend older than the loop) — *"read it as no answer, and not as no snapshots"*; the
+read failed with nothing in hand — *"a failure on our side, not a statement that no cycle has run"*;
+empty and never enabled; and empty with the switch already decided — *"the empty ledger is the thing
+to explain rather than the thing to expect"*. A fifth case renders the rows **and** marks them stale,
+because withholding what we have would be its own lie.
+
+Mutation-verified: collapsing *absent* into *empty* fails by name, and the DOM dump shows the page
+asserting *"nothing has ever turned `dated_export_archive` on here"* against a response that never
+carried the field. That is the confident emptiness two 0.3.0 operator screens shipped with.
+
+### Fixed
+
+- **`prerender.test.ts` failed for the environment on its most important assertion.** It drove
+  `consumer.tick()` from a null cursor while `tick` reads 200 events in `(updated_at, id)` order, and
+  `events` is append-only by design. Past 200 older renderable rows the batch is spent before the
+  fixtures are reached — and the test that fails is *"a withdrawn meeting kept its prerendered page"*,
+  the worst report this system can produce. Demonstrated: 3 of 11 fail under 530 old renderable
+  events unmodified; 11 of 11 pass with the cursor seeded. **A test that goes red for the environment
+  on its most important assertion teaches the next reader to disbelieve it.**
+  The threshold is 201 **renderable** rows, not 201 rows — `tick` filters on `RENDERABLE_KINDS`, and
+  a first attempt with 250 injected rows did not reproduce it.
+- **The release-drift check could be switched off by an unrelated YAML edit.** Dropping
+  `MONITOR_EXPECTED_SHA` from a workflow makes the check report BLOCKED while the run stays green.
+  A test now reads both workflow files off disk and asserts each variable is both supplied to the
+  step and forwarded with `-e` into the container; one without the other is the same silent failure.
+  No YAML parser — a guard that needs a new dependency acquires a reason not to run.
+
+### Operational traps, stated rather than implied
+
+- **The type system did not catch the removal of two feature keys.** `FeatureKey` is a literal union,
+  but every reference was a runtime string — supertest path params and `findFeatureDefinition(key:
+  string)` — so backend typecheck passed with the keys gone and the tests still naming them. The
+  runtime tests caught it. **A literal-union key type only protects call sites that use the type.**
+- **Backticks in a `git commit -m` string are command substitution.** Two phrases were silently eaten
+  and the commit still exited 0. Use `-F`.
+- **A prerendered page is a file already written to disk.** Any future switch over published content
+  has to enqueue a re-render to take effect at all; turning a flag off does not unwrite a page. This
+  is the constraint that most complicates the `claim_publication` question.
+
+### A finishing swap is not a half-finished rollout
+
+**Completeness: Shipped.**
+
+`evaluateVersion` — the check that `/api/version` and `/version.json` agree — had the drift check's
+race and no settle. The two images roll independently, so a probe landing mid-swap catches one rolled
+and the other not, and reports a convincing "half-finished rollout" that is a deploy in progress.
+`deploy.yml` runs this monitor, so that was a red pipeline on a good deploy.
+
+The settle loop was **extracted** rather than copied — a generic `settle()`, with the caller deciding
+*whether* and the loop owning *how*. The evidence it did not change the check it was lifted from:
+**every drift message string is byte-identical and the pre-existing settle tests pass untouched.**
+
+**One deliberate divergence between the two checks.** A garbage settle config leaves an observed skew
+as **fail**, not `blocked`. The drift check's `blocked` is right because a missing expected head means
+nothing was ever compared; here the skew *was* read, and a typo in an environment variable must not
+be able to silence a half-rolled stack.
+
+The mutation that matters is the second direction: making the settle **too generous** fails five
+tests, including *both* checks' persistence guards. That is the pair that stops a settle from
+laundering a real skew into a pass.
+
+### The test log stops regrowing
+
+**Completeness: Shipped.**
+
+0.4.0's prerender fix seeded a cursor so orphaned events could not spend a suite's batch. That was the
+symptom. The cause was that several suites emit events and never tear them down, so the soil
+regrows — and the failure it eventually produces is *"a withdrawn meeting kept its prerendered page"*,
+the worst report this system can make, for a reason unrelated to the code under test.
+
+Real counts, from real queries: the test database held **620 rows**; a clean full-suite run still left
+**31**; it is now **0**. Per-suite attribution across all 105 listed files found exactly four leakers.
+
+Three mechanisms, because none covers all three failure modes alone: a guarded `pretest` truncate (the
+only thing that can clear soil from ad-hoc runs outside `npm test`), per-suite teardown centralised in
+`cleanupByPrefix` so a **new** suite cleans up without knowing this problem exists, and a `posttest`
+check that fails the run and names the leaker. Truncate-at-the-end was rejected: it keeps the suite
+green and lets the habit spread.
+
+**Migration 083's `Retention: never delete` is load-bearing in production, so the truncate is guarded
+by code rather than convention, and all four refusals were run rather than asserted** — a database not
+ending in `_test`, the `postgres` database, `NODE_ENV=production`, and a connection that disagrees
+with the knexfile. The name is read from `select current_database()` on the live connection, not from
+the config object, so a stale or edited config still answers with the database it is genuinely
+connected to.
+
+**The trap worth keeping:** the leak check was first placed in a test file listed last, but
+`node --test` **sorts** the files it is given — it ran 114th of 403 suites and would have reported
+every not-yet-run suite as clean. A guard that passes because it looked too early. It moved to
+`posttest`, which has no ordering assumption to get wrong.
+
+A related hole closed on the way: nothing verified that a test file appears in `package.json`'s
+explicit test list — the trap that makes a guard never run at all. It is now audited, with one named
+exemption asserted to have its own script.
+
+The mutation states the point exactly: reverting the disputes teardown leaves that suite **green at 33
+pass** while `posttest` exits 1 and names the 25 rows. **A leak is invisible to the suite that causes
+it.**
+
+### The ledger window was a row count wearing a day count's name
+
+**Completeness: Shipped.**
+
+`SNAPSHOT_RUN_DAYS = 30` was applied as `.limit(30)` on **rows**, and one day can produce five (one
+per outcome), so the served window was somewhere between six days and thirty while the constant's name
+and doc comment both promised thirty days. The console had already refused to print "the last 30 days"
+because of it — the hedge was correct and is now obsolete.
+
+The query bounds `run_day` now. The row cap survives as `days × outcomes` — the **arithmetic ceiling**
+of the window, guaranteed by the unique index on `(run_day, outcome)` — so it can never shorten the
+window again. The signature moved from a positional `limit` to an options object **on purpose**: a
+positional `30` silently changing meaning from rows to days is the same defect being fixed.
+
+### Refused, and why
+
+- **`claim_publication` was not wired.** Gating the six surfaces that serve approved claims would have
+  withdrawn material that is public right now, silently, on the next deploy. Three options are put to
+  the operator in `docs/superpowers/specs/2026-08-16-claim-publication-gate-design.md`.
+- **The office gate was not loosened.** 283 of 336 surviving extraction rejections are
+  `not-an-official` — a board printing bare first names against a gate requiring an office to lead the
+  subject. The gate is what lets extraction run before a sourced roster exists, and loosening it is the
+  change that puts an unverifiable person's name on a public page. The spec records the finding that
+  **sourcing the roster does not unlock them**: a roster makes "Commissioner Bode" checkable, not
+  "Dave".
+- **Body lists were not moved into `ingestion_sources.config`.** Planned, then dropped: it buys the
+  ability to add a body without a deploy, and no body is waiting to be added. Named here so the
+  omission is a decision on the record rather than an oversight.
+
+---
+
 ## [0.4.0] — 2026-08-15
 
 The release in which the things shipped dark in 0.3.0 got a switch an operator can actually reach —
