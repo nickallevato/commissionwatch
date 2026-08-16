@@ -19,6 +19,7 @@ import { MeetingTranscript } from "@/components/MeetingTranscript";
 import { flagTypeLabels } from "@/components/flag-labels";
 import { SeverityMark } from "@/components/AnomalyBadge";
 import { severityRank } from "@/components/severity";
+import { tallyVotes, type VoteTally } from "@/components/vote-tally";
 import type { MeetingDocument, Vote, VoteValue } from "@/types";
 
 /* ---------------------------------------------------------------- formatting */
@@ -55,22 +56,9 @@ function formatClock(value: string | null): string | null {
 
 /* -------------------------------------------------------------------- tallies */
 
-interface Tally {
-  yes: number;
-  no: number;
-  abstain: number;
-  absent: number;
-}
-
-function tally(votes: Vote[]): Tally {
-  const counts: Tally = { yes: 0, no: 0, abstain: 0, absent: 0 };
-  for (const vote of votes) counts[vote.vote]++;
-  return counts;
-}
-
 type Outcome = "passed" | "failed" | "none";
 
-function outcomeOf(counts: Tally): Outcome {
+function outcomeOf(counts: VoteTally): Outcome {
   if (counts.yes + counts.no === 0) return "none";
   return counts.yes > counts.no ? "passed" : "failed";
 }
@@ -435,7 +423,7 @@ export function MeetingDetailPage() {
               </thead>
               <tbody>
                 {agendaItems.map((item) => {
-                  const counts = tally(votesByItem.get(item.id) ?? []);
+                  const counts = tallyVotes(votesByItem.get(item.id) ?? []);
                   const outcome = outcomeOf(counts);
                   const aside = [
                     counts.abstain > 0 ? `${counts.abstain} abstained` : null,
