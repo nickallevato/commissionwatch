@@ -167,3 +167,24 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   API is dead and Open States has been absorbed into commercial Plural. A newsroom and a flagship
   civic-data project both failed to keep a public API alive, and this project invites people to
   build on four.
+- **08:52Z** — Both agents landed; verified each myself. Backend **2142**, frontend **836**, both
+  clean on typecheck, lint and build.
+
+  **6.10 corrected a mistake of mine rather than fixing what I said was broken.** `/api/search` was
+  already rate limited — `app.ts:97` applies `publicRateLimit` globally, 60/min on the expensive
+  tier, added in `ad83ffa` before my review existed. I got there two wrong ways at once: I grepped
+  `FixedWindowLimiter`, the class, when the caller is `publicRateLimit`; and I fired **twelve**
+  requests at a **sixty**-per-minute ceiling and read twelve 200s as "unthrottled". That is a
+  negative result from a test with no power to find the thing.
+
+  The security review now carries the correction in place. **A review that reports a defence as
+  absent invites someone to build it twice and discredits the true findings beside it**, so it is
+  corrected loudly rather than quietly edited. What was genuinely missing — caching, env
+  configurability, and a 429 that points at the bulk export — is built.
+
+  **Lesson adopted:** when a probe finds nothing, check the probe had the power to find it. Twelve
+  against sixty could never have.
+
+  7.2/7.4 landed on `/data`, not duplicated onto `/bot`, and the agent's reasoning was better than
+  my brief: `/bot` links to `/data` for terms by convention, and a second hand-kept copy would be
+  the drift failure that page's own docblock warns about.
