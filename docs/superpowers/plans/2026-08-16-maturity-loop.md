@@ -439,3 +439,28 @@ instruction, not about the agents** — and I had the evidence after the second 
   7.1's "recruit a second reviewer" is narrower than it sounds. Told it specifically to check the
   collapsible group headers added today, since a collapsible that cannot be operated by keyboard
   makes the grouping worse than the flat list it replaced.
+- **10:50Z** — Both slots verified and pushed: the vocabulary guard (`c33a81c`) and the console a11y
+  sweep (`5a70645`). Backend **2175 / 527**, frontend **868 / 70**, both clean. `/accessibility`
+  answers 200 in production.
+
+  **The vocabulary count was wrong twice, both times mine.** I filed it as three copies, corrected to
+  six after grepping, and the agent found **ten** — including three `VotingRecord`-shaped interfaces
+  whose failure mode is quieter than the rest: a missing member does not NaN, the seeding literal
+  still typechecks, and an official's record silently undercounts forever.
+
+  **It also refused my instruction and was right to.** I told it `vote-events.test.ts` does not load
+  the module; it does, and exercises every exported function. What is absent is a runtime caller. So
+  the module is a complete, tested implementation of an unbuilt feature rather than a duplicate of
+  live logic, and deleting it — which my brief leaned toward — would have destroyed working code on
+  the strength of a coverage report.
+
+  The console sweep found three heading-order violations on its first run, never caught because the
+  console had never been swept. And the collapsible I added this morning is now asserted operable by
+  keyboard, which matters specifically because 7.1 proposes recruiting a second reviewer into that
+  screen.
+
+  Dispatched **6.8** alone. It is the last substantial build and touches broadly, so pairing invites
+  the contention already paid for twice. **Two scope decisions made to stop it ballooning:** do not
+  convert all 139 `console.*` calls — the deliverable is a logger, request ids and error counts, and
+  a 139-call sweep would be unreviewable and bury the feature — and prefer **no new dependency**,
+  because this project avoids them deliberately and 6.2 has just gated supply chain.
