@@ -577,8 +577,24 @@ const DEFAULT_MAX_CANDIDATES = 5;
 const DEFAULT_MAX_REPORTS = 3;
 const DEFAULT_PAGE_SIZE = 100;
 
-/** 2 seconds between requests, one at a time. Never concurrent. */
-const MIN_DELAY_MS = 2000;
+/**
+ * Five seconds between requests, one at a time. Never concurrent.
+ *
+ * Slower than every other adapter here, and deliberately. `cers-ext.mt.gov`
+ * publishes **no `robots.txt` at all** — see `docs/exploration/mt-cers-spike.md`
+ * — so there is no stated rate to honour and no `Crawl-delay` to point at. Two
+ * seconds was a number this project chose for itself against a host that never
+ * agreed to it.
+ *
+ * Where a source has published a rate we follow it exactly; where it has
+ * published nothing we err slower rather than assuming the general default was
+ * meant for us. A state agency's filing system is also the one host here whose
+ * unavailability would matter to people with nothing to do with this project.
+ *
+ * Raised from 2000ms on 2026-08-16, at the operator's instruction to be gentle
+ * with the state site, before it swept for the first time.
+ */
+const MIN_DELAY_MS = 5000;
 
 /** Redirect hops followed before giving up. CERS uses one; a loop is a defect. */
 const MAX_REDIRECTS = 5;

@@ -73,8 +73,11 @@ describe('mt-cers descriptor', () => {
     expect(descriptor.bodies).toEqual([]);
   });
 
-  it('fetches no faster than one request every two seconds, never concurrently', () => {
-    expect(descriptor.politeness.minDelayMs).toBeGreaterThanOrEqual(2000);
+  it('fetches no faster than one request every five seconds, never concurrently', () => {
+    // Slower than every other adapter, because this host publishes no
+    // robots.txt: there is no stated rate to honour, so we err slower rather
+    // than assuming the general default was meant for us.
+    expect(descriptor.politeness.minDelayMs).toBeGreaterThanOrEqual(5000);
     expect(descriptor.politeness.maxConcurrency).toBe(1);
   });
 
