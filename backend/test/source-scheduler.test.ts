@@ -446,6 +446,67 @@ describe("SourceScheduler — one sweep per source", () => {
  * that on 2026-08-16: two runs opened at 07:17Z were still reported `running`
  * ten hours later, by a process built at 12:33Z that had never seen them.
  */
+/**
+ * One pending discover per source.
+ *
+ * Production held five on 2026-08-16 — three for Gallatin, two for Bozeman,
+ * the oldest from the 14th — because every sweep enqueued one unconditionally
+ * and a sweep that hit its deadline left its own behind. Each would eventually
+ * run a full discovery crawl of the same county.
+ */
+describe("a sweep does not queue a second discover beside the first", () => {
+  it("adopts the pending discover instead of adding another", async () => {
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    await scheduler.sweepSource(sourceId);
+    // Leave the first sweep's discover behind, exactly as a deadline would.
+    await db("ingestion_jobs").update({ status: "pending", next_attempt_at: db.fn.now() });
+    const before = await db("ingestion_jobs").where({ stage: "discover" });
+    assert.equal(before.length, 1);
+
+    await scheduler.sweepSource(sourceId);
+
+    const after = await db("ingestion_jobs").where({ stage: "discover" });
+    assert.equal(after.length, 1, "a second sweep must not add a second discovery crawl");
+  });
+
+  it("re-points the adopted job at the open run, not the closed one", async () => {
+    // Otherwise the counts land on a run that finished days ago, and phase 1 of
+    // the drain has no work of its own to claim.
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    await scheduler.sweepSource(sourceId);
+    await db("ingestion_jobs").update({ status: "pending", next_attempt_at: db.fn.now() });
+    const first = await db("ingestion_jobs").where({ stage: "discover" }).first();
+
+    const outcome = await scheduler.sweepSource(sourceId);
+    assert.equal(outcome.kind, "ran");
+
+    const adopted = await db("ingestion_jobs").where({ id: first.id }).first();
+    assert.notEqual(adopted.run_id, first.run_id);
+    assert.equal(adopted.run_id, outcome.kind === "ran" ? outcome.runId : null);
+  });
+
+  it("does not reset attempts, because adopting is not a human clearing a fault", async () => {
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }));
+
+    await scheduler.sweepSource(sourceId);
+    await db("ingestion_jobs").update({ status: "pending", attempts: 2, next_attempt_at: db.fn.now() });
+
+    await scheduler.sweepSource(sourceId);
+
+    // The adopted job is due immediately, so the same sweep drains it and the
+    // count goes up by one. What must never happen is it going *down*: a reset
+    // would hand a repeatedly-failing job a fresh budget every night, and that
+    // reset belongs to `unblock` and to a person.
+    const job = await db("ingestion_jobs").where({ stage: "discover" }).first();
+    assert.ok(
+      Number(job.attempts) >= 2,
+      `attempts fell to ${job.attempts}; only unblock resets an attempt budget`,
+    );
+  });
+});
+
 describe("SourceScheduler.recoverAbandonedRuns", () => {
   async function insertRun(
     startedMinutesAgo: number,

@@ -627,7 +627,7 @@ export class SourceScheduler {
     let processed = 0;
     try {
       const since = new Date(this.now().getTime() - this.lookbackDays * 24 * 60 * 60 * 1000);
-      await this.options.queue.enqueue("discover", { since: since.toISOString() }, runId);
+      await this.enqueueDiscover(sourceId, runId, since);
       processed = await this.drain(runId);
     } catch (error) {
       if (error instanceof SweepDeadlineReached) {
@@ -718,6 +718,61 @@ export class SourceScheduler {
       counts,
       error: errorText.length > 0 ? errorText.join("\n") : null,
     });
+  }
+
+  /**
+   * One pending `discover` per source, never a new one beside an old one.
+   *
+   * `runSweep` used to enqueue unconditionally and `IngestionQueue.enqueue` is a
+   * bare insert, so every sweep that did not drain its own discover left one
+   * behind and added another. Production on 2026-08-16 held five: three for
+   * Gallatin, two for Bozeman, the oldest from the 14th. Each would eventually
+   * run a **full discovery pass against the source** — three identical crawls
+   * of the same county, which is the opposite of the politeness the rest of
+   * this pipeline is built around.
+   *
+   * The precedent is already in the codebase and was simply not applied here:
+   * `enqueueExtraction` checks for an existing queued job and refuses to add a
+   * second. Nothing argued for the difference — no comment defends it, unlike
+   * the `SweepDeadlineReached` carry-forward a few lines below — so it was an
+   * omission rather than a decision.
+   *
+   * Adoption rather than "skip the insert": the existing job is re-pointed at
+   * *this* run and its window refreshed, so phase 1 of the drain still has this
+   * run's own work to claim, and the counts land on the run that is open rather
+   * than on one closed days ago.
+   *
+   * `attempts` is deliberately not reset. The carried-over job may have been
+   * failing for a reason, and a sweep adopting it is not a human saying the
+   * cause is gone — that distinction is `unblock`'s, and it belongs to a person.
+   */
+  private async enqueueDiscover(sourceId: string, runId: string, since: Date): Promise<void> {
+    const target = { since: since.toISOString() };
+
+    const existing: unknown = await this.db("ingestion_jobs as j")
+      .join("ingestion_runs as r", "j.run_id", "r.id")
+      .where("r.source_id", sourceId)
+      .where("j.stage", "discover")
+      .where("j.status", "pending")
+      .orderBy("j.created_at", "asc")
+      .first("j.id as id");
+
+    if (isRecord(existing) && typeof existing.id === "string") {
+      await this.db("ingestion_jobs")
+        .where({ id: existing.id, status: "pending" })
+        .update({
+          run_id: runId,
+          target: JSON.stringify(target),
+          next_attempt_at: this.db.fn.now(),
+          updated_at: this.db.fn.now(),
+        });
+      this.logger.info(
+        `SourceScheduler: sweep ${runId} adopted the discover job already queued for source ${sourceId} rather than adding a second`,
+      );
+      return;
+    }
+
+    await this.options.queue.enqueue("discover", target, runId);
   }
 
   /** Turns the worker until this run has no claimable work left, or time runs out. */
