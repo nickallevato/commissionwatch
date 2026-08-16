@@ -2,7 +2,7 @@
 
 > Last updated: 2026-08-16, after the second autonomous loop — **0.5.0, in which the switch panel
 > built in 0.4.0 was audited against the code behind it and two of its six switches turned out to
-> control nothing.** Backend **2033 tests / 488 suites**, frontend **737 / 64**, both packages
+> control nothing.** Backend **2038 tests / 491 suites**, frontend **737 / 64**, both packages
 > typecheck- and build-clean. The deploy host's disk was cleared by the operator at ~22:15Z on
 > 2026-08-15, so the 0.4.0 backlog is deployed and production tracks head again. **Three operator
 > decisions were created and none were taken autonomously** — see § 2026-08-16 immediately below.
