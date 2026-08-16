@@ -70,3 +70,21 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
 
 - **Loop armed.** Critical maturity review dispatched (opus, read-only on code, may write the spec
   and roadmap entries). The loop's first job on its return is to turn its gaps into scheduled work.
+- **08:13Z** — Maturity review returned and is committed. **PASS**: testing (L4), data governance (L3),
+  product/UX (L3). **FAIL**: operational readiness (L2), security (L2), delivery (L2),
+  sustainability (L1). Phases 6 and 7 added to hold operations, security, retention and
+  stewardship — the structural finding being that all five existing phases were feature phases, so
+  this work had nowhere to live and was untracked rather than undone.
+
+  Verified the top finding myself rather than taking it: `npm audit --omit=dev` confirms 3 moderate
+  in the frontend (`react-router`, exercised on every public page) and 6 in the backend (`resend` →
+  `svix` → `uuid`, shipped but dormant). The production-only lens matters — a build-time advisory
+  does not reach a reader.
+
+  **Two agents dispatched, disjoint by package:** frontend takes the shipping router advisory plus a
+  Gitea audit step; backend/deploy takes the off-instance backup leg. No shared file, no shared test
+  list.
+
+  **Decision made and recorded:** the CI audit gate runs `--omit=dev --audit-level=high`. Failing on
+  build-time moderates would train everyone to ignore the check, and a gate people route around is
+  worse than no gate. The current moderates are being fixed rather than tolerated.
