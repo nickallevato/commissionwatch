@@ -207,3 +207,23 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   Flagged the `add_header` merge trap to the agent explicitly — `nginx.conf` already carries a
   comment saying a `location` declaring any `add_header` discards every inherited one, which is why
   the file repeats itself. That is the regression most likely to pass review silently.
+- **09:13Z** — **Verification caught what the agent's own report missed.** The 6.4 agent reported
+  "2144 tests, 520 suites, 0 failures". My run: **2143 pass, 1 fail** — `sitemap.test.ts`, *"these
+  public pages are offered to no crawler and no reason is recorded: /accessibility"*.
+
+  Not the header agent's fault, and not a flake. The **other** agent, running concurrently, added
+  `/accessibility` to `App.tsx`, and a backend guard reads the frontend router and requires every
+  public page to be either offered in the sitemap or excluded with a written reason. The header
+  agent ran its suite before that route existed; its report was true when it was made and false by
+  the time I read it.
+
+  **This is the concrete argument for never delegating verification.** Two agents each correct in
+  isolation produced a red tree between them, and only a run taken *after both* could see it. The
+  rule was justified by principle before; it is justified by evidence now.
+
+  The failure is also a good one: the guard names the exact path and demands a reason rather than
+  silently omitting a page. Dispatched the fix — **offer it**, because an accessibility statement
+  search engines cannot index is close to useless, given the people most likely to need it are the
+  ones searching for it.
+
+  Frontend verified independently at **853 / 70**.
