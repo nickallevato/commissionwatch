@@ -464,3 +464,25 @@ instruction, not about the agents** — and I had the evidence after the second 
   convert all 139 `console.*` calls — the deliverable is a logger, request ids and error counts, and
   a 139-call sweep would be unreviewable and bury the feature — and prefer **no new dependency**,
   because this project avoids them deliberately and 6.2 has just gated supply chain.
+- **11:05Z** — 6.8 verified and pushed (`3eb2ded`), backend **2190 / 530** clean. Confirmed both scope
+  decisions held rather than taking the report: **no logging dependency** in the diff, and error
+  counts **absent from public `/api/health`**.
+
+  The agent departed from the precedent I pointed it at, with a reason I accept: `c2ce56a` puts
+  coarse resource states on public health because an alarm needs them and they disclose little, but a
+  **per-route 5xx tally is a fragility map rather than a health signal**, so it sits behind
+  `requireOperator` and the monitor is deliberately not given a credential to read it.
+
+  **Re-dispatched the critical reviewer** — the acceptance criterion. Told it explicitly not to trust
+  the roadmap: **the coordinator's own statuses were wrong at least four times today**, including one
+  item marked two-sevenths complete that was finished. Asked it specifically to hunt for work that is
+  *claimed but hollow* — a guard that cannot fail, a policy page contradicting the code — since the
+  loop found several such in its own output and will have missed others. And to judge whether
+  anything got **worse**: fourteen items landed in a few hours through delegated agents.
+
+  Second slot took 6.9's nginx half. **Rejected the obvious approach**: a test running the nginx
+  container needs Docker in CI, is slow, and verifies a container built from the config rather than
+  the thing actually serving readers. The monitor already probes production every fifteen minutes and
+  already owns this shape of problem, so the check goes there. Told the agent to **establish what
+  production actually does first** — prerendering may be shipped dark, and building a check for
+  something that is not happening would be worse than leaving the gap named.
