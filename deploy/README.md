@@ -300,7 +300,17 @@ make:
 BACKUP_S3_URI=s3://your-org-backups/commissionwatch
 ```
 
-The instance role needs `s3:PutObject` on that prefix. Nothing else changes.
+The instance role needs `s3:PutObject` and `s3:ListBucket` on that prefix — the script lists the
+object back after the copy to confirm it actually landed rather than trusting `aws s3 cp`'s own
+exit code alone. Nothing else changes.
+
+**While `BACKUP_S3_URI` is unset (or an upload fails its verification), `backup.sh` no longer says
+so quietly.** It emits `ops.backup_offsite_missing` at `critical` severity through the same
+dispatcher `ops.backup_failed` uses, and exits `60` — distinct from its other failure exits — so a
+cron mailer or a monitor watching this job's exit code notices even with no delivery channel
+configured. The local backup still ran and is still retained; only the offsite leg is reported
+missing. This was a plain `log` line before 2026-08-16, and that is exactly how it went unnoticed
+for weeks — see the maturity review, finding 6.1.
 
 ### The restore drill — run it, do not read it
 

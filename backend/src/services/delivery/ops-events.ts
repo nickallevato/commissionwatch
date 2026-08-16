@@ -16,6 +16,7 @@ import type { EventPayload } from "./dispatcher";
 export const OPS_EVENTS = [
   "ops.backup_succeeded",
   "ops.backup_failed",
+  "ops.backup_offsite_missing",
   "ops.restore_drill_succeeded",
   "ops.restore_drill_failed",
 ] as const;
@@ -39,7 +40,11 @@ export interface OpsEventArgs {
  *
  * A failure is `critical` by default and a success is `low`, because the window
  * a missed backup opens only widens: the operator needs to hear about the one
- * immediately and the other in a digest, if at all.
+ * immediately and the other in a digest, if at all. `ops.backup_offsite_missing`
+ * defaults to `critical` too, even though its name does not end `_failed`: a
+ * backup that never leaves the instance is the condition this event exists to
+ * make loud, and it must stay loud even if a future caller forgets to pass
+ * `--severity` explicitly.
  */
 export function parseOpsEventArgs(argv: readonly string[]): OpsEventArgs {
   const raw = new Map<string, string>();
@@ -66,7 +71,9 @@ export function parseOpsEventArgs(argv: readonly string[]): OpsEventArgs {
     event,
     detail: raw.get("detail") ?? "",
     source: raw.get("source") ?? "ops",
-    severity: raw.get("severity") ?? (event.endsWith("_failed") ? "critical" : "low"),
+    severity:
+      raw.get("severity") ??
+      (event.endsWith("_failed") || event === "ops.backup_offsite_missing" ? "critical" : "low"),
   };
 }
 

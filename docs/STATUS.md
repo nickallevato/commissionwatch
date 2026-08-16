@@ -2403,14 +2403,23 @@ Ordered by how much each blocks the product being real.
    137 rows restored, no losses, 11 objects in the archive. Runbook: `deploy/README.md` §5.
    **Outstanding:** `BACKUP_S3_URI` is unset, so an archive currently never leaves the instance —
    that is a copy, not a backup. Setting it needs a bucket, which costs money and is the operator's
-   call. The cron entry also still has to be installed on the host.
-9. **No monitoring** — **mostly closed 2026-08-10 by the external monitor, with one operator task
-   left.** See the section below. The probe is built, tested and green against production, and the
-   periodic trigger it was missing is now `deploy/monitor-trigger.sh` — **scheduled workflows do not
-   fire on this Gitea instance**, measured, not suspected, so the clock is a cron entry driving the
-   `workflow_dispatch` that does fire. **Installing that cron entry is the operator task**; the
-   exact command is in the monitor section. Still open and named there rather than left implicit:
-   nothing notices if the trigger itself stops.
+   call. **Since 2026-08-16, the script itself refuses to let that go unnoticed:** when
+   `BACKUP_S3_URI` is unset, or when the upload to it fails and does not verify on a read-back,
+   `backup.sh` emits `ops.backup_offsite_missing` at `critical` severity through the same
+   dispatcher a backup failure uses, *and* exits non-zero (60) so a cron or monitor watching the
+   job's exit code notices even with no delivery channel configured. That closes the "reports
+   success on a failed/absent upload" half of the maturity review's top-ranked finding; it does not
+   put anything in a bucket — the bucket itself is still the operator's call. The cron entry also
+   still has to be installed on the host.
+9. **No monitoring** — **closed 2026-08-10 by the external monitor.** See the section below. The
+   probe is built, tested and green against production, and the periodic trigger it was missing is
+   `deploy/monitor-trigger.sh` — **scheduled workflows do not fire on this Gitea instance**,
+   measured, not suspected, so the clock is a cron entry driving the `workflow_dispatch` that does
+   fire. **That cron entry is installed and firing**: the 2026-08-16 maturity review queried the
+   Gitea API and found runs landing on a 15-minute tick (`:00`/`:15`/`:30`/`:45` local) with 580
+   successful monitor runs total. This document previously called installing it "the operator
+   task"; that was stale as of the same review. Still open and named there rather than left
+   implicit: nothing notices if the trigger itself stops.
 10. ~~**No admin authentication.**~~ Closed 2026-08-09 by A1. One operator class, `scrypt` from
     `node:crypto`, revocable server-side sessions in an httpOnly cookie, no public registration.
     The review queue is no longer blocked on it.
@@ -2558,10 +2567,9 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
    confidently wrong. It blocks P7 entirely and nothing else blocks it. Full instructions in the
    P7 section above. **This one cannot be delegated to an agent** — it is a person reading a
    statute and putting their name against the date.
-0b. **Install the external monitor's cron entry.** One line, on an always-on machine, and until it
-   is installed nothing checks the site periodically at all. Exact command in the monitor section
-   above. Prefer a machine that is *not* the deploy host, so the clock does not go down with the
-   thing it watches.
+0b. ~~**Install the external monitor's cron entry.**~~ **Done.** Confirmed via the Gitea API by the
+   2026-08-16 maturity review: runs land on a 15-minute tick, 580 successful monitor runs total.
+   This item previously read as outstanding; it was stale.
 0c. **Rotate the superseded OpenRouter key.** Two keys were issued on 2026-08-11; the first was
    replaced within minutes but was written to `/commissionwatch/env` first, and Parameter Store
    retains prior versions. The key in use is the second one. Rotating costs nothing — OpenRouter
@@ -2571,7 +2579,8 @@ Full detail in `.claude/skills/commissionwatch-development/SKILL.md`.
 1. **Enable Gallatin on the live host and install the backup cron.** The code for both landed
    2026-08-09; neither is switched on in production. `npm run sweep -- --adapter gallatin-civicplus
    --enable`, then the `17 4 * * *` entry from `deploy/README.md` §5. Set `BACKUP_S3_URI` at the
-   same time, or accept that the backup has not left the instance.
+   same time — as of 2026-08-16 `backup.sh` exits non-zero and pages `ops.backup_offsite_missing`
+   every night it is unset, specifically so this line item cannot be silently deferred again.
 1b. **Fix the repetition loop that truncates a fifth of every document.** ~20% of every set of
    minutes is currently never read, and as of **2026-08-15 that share is measured rather than
    estimated**: 5 of 24 chunks unread (20.8%), and **every one of them `truncated-reply` — 100%,
