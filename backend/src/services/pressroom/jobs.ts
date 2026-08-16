@@ -1,4 +1,5 @@
 import type { Knex } from "knex";
+import { IngestionQueue } from "../ingestion/queue";
 
 /**
  * The queue's individual jobs, so "976 pending" can be opened and read.
@@ -35,6 +36,23 @@ export const JOB_STATUSES = ["pending", "running", "done", "failed", "blocked"] 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
 export const JOBS_PAGE_MAX = 200;
+
+/**
+ * Returns blocked jobs to the queue, attempts reset.
+ *
+ * Delegates to `IngestionQueue.unblock` rather than reimplementing the update:
+ * that method owns what unblocking means — including that resetting attempts is
+ * a human saying the cause is gone — and a second copy here would drift from it
+ * the first time either changed.
+ *
+ * Takes a `Knex` rather than a live ingestion stack because unblocking is a
+ * database fact. The worker discovers the change by polling, so this works on a
+ * process that never built a stack, which is the same reason the source toggle
+ * does not require one.
+ */
+export function unblockJobs(db: Knex, ids: string[]): Promise<number> {
+  return new IngestionQueue(db).unblock(ids);
+}
 
 export interface QueuedJob {
   id: string;

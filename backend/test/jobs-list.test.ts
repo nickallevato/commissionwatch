@@ -54,6 +54,94 @@ describe("describe() reads the key each stage actually uses", () => {
   });
 });
 
+/**
+ * Unblocking, which had no route at all.
+ *
+ * `IngestionQueue.unblock` existed from the day the queue was written and
+ * nothing could call it. A job reaches `blocked` by exhausting its attempts,
+ * which usually means a defect in this codebase — and once that defect was
+ * fixed there was no way to tell the queue to try again. On 2026-08-16 five
+ * Bozeman transcripts sat blocked on a WebVTT parser that had since been
+ * fixed, unreachable by any deploy.
+ *
+ * Its own fixture, deliberately: the list suite below asserts exact counts, and
+ * borrowing its run to create a blocked job would make one suite's setup change
+ * another suite's arithmetic.
+ */
+describe("returning blocked jobs to the queue", () => {
+  const UNBLOCK_PREFIX = `${PREFIX}-unblock`;
+  const UNBLOCK_EMAIL = "jobs-unblock-test@example.invalid";
+  let cookie: string;
+  let runId: string;
+
+  before(async () => {
+    await cleanupByPrefix(UNBLOCK_PREFIX);
+    cookie = await signInOperator(UNBLOCK_EMAIL, "Jobs Unblock Test");
+    const fixture = await createSource(UNBLOCK_PREFIX, {
+      adapterKey: `${UNBLOCK_PREFIX}-src`,
+      enabled: true,
+    });
+    runId = await createRun(fixture.sourceId, { status: "partial" });
+  });
+
+  after(async () => {
+    await cleanupByPrefix(UNBLOCK_PREFIX);
+    await db("operators").where({ email: UNBLOCK_EMAIL }).del();
+  });
+
+  it("is closed without an operator session", async () => {
+    await request(app).post("/api/admin/pressroom/jobs/unblock").send({ ids: [] }).expect(401);
+  });
+
+  it("returns a blocked job to the queue when an operator says the cause is gone", async () => {
+    const blocked = await createJob(
+      runId,
+      "parse",
+      { sha256: "e".repeat(64) },
+      { status: "blocked", lastError: "attempts exhausted after 5", attempts: 5 },
+    );
+
+    const res = await request(app)
+      .post("/api/admin/pressroom/jobs/unblock")
+      .set("Cookie", cookie)
+      .send({ ids: [blocked] })
+      .expect(200);
+
+    assert.equal(res.body.unblocked, 1);
+    const row = await db("ingestion_jobs").where({ id: blocked }).first();
+    assert.equal(row.status, "pending");
+    assert.equal(Number(row.attempts), 0, "a human saying the cause is gone resets the budget");
+  });
+
+  it("counts what actually moved, not what was asked for", async () => {
+    // Naming a job that is not blocked is a no-op rather than an error: the
+    // count is the number an operator needs to read.
+    const done = await createJob(runId, "parse", { sha256: "f".repeat(64) }, { status: "done" });
+
+    const res = await request(app)
+      .post("/api/admin/pressroom/jobs/unblock")
+      .set("Cookie", cookie)
+      .send({ ids: [done] })
+      .expect(200);
+
+    assert.equal(res.body.unblocked, 0);
+    assert.equal(res.body.requested, 1);
+  });
+
+  it("refuses an empty list and a non-uuid rather than guessing", async () => {
+    await request(app)
+      .post("/api/admin/pressroom/jobs/unblock")
+      .set("Cookie", cookie)
+      .send({ ids: [] })
+      .expect(400);
+    await request(app)
+      .post("/api/admin/pressroom/jobs/unblock")
+      .set("Cookie", cookie)
+      .send({ ids: ["not-a-uuid"] })
+      .expect(400);
+  });
+});
+
 describe("the jobs list", () => {
   let cookie: string;
   let sourceId: string;
@@ -85,6 +173,7 @@ describe("the jobs list", () => {
 
   it("requires an operator session", async () => {
     await request(app).get("/api/admin/pressroom/jobs").expect(401);
+    await request(app).post("/api/admin/pressroom/jobs/unblock").send({ ids: [] }).expect(401);
   });
 
   it("says what each job is, not just that it exists", async () => {

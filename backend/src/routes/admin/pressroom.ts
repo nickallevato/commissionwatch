@@ -27,6 +27,7 @@ import {
   JOBS_PAGE_MAX,
   JOB_STATUSES,
   listJobs,
+  unblockJobs,
 } from "../../services/pressroom/jobs";
 import { ExtractionUnavailable } from "../../services/extraction/run";
 import { enqueueExtractionBatch, MAX_EXTRACT_BATCH, enqueueExtraction } from "../../services/extraction/stage";
@@ -301,6 +302,54 @@ router.get("/jobs", async (req, res, next) => {
     );
   } catch (err) {
     next(err);
+  }
+});
+
+/**
+ * `POST /jobs/unblock` — return blocked jobs to the queue, attempts reset.
+ *
+ * **Why this needed a route.** `IngestionQueue.unblock` has existed since the
+ * queue was written and nothing could call it. A job reaches `blocked` by
+ * exhausting its attempts, which means the cause was usually a defect in this
+ * codebase — and once that defect is fixed there was no way to tell the queue
+ * to try again. On 2026-08-16 five Bozeman transcripts sat blocked on a WebVTT
+ * parser that had since been fixed, permanently, with a deploy that could not
+ * reach them.
+ *
+ * Resetting attempts is the whole point, and it is why this is a route rather
+ * than something the worker does on its own: `unblock`'s docblock is explicit
+ * that a reset means *a human saying the cause is gone*. A queue that unblocked
+ * itself would loop forever on a job that fails the same way every time.
+ *
+ * Ids are required rather than offering "unblock everything": the operator
+ * should have looked at what they are retrying.
+ */
+router.post("/jobs/unblock", async (req: Request<unknown, unknown, { ids?: unknown }>, res, next) => {
+  try {
+    const { ids } = req.body ?? {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: "ids must be a non-empty array of job ids", statusCode: 400 });
+      return;
+    }
+    if (ids.length > JOBS_PAGE_MAX) {
+      res.status(400).json({
+        error: `ids may name at most ${JOBS_PAGE_MAX} jobs`,
+        statusCode: 400,
+      });
+      return;
+    }
+    if (!ids.every((id): id is string => typeof id === "string" && UUID_RE.test(id))) {
+      res.status(400).json({ error: "every id must be a job uuid", statusCode: 400 });
+      return;
+    }
+
+    // `unblock` filters on `status = 'blocked'` itself, so naming a job that is
+    // not blocked is a no-op rather than an error — the count says what
+    // actually moved, which is the number an operator needs.
+    const unblocked = await unblockJobs(db, ids);
+    res.json({ unblocked, requested: ids.length });
+  } catch (err) {
+    fail(res, err, next);
   }
 });
 

@@ -139,6 +139,20 @@ services:
       # empty value reads as absent. It must not equal OPENROUTER_MODEL —
       # a model judging its own output is a rubber stamp, and startup refuses.
       - GOVERNOR_MODEL=${GOVERNOR_MODEL:-}
+      # The standing fetch loop. Off in code by default — see
+      # `fetchWorkerEnabled` — because enabling it changes this project's daily
+      # footprint against a county's vendor, and that is a deployment's decision
+      # rather than a default any checkout should inherit.
+      #
+      # THIS deployment opts in. The request *rate* is unchanged and still each
+      # adapter's published crawl-delay; what changes is that fetching no longer
+      # stops after fifteen minutes a night. Without it the queue could not
+      # converge: on 2026-08-16 it held 1,639 pending fetches, the oldest three
+      # days old, against a drain of about ninety a night.
+      #
+      # Set FETCH_WORKER_ENABLED=false in Parameter Store to stop it without a
+      # code change.
+      - FETCH_WORKER_ENABLED=${FETCH_WORKER_ENABLED:-true}
       - OPERATOR_SEED_EMAIL=${OPERATOR_SEED_EMAIL:-}
       - OPERATOR_SEED_PASSWORD=${OPERATOR_SEED_PASSWORD:-}
       - OPERATOR_SEED_NAME=${OPERATOR_SEED_NAME:-}
