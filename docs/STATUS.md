@@ -2371,9 +2371,20 @@ Ordered by how much each blocks the product being real.
 3. ~~**Bozeman adapter.**~~ Closed 2026-08-09 by P4. `backend/src/services/ingestion/adapters/bozeman-granicus.ts`, registered **disabled**, swept for real (below). `bozemanmt.gov` is still a blanket Akamai deny and is never fetched. ~~Outstanding from the same backlog item: the **public-records-request page**~~ — closed 2026-08-10 by P7, though it can draft nothing until `jurisdiction_records_law` is populated. See above.
 4. ~~**MT CERS campaign finance**~~ (`cers-ext.mt.gov/CampaignTracker`). Closed 2026-08-10 — the
    adapter is written, registered **disabled**, and a real rate-limited sweep landed 384 filers,
-   35 filed reports and 127 itemised transactions. See above. Outstanding from the same item: no
-   public route and no frontend yet, no committee sweep, and the roster cursor named as a known
-   limitation.
+   35 filed reports and 127 itemised transactions. See above. ~~Outstanding from the same item: no
+   public route and no frontend yet~~ — **corrected 2026-08-16**: both exist. Verified against
+   production that day: `GET /api/officials/finance-coverage` returns 200, `GET /api/officials/:id`
+   serves the donor overlay, and `/elections` renders — `ElectionsPage`, `OfficialPage`,
+   `DonorOverlay` and `MatchQuality` are all routed in `App.tsx`. Still outstanding: **no committee
+   sweep**, and the roster cursor named as a known limitation.
+
+   **What that scoping turned up instead**, and it is worse than the stale line: `mt_cers` is
+   hardcoded `planned` in `services/finance/coverage.ts`, and the published caveat ends "Montana
+   state and local filings are held by CERS, which this site does not yet read." Nothing updates
+   either when data arrives. Enabling the CERS source therefore makes the site render CERS-derived
+   figures beside a sentence denying it reads CERS. `coverage-drift.test.ts` now fails loudly on
+   exactly that; the wording change is an operator decision, specced in
+   `docs/superpowers/specs/2026-08-16-finance-coverage-drift-design.md`.
 5. **W6 funding network layer.** Specced only — `docs/superpowers/specs/2026-08-04-funding-network-layer-design.md`.
 6. ~~**W7 delivery channels.**~~ Built. Channels, routes, encryption, the Discord transport, and — as of B-e — cadence, SMS, and a self-serve subscriber surface on the same substrate. Nothing dispatches product events yet, because nothing ingests.
 7. **Launch readiness**: ~~corrections and dispute policy~~ — **closed 2026-08-10 by B3**, see
