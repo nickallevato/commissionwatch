@@ -16,6 +16,7 @@ import {
   classifyRun,
   parseSourceRow,
   schedulerEnabled,
+  RUN_RECOVERY_INTERVAL_MS,
   SourceScheduler,
   sourceLockKey,
   SOURCE_LOCK_NAMESPACE,
@@ -128,9 +129,20 @@ beforeEach(async () => {
   });
 });
 
+/** Polls until `read` returns non-null, or gives up loudly. */
+async function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 3000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (value !== null) return value;
+    if (Date.now() > deadline) throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 function buildScheduler(
   adapter: SourceAdapter,
-  overrides: { sweepTimeoutMs?: number } = {},
+  overrides: { sweepTimeoutMs?: number; recoveryIntervalMs?: number } = {},
 ): SourceScheduler {
   const registry = createAdapterRegistry([adapter]);
   const queue = new IngestionQueue(db, { maxAttempts: 1 });
@@ -154,6 +166,9 @@ function buildScheduler(
     logger: silentLogger,
     enabled: true,
     sweepTimeoutMs: overrides.sweepTimeoutMs ?? 5000,
+    ...(overrides.recoveryIntervalMs === undefined
+      ? {}
+      : { recoveryIntervalMs: overrides.recoveryIntervalMs }),
   });
 }
 
@@ -512,6 +527,49 @@ describe("SourceScheduler.recoverAbandonedRuns", () => {
     assert.equal(source.last_success_at, null);
     assert.equal(Number(source.consecutive_failures), 0);
     assert.equal(source.health_status, "healthy");
+  });
+
+  it("keeps checking on a timer, because a run stranded just after boot is invisible otherwise", async () => {
+    // The hole the boot-only check left, walked into by production on
+    // 2026-08-16: a deploy at 20:04Z stranded a run opened at 20:00Z. At boot
+    // that run was four minutes old — under the threshold that stops this
+    // closing a *live* sweep — so nothing looked again, and for a nightly
+    // source nothing would have until the following morning.
+    assert.equal(RUN_RECOVERY_INTERVAL_MS, 5 * 60 * 1000);
+
+    const runId = await insertRun(60, { discovered: 4 });
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }), {
+      recoveryIntervalMs: 20,
+    });
+
+    try {
+      // `start()` finds no cron module under test and returns early. The timer
+      // is armed before that, deliberately: recovery has nothing to do with
+      // cron, and this asserts it rather than trusting the ordering.
+      await scheduler.start();
+
+      const closed = await waitFor(async () => {
+        const row = await db("ingestion_runs").where({ id: runId }).first();
+        return row.status === "partial" ? row : null;
+      });
+      assert.notEqual(closed.finished_at, null);
+    } finally {
+      scheduler.stop();
+    }
+  });
+
+  it("stops checking once the scheduler stops", async () => {
+    const scheduler = buildScheduler(createStubAdapter({ discover: async () => [] }), {
+      recoveryIntervalMs: 20,
+    });
+    await scheduler.start();
+    scheduler.stop();
+
+    const runId = await insertRun(60, { discovered: 4 });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const row = await db("ingestion_runs").where({ id: runId }).first();
+    assert.equal(row.status, "running", "a stopped scheduler must not still be writing");
   });
 
   it("refuses a threshold that is not a positive number", async () => {

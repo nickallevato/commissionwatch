@@ -138,6 +138,8 @@ export interface SourceSchedulerOptions {
   lookbackDays?: number;
   /** Ceiling on one sweep's draining loop. Default 15 minutes. */
   sweepTimeoutMs?: number;
+  /** Overrides {@link RUN_RECOVERY_INTERVAL_MS}; injected so a test need not wait five minutes. */
+  recoveryIntervalMs?: number;
   /** Injected for tests; defaults to `node-cron`. */
   cron?: CronModule;
   /** Injected for tests; defaults to `() => new Date()`. */
@@ -282,6 +284,15 @@ export class SweepDeadlineReached extends Error {
   }
 }
 
+/**
+ * How often a running scheduler re-checks for runs abandoned by a dead process.
+ *
+ * Five minutes: short enough that a stranded run is visible for minutes rather
+ * than until the next nightly sweep, long enough that it is one cheap indexed
+ * query per interval and not a poll.
+ */
+export const RUN_RECOVERY_INTERVAL_MS = 5 * 60 * 1000;
+
 export class SourceScheduler {
   private readonly logger: SchedulerLogger;
   private readonly enabled: boolean;
@@ -293,6 +304,8 @@ export class SourceScheduler {
   private cron: CronModule | null;
   private started = false;
   private lastOutcomeBySource = new Map<string, SweepOutcome>();
+  private recoveryTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly recoveryIntervalMs: number;
 
   constructor(
     private readonly db: Knex,
@@ -304,6 +317,7 @@ export class SourceScheduler {
     this.sweepTimeoutMs = options.sweepTimeoutMs ?? 15 * 60 * 1000;
     this.now = options.now ?? ((): Date => new Date());
     this.cron = options.cron ?? null;
+    this.recoveryIntervalMs = options.recoveryIntervalMs ?? RUN_RECOVERY_INTERVAL_MS;
   }
 
   get running(): boolean {
@@ -409,6 +423,30 @@ export class SourceScheduler {
       return;
     }
 
+    /**
+     * Re-check for abandoned runs on a timer, not only at boot and at sweep.
+     *
+     * The boot check alone leaves a real hole, and production walked straight
+     * into it on 2026-08-16: a deploy at 20:04Z stranded a run that had opened
+     * at 20:00Z, and at boot that run was four minutes old — well under the
+     * threshold that keeps this from closing a *live* sweep. Nothing would look
+     * again until the next sweep, which for a nightly source is the following
+     * morning. The run sat `running` and the console said "Sweeping" for a
+     * process that no longer existed, which is the exact defect the boot check
+     * was added to fix.
+     *
+     * A periodic check closes it within the threshold plus this interval
+     * instead. Unref'd so it never holds the process open, and cleared in
+     * `stop()`.
+     */
+    this.recoveryTimer = setInterval(() => {
+      void this.recoverAbandonedRuns().catch((error: unknown) => {
+        this.logger.error(`SourceScheduler: abandoned-run recovery failed — ${errorMessage(error)}`);
+      });
+    }, this.recoveryIntervalMs);
+    this.recoveryTimer.unref();
+
+
     const cron = await this.loadCron();
     if (cron === null) {
       this.logger.error("SourceScheduler: node-cron unavailable, no source will sweep");
@@ -455,6 +493,10 @@ export class SourceScheduler {
   }
 
   stop(): void {
+    if (this.recoveryTimer !== null) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
     for (const task of this.tasks.values()) {
       void task.stop();
       void task.destroy();
