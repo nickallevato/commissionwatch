@@ -350,3 +350,25 @@ instruction, not about the agents** — and I had the evidence after the second 
 
   Nothing committed from either agent. 6.9 still has half its chain missing and its wall mutation
   unrun; the session sweep is unverified. **Neither is going in on an agent's word.**
+- **10:09Z** — Clean tick: tree clean, **0** stale processes, both slots free, `52cfd60` and `662cb14`
+  pushed. Live is `6db1d09`; a deploy will follow.
+
+  **New standing rule, from the hour lost this afternoon: a subagent never runs the full suite.** It
+  runs only the files it touched; the main loop runs `npm test`. Two agents against one Postgres
+  produced two failures that were pure contention — `sweep-progress` claiming two jobs where it
+  expected one, `queue-stats` seeing fewer pending fetches than it created — and both passed alone
+  and in every pairing. Cheaper to forbid the concurrency than to diagnose it again.
+
+  Dispatched **6.9-finish** and **6.3**, chosen to share no file: one owns
+  `publish-path.e2e.test.ts`, the other `external-monitor.ts` + `health.test.ts`, and neither may
+  touch `backend/package.json`.
+
+  **Design decision on 6.3, mine.** The monitor probes from outside and cannot read the host's disk,
+  so `/api/health` must report it — but that endpoint is public and unauthenticated, and publishing
+  exact free bytes tells an attacker how much to send to fill it. So: **coarse states, never raw
+  capacity**. The alarm works; the capacity map is not handed out. The reasoning goes in a comment,
+  because the next person will want to add the numbers back.
+
+  The assertion I care about most there is that an **absent** `resources` field reports `blocked`
+  rather than `pass`. That is the exact shape of the 2026-08-15 failure — everything green, disk
+  full, nothing determinable — and its mutation reproduces the original incident.
