@@ -169,6 +169,49 @@ export const DEFAULT_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free";
  */
 export const DEFAULT_MAX_TOKENS = 8000;
 
+/**
+ * Frequency penalty, off by default — the knob that makes the repetition
+ * question measurable without changing today's behaviour.
+ *
+ * ## Why this exists
+ *
+ * A fifth of extraction chunks end `repetition-truncated`: the model was
+ * looping when `max_tokens` stopped it. `docs/STATUS.md` records the
+ * measurement (5 of 24 chunks unread, every one of them `truncated-reply`) and
+ * notes that extraction is **not scheduled** because of it.
+ *
+ * The request below asks for `temperature: 0` and sends no repetition or
+ * frequency penalty at all, and that combination is the textbook recipe for
+ * degenerate repetition. At temperature zero the model takes the
+ * highest-probability token at every step, so once the output enters a
+ * repeating cycle there is no stochastic path out of it — the cycle is, by
+ * construction, the most probable continuation of itself. It repeats until the
+ * ceiling truncates the reply. That is precisely the observed signature.
+ *
+ * ## Why the fix is not simply "raise the temperature"
+ *
+ * Temperature zero is not an oversight here; it is load-bearing. This is an
+ * extraction task with a right answer, and a transparency project that cannot
+ * reproduce its own output cannot defend it. Sampling would break the loop and
+ * cost determinism, which is the wrong trade for this codebase.
+ *
+ * A frequency penalty breaks the cycle **without** giving up greedy decoding:
+ * it reshapes the scores by how often a token has already appeared, so the run
+ * stays deterministic and reproducible while a repeated token stops being the
+ * argmax forever.
+ *
+ * ## Why it defaults to zero
+ *
+ * Because nothing has been measured yet, and this project does not change model
+ * behaviour by reasoning. **At `0` the field is omitted from the request
+ * entirely**, so the bytes sent are identical to before this knob existed and
+ * the existing loss measurement stays a statement about the same
+ * configuration. Set `EXTRACTION_FREQUENCY_PENALTY` to run the comparison.
+ * `docs/superpowers/specs/2026-08-16-repetition-truncation-design.md` is the
+ * experiment this is for.
+ */
+export const DEFAULT_FREQUENCY_PENALTY = 0;
+
 export interface OpenRouterOptions {
   apiKey?: string;
   model?: string;
@@ -179,6 +222,11 @@ export interface OpenRouterOptions {
   /** Injected in tests so a retry path does not really sleep. */
   sleep?: (ms: number) => Promise<void>;
   logger?: { info(message: string): void; warn(message: string): void };
+  /**
+   * Overrides `EXTRACTION_FREQUENCY_PENALTY`. See
+   * {@link DEFAULT_FREQUENCY_PENALTY}.
+   */
+  frequencyPenalty?: number;
 }
 
 export interface CompletionRequest {
@@ -220,6 +268,48 @@ function envValue(name: string): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
+/**
+ * Resolve the frequency penalty from an explicit option or the environment.
+ *
+ * Every unusable value resolves to {@link DEFAULT_FREQUENCY_PENALTY} — which is
+ * today's behaviour — and says so through the logger. The alternative, throwing,
+ * would let a typo in one environment variable take extraction down entirely;
+ * the alternative to *disclosing*, silently falling back, would leave an
+ * operator reading a comparison that never ran with the setting they thought
+ * they had set.
+ *
+ * The accepted range is OpenAI's and OpenRouter's: −2 to 2 inclusive. A value
+ * outside it is a mistake, not a stronger opinion.
+ */
+export function resolveFrequencyPenalty(
+  option: number | undefined,
+  raw: string | undefined,
+  logger: { warn(message: string): void },
+): number {
+  if (option !== undefined) {
+    if (!Number.isFinite(option) || option < -2 || option > 2) {
+      logger.warn(
+        `EXTRACTION_FREQUENCY_PENALTY option ${String(option)} is outside the accepted ` +
+          `range -2..2; using ${DEFAULT_FREQUENCY_PENALTY} instead.`,
+      );
+      return DEFAULT_FREQUENCY_PENALTY;
+    }
+    return option;
+  }
+  if (raw === undefined) return DEFAULT_FREQUENCY_PENALTY;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < -2 || parsed > 2) {
+    logger.warn(
+      `EXTRACTION_FREQUENCY_PENALTY="${raw}" is not a number in -2..2; using ` +
+        `${DEFAULT_FREQUENCY_PENALTY} instead, which is the behaviour every prior ` +
+        `extraction measurement was taken under.`,
+    );
+    return DEFAULT_FREQUENCY_PENALTY;
+  }
+  return parsed;
+}
+
 export class OpenRouterClient {
   readonly model: string;
   private readonly apiKey: string;
@@ -228,6 +318,7 @@ export class OpenRouterClient {
   private readonly maxRetries: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly logger: { info(message: string): void; warn(message: string): void };
+  readonly frequencyPenalty: number;
 
   constructor(options: OpenRouterOptions = {}) {
     this.model = options.model ?? envValue("OPENROUTER_MODEL") ?? DEFAULT_MODEL;
@@ -246,6 +337,11 @@ export class OpenRouterClient {
       info: (message) => console.log(message),
       warn: (message) => console.warn(message),
     };
+    this.frequencyPenalty = resolveFrequencyPenalty(
+      options.frequencyPenalty,
+      envValue("EXTRACTION_FREQUENCY_PENALTY"),
+      this.logger,
+    );
   }
 
   get configured(): boolean {
@@ -304,6 +400,15 @@ export class OpenRouterClient {
             // Deterministic as the endpoint allows. This is an extraction task
             // with a right answer, not a writing task.
             temperature: 0,
+            // Spread, not a plain property, so that at the default of 0 the key
+            // is ABSENT rather than present-and-zero. The request is then byte
+            // for byte what it was before this knob existed, which is what lets
+            // the existing truncation measurements keep describing the
+            // configuration they were actually taken under. See
+            // DEFAULT_FREQUENCY_PENALTY.
+            ...(this.frequencyPenalty === 0
+              ? {}
+              : { frequency_penalty: this.frequencyPenalty }),
           }),
         });
       } catch (error) {
