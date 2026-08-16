@@ -899,6 +899,91 @@ export function evaluateSources(probe: ProbeResult, now: Date): CheckOutcome[] {
   return outcomes;
 }
 
+/* ── Probe 5: resource pressure ─────────────────────────────────────── */
+
+/** The three real states `routes/health.ts` may report for a resource. */
+type ResourceState = "ok" | "low" | "critical";
+
+function isResourceState(value: unknown): value is ResourceState {
+  return value === "ok" || value === "low" || value === "critical";
+}
+
+function worstResourceState(a: ResourceState, b: ResourceState): ResourceState {
+  const rank: Record<ResourceState, number> = { ok: 0, low: 1, critical: 2 };
+  return rank[a] >= rank[b] ? a : b;
+}
+
+/**
+ * Disk and memory pressure, as reported by `/api/health`'s `resources` field.
+ *
+ * **Why this reads `/api/health` rather than probing the host.** The monitor
+ * runs outside the box over HTTP — see the module doc — so it cannot read the
+ * deploy host's disk or memory itself. The backend can, from inside the
+ * container, and reports coarse states rather than raw capacity; see
+ * `routes/health.ts` for why exact free bytes are deliberately withheld from
+ * this public, unauthenticated endpoint.
+ *
+ * **`blocked`, not `pass`, is the whole point of this check.** This is the
+ * exact shape of the 2026-08-15 incident: the disk filled, every uptime and
+ * deploy signal stayed green because they only ever asked "is the site up",
+ * and the site was. A backend that predates this field, or that ships one in
+ * a shape this cannot trust, must read as "we could not tell" — never as a
+ * clean bill of health borrowed from an absence. So every one of these is
+ * `blocked`, not `pass`:
+ *
+ * - `/api/health` itself could not be read (transport failure, non-JSON body).
+ * - the response has no `resources` object at all — an older backend.
+ * - `resources.disk` or `resources.memory` is missing, not a string, or a
+ *   string this backend does not use (a typo, a future state this monitor
+ *   predates).
+ *
+ * Only when both fields are a known state does this become a real verdict:
+ * `critical` on either fails the run, `low` on either (with neither critical)
+ * warns, and `ok`/`ok` passes.
+ */
+export function evaluateResources(health: ProbeResult): CheckOutcome {
+  const name = "resources";
+
+  const failure = transportFailure(health);
+  if (failure !== null) {
+    return { name, state: "blocked", detail: `could not read /api/health: ${failure}` };
+  }
+
+  const parsed = parseJsonObject(health.body);
+  if (!parsed.ok) {
+    return { name, state: "blocked", detail: `could not read /api/health: ${parsed.reason}` };
+  }
+
+  const resources = parsed.value.resources;
+  if (!isRecord(resources)) {
+    return {
+      name,
+      state: "blocked",
+      detail:
+        "response has no `resources` object — either an older backend that predates this check, " +
+        "or a malformed one. Not a pass",
+    };
+  }
+
+  const disk = resources.disk;
+  const memory = resources.memory;
+  if (!isResourceState(disk) || !isResourceState(memory)) {
+    return {
+      name,
+      state: "blocked",
+      detail:
+        `resources has an unreadable field — disk=${JSON.stringify(disk)}, memory=${JSON.stringify(memory)}. ` +
+        `Not a pass`,
+    };
+  }
+
+  const worst = worstResourceState(disk, memory);
+  const detail = `disk ${disk}, memory ${memory}`;
+  if (worst === "critical") return { name, state: "fail", detail };
+  if (worst === "low") return { name, state: "warn", detail };
+  return { name, state: "pass", detail };
+}
+
 /* ── Reporting ──────────────────────────────────────────────────────── */
 
 export interface Summary {
@@ -1086,6 +1171,7 @@ export async function main(): Promise<number> {
 
   const outcomes: CheckOutcome[] = [
     evaluateHealth(health),
+    evaluateResources(health),
     version,
     drift,
     ...evaluateSources(sources, now),

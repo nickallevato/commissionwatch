@@ -1,4 +1,6 @@
 import { Router } from "express";
+import os from "os";
+import { promises as fsPromises } from "fs";
 import db from "../config/database";
 import { probeStorage, type StorageState } from "../services/storage";
 
@@ -160,6 +162,161 @@ async function checkStorage(): Promise<StorageState> {
   }
 }
 
+/* ── Resources ──────────────────────────────────────────────────────── */
+
+/**
+ * Coarse disk/memory pressure — never raw bytes.
+ *
+ * `/api/health` is public and unauthenticated. Publishing exact free capacity
+ * here would hand anyone watching a countdown to exactly how much data to send
+ * to fill the disk, or how much load to throw at the process to force an OOM.
+ * A coarse state lets `scripts/external-monitor.ts` alarm on the same class of
+ * failure that went unnoticed on 2026-08-15 (see the module doc there) without
+ * publishing a capacity map of a shared host. If you're tempted to add the raw
+ * numbers back "for debugging", put them behind an authenticated admin route
+ * instead — not here.
+ *
+ * `unknown` is distinct from the three real states: it means this process
+ * could not read the figure at all (a missing `/proc`, a permissions error), as
+ * opposed to having read it and found it fine. `scripts/external-monitor.ts`
+ * treats anything other than `ok` | `low` | `critical` as `blocked` — an
+ * absence must never be mistaken for a clean bill of health.
+ */
+export type ResourceState = "ok" | "low" | "critical" | "unknown";
+
+export interface ResourcesStatus {
+  disk: ResourceState;
+  memory: ResourceState;
+}
+
+/**
+ * Thresholds, as a percentage of capacity used.
+ *
+ * The deploy host is a shared `t4g.medium` — one EBS volume and one pool of
+ * RAM behind Caddy, this backend, Postgres, MinIO and four other product
+ * stacks (docs/superpowers/plans/2026-08-04-w4-public-launch.md) — so there is
+ * no dedicated headroom to tune against; the margin has to assume the rest of
+ * the host is doing its own thing at the same time. 80% ("low") is meant to
+ * fire early enough that an operator has time to act before a build, a WAL
+ * segment, or another stack's log file is what finally tips it over. 90%
+ * ("critical") is deliberately close to full: the 2026-08-15 incident was the
+ * disk actually filling, not sitting at some comfortable plateau, and a
+ * threshold set lower than that would cry wolf on every busy build. Both are
+ * overridable per-environment because these are a considered guess about a
+ * shared host, not a promise about this application's own footprint.
+ */
+const DEFAULT_DISK_LOW_PERCENT = 80;
+const DEFAULT_DISK_CRITICAL_PERCENT = 90;
+const DEFAULT_MEMORY_LOW_PERCENT = 80;
+const DEFAULT_MEMORY_CRITICAL_PERCENT = 90;
+
+/** A percentage threshold from the environment, or the default if unset or unusable. */
+function readPercentThreshold(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 100) return fallback;
+  return parsed;
+}
+
+function classify(usedPercent: number, lowPercent: number, criticalPercent: number): ResourceState {
+  if (usedPercent >= criticalPercent) return "critical";
+  if (usedPercent >= lowPercent) return "low";
+  return "ok";
+}
+
+/**
+ * Disk usage of the filesystem holding the process's working directory.
+ *
+ * `fs.statfs` reads the mount the container's root filesystem sits on. In
+ * `deploy/docker-compose.shared.yml` that is an overlayfs backed directly by
+ * the host's EBS volume — the backend container is given no disk quota of its
+ * own — so on the deployment this monitor watches, this figure genuinely is
+ * the host's disk, which is the thing that filled on 2026-08-15. That is a
+ * property of this deployment's compose file, not a guarantee `fs.statfs`
+ * itself makes: a deployment that did quota the container's writable layer
+ * would make this check honestly report the quota instead, which is still the
+ * correct answer to "how much room does this process have left".
+ */
+async function checkDisk(): Promise<ResourceState> {
+  try {
+    const stats = await withTimeout(fsPromises.statfs(process.cwd()));
+    const total = Number(stats.blocks) * Number(stats.bsize);
+    const available = Number(stats.bavail) * Number(stats.bsize);
+    if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(available)) return "unknown";
+    const usedPercent = ((total - available) / total) * 100;
+    return classify(
+      usedPercent,
+      readPercentThreshold("RESOURCE_DISK_LOW_PERCENT", DEFAULT_DISK_LOW_PERCENT),
+      readPercentThreshold("RESOURCE_DISK_CRITICAL_PERCENT", DEFAULT_DISK_CRITICAL_PERCENT),
+    );
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * The container's own memory ceiling, from cgroup v2, when one is visible.
+ *
+ * `memory.max` can legitimately read `"max"` — no ceiling configured — in
+ * which case there is nothing to compute a percentage against, so this
+ * returns `null` exactly as it does for a missing or unreadable file, and the
+ * caller falls back to `os.totalmem()`/`os.freemem()`.
+ */
+async function readCgroupV2Memory(): Promise<{ current: number; max: number } | null> {
+  try {
+    const [maxRaw, currentRaw] = await Promise.all([
+      fsPromises.readFile("/sys/fs/cgroup/memory.max", "utf8"),
+      fsPromises.readFile("/sys/fs/cgroup/memory.current", "utf8"),
+    ]);
+    if (maxRaw.trim() === "max") return null;
+    const max = Number(maxRaw.trim());
+    const current = Number(currentRaw.trim());
+    if (!Number.isFinite(max) || max <= 0 || !Number.isFinite(current) || current < 0) return null;
+    return { current, max };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Memory pressure.
+ *
+ * **What this can honestly determine.** Where the cgroup v2 memory controller
+ * is visible — as it is on the deploy host, which runs this container under
+ * `mem_limit: 512m` — `memory.max`/`memory.current` are read directly. Those
+ * are exactly this container's own ceiling and usage; they cannot be confused
+ * with the host's.
+ *
+ * **Where it cannot.** Off that path — this dev machine, a cgroup v1 host, a
+ * non-Linux OS, or a container runtime that hides `/sys/fs/cgroup` — this
+ * falls back to `os.totalmem()`/`os.freemem()`, which read `/proc/meminfo` and
+ * report the **host's** memory, not necessarily this container's. On a shared
+ * host that is still a usable signal (the host running low is exactly the
+ * 2026-08-15 failure mode), but it is not the same claim as the cgroup path,
+ * and this comment is the place that says so rather than a report that quietly
+ * conflates the two.
+ */
+async function checkMemory(): Promise<ResourceState> {
+  const lowPercent = readPercentThreshold("RESOURCE_MEMORY_LOW_PERCENT", DEFAULT_MEMORY_LOW_PERCENT);
+  const criticalPercent = readPercentThreshold("RESOURCE_MEMORY_CRITICAL_PERCENT", DEFAULT_MEMORY_CRITICAL_PERCENT);
+
+  const cgroup = await readCgroupV2Memory();
+  if (cgroup !== null) {
+    return classify((cgroup.current / cgroup.max) * 100, lowPercent, criticalPercent);
+  }
+
+  const total = os.totalmem();
+  const free = os.freemem();
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(free)) return "unknown";
+  return classify(((total - free) / total) * 100, lowPercent, criticalPercent);
+}
+
+async function checkResources(): Promise<ResourcesStatus> {
+  const [disk, memory] = await Promise.all([checkDisk(), checkMemory()]);
+  return { disk, memory };
+}
+
 /* ── The routes ─────────────────────────────────────────────────────── */
 
 const router = Router();
@@ -173,10 +330,11 @@ router.get("/live", (_req, res) => {
 });
 
 router.get("/", async (_req, res) => {
-  const [database, migrations, storage] = await Promise.all([
+  const [database, migrations, storage, resources] = await Promise.all([
     checkDatabase(),
     checkMigrations(),
     checkStorage(),
+    checkResources(),
   ]);
 
   const digest = digestStatusFn
@@ -194,6 +352,7 @@ router.get("/", async (_req, res) => {
     database,
     migrations,
     storage,
+    resources,
     digest: {
       running: digest.running,
       dailyLastRun: digest.dailyLastRun?.toISOString() ?? null,

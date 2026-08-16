@@ -58,6 +58,19 @@ describe("GET /api/health", () => {
     assert.equal(res.body.migrations.pending, 0);
   });
 
+  it("includes a resources object with coarse disk and memory states", async () => {
+    const res = await request(app).get("/api/health").expect(200);
+
+    assert.ok("resources" in res.body);
+    assert.ok(["ok", "low", "critical", "unknown"].includes(res.body.resources.disk));
+    assert.ok(["ok", "low", "critical", "unknown"].includes(res.body.resources.memory));
+    // Coarse states only — this endpoint is public and unauthenticated, and a
+    // raw byte count would hand an attacker a countdown to how much it takes
+    // to fill the disk. See routes/health.ts for the reasoning.
+    assert.equal(typeof res.body.resources.disk, "string");
+    assert.equal(res.body.resources.disk.match(/^\d/), null);
+  });
+
   it("reports object storage as unconfigured when MINIO_ENDPOINT is unset", async () => {
     // The test environment runs no MinIO, which is a missing setting rather
     // than a failure — reporting it as a failure would make CI permanently

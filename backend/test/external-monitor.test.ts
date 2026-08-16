@@ -6,6 +6,7 @@ import {
   DEFAULT_MAX_DRIFT_MINUTES,
   evaluateHealth,
   evaluateReleaseDrift,
+  evaluateResources,
   evaluateSource,
   evaluateSources,
   evaluateVersion,
@@ -117,6 +118,88 @@ describe("external monitor — health", () => {
     const outcome = evaluateHealth(response(200, JSON.stringify({ status: "ok" })));
     assert.equal(outcome.state, "fail");
     assert.match(outcome.detail, /no `database` string/);
+  });
+});
+
+/**
+ * `evaluateResources` reads the `resources` field `/api/health` reports (see
+ * `routes/health.ts`). The case that matters most is the one named in the
+ * roadmap item: an absent `resources` field must be `blocked`, never `pass` —
+ * that is precisely the failure that let the 2026-08-15 disk-full incident go
+ * unnoticed while every uptime signal stayed green.
+ */
+function healthBody(resources: unknown): string {
+  return JSON.stringify({ status: "ok", database: "connected", resources });
+}
+
+describe("external monitor — resource pressure", () => {
+  it("passes when both disk and memory are ok", () => {
+    const outcome = evaluateResources(response(200, healthBody({ disk: "ok", memory: "ok" })));
+    assert.equal(outcome.state, "pass");
+    assert.match(outcome.detail, /disk ok, memory ok/);
+  });
+
+  it("warns when disk is low", () => {
+    const outcome = evaluateResources(response(200, healthBody({ disk: "low", memory: "ok" })));
+    assert.equal(outcome.state, "warn");
+  });
+
+  it("warns when memory is low", () => {
+    const outcome = evaluateResources(response(200, healthBody({ disk: "ok", memory: "low" })));
+    assert.equal(outcome.state, "warn");
+  });
+
+  it("fails when disk is critical", () => {
+    const outcome = evaluateResources(response(200, healthBody({ disk: "critical", memory: "ok" })));
+    assert.equal(outcome.state, "fail");
+  });
+
+  it("fails when memory is critical even if disk is only low", () => {
+    const outcome = evaluateResources(response(200, healthBody({ disk: "low", memory: "critical" })));
+    assert.equal(outcome.state, "fail");
+    assert.match(outcome.detail, /disk low, memory critical/);
+  });
+
+  it("blocks — not passes — when the resources field is entirely absent", () => {
+    // This is the assertion that matters most: an older backend that predates
+    // this field, or a health response that simply omits it, must read as
+    // "we could not tell" rather than borrowing a clean bill of health from an
+    // absence. That collapse is exactly the shape of the 2026-08-15 incident.
+    const outcome = evaluateResources(response(200, JSON.stringify({ status: "ok", database: "connected" })));
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /no `resources` object/);
+  });
+
+  it("blocks when resources is present but not an object", () => {
+    const outcome = evaluateResources(response(200, healthBody("fine")));
+    assert.equal(outcome.state, "blocked");
+  });
+
+  it("blocks when disk is a string that is not a known state", () => {
+    const outcome = evaluateResources(response(200, healthBody({ disk: "mostly fine", memory: "ok" })));
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /unreadable field/);
+  });
+
+  it("blocks when memory is missing", () => {
+    const outcome = evaluateResources(response(200, healthBody({ disk: "ok" })));
+    assert.equal(outcome.state, "blocked");
+  });
+
+  it("blocks when a state field is a number instead of a string", () => {
+    const outcome = evaluateResources(response(200, healthBody({ disk: 1, memory: "ok" })));
+    assert.equal(outcome.state, "blocked");
+  });
+
+  it("blocks when /api/health itself could not be read", () => {
+    const outcome = evaluateResources(unreachable("timeout"));
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /could not read \/api\/health/);
+  });
+
+  it("blocks on a malformed /api/health body rather than reading it as fine", () => {
+    const outcome = evaluateResources(response(200, "<html>it worked!</html>"));
+    assert.equal(outcome.state, "blocked");
   });
 });
 
