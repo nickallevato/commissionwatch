@@ -94,6 +94,35 @@ This roadmap outlines the implementation plan for CommissionWatch, an AI-powered
 
 **Bozeman, MT (City Council)** and **Gallatin County, MT** are the initial targets. The platform is designed to scale to any of the 90,000+ US local government bodies.
 
+## Phase 5 — Interface
+
+| # | Deliverable | Description | Status |
+|---|---|---|---|
+| 5.1 | One palette | Point `tailwind.config.ts` colours at the `--cw-*` custom properties, with a guard test, so the palette has one definition instead of two hand-synchronised copies. Worth doing on its own merits. | Planned |
+| 5.2 | Dark theme — operator console | `/admin/*` first: it is where a person spends hours, and it has a real component library rather than inline class strings. | Planned |
+| 5.3 | Dark theme — public site | Higher care: prerendered pages, and the light editorial identity is deliberate. Needs an explicit operator decision. | Planned |
+
+**Dark theme (5.1–5.3), added 2026-08-16 at the operator's request.**
+
+> Design of record: [dark theme spec](superpowers/specs/2026-08-16-dark-theme-design.md).
+
+This is **not** reopening the decision that produced the light identity. What the 2026-08-14 roadmap
+deleted was *dead config* — `darkMode: "class"` with `<html class="dark">` shipped permanently, so
+every `dark:` variant was always on and the shell painted grey before React mounted. That deletion
+said a later dark mode would be "a token swap, not a rewrite", and this exercises the option it left
+open.
+
+**The premise needs fixing first, which is why 5.1 exists.** Checked 2026-08-16: `index.css` defines
+42 `--cw-*` properties and `tailwind.config.ts` defines the same palette again as flat hex literals.
+They agree because someone typed the values twice. Swapping the variables under a media query would
+restyle the body and leave every `bg-paper` / `text-ink` / `text-accent` class light — worse than no
+dark theme at all. **5.1 is a prerequisite, and it is worth shipping even if 5.2 and 5.3 never are.**
+
+Two findings already in hand: a complete dark palette drafted and checked against the production
+tokens (the deep red accent `#B03A2E` goes muddy on a dark ground and needs `#E0705E`), and the
+observation that severity here is never carried by colour alone — `SeverityMark` uses a numeral and
+an `sr-only` span — which removes the usual expensive part of theming a status UI.
+
 ## Design Principles
 
 - **Non-partisan** — facts over politics, sunlight as disinfectant
