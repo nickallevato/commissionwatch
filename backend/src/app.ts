@@ -79,7 +79,47 @@ const corsDelegate: CorsOptionsDelegate<Request> = (req, callback) => {
   callback(null, options);
 };
 
-app.use(helmet());
+/**
+ * Roadmap 6.4: nginx owns the security headers that must be identical on
+ * every response, HTML document and API alike, because nginx is the only
+ * layer in the request path for both — this middleware never sees a request
+ * for `/`, so it can never be the layer that sets HSTS on the document no
+ * matter how it is configured. Helmet used to set its own, weaker, second
+ * copy of the same five headers, which is what produced duplicate
+ * `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy` and
+ * `X-Content-Type-Options` on `GET /api/health` (`docs/superpowers/specs/
+ * 2026-08-16-security-review.md`, findings 1-2).
+ *
+ * Disabled here, now owned exclusively by frontend/nginx.conf:
+ *   contentSecurityPolicy  — nginx's policy is the stricter one on every
+ *                            directive both declared (see the comparison in
+ *                            frontend/nginx.conf) and covers the routes
+ *                            Helmet cannot
+ *   referrerPolicy         — nginx sends strict-origin-when-cross-origin
+ *                            (Helmet's no-referrer default); see nginx.conf
+ *                            for why that one directive was NOT tightened
+ *   xFrameOptions          — nginx sends DENY; Helmet's default is the
+ *                            weaker SAMEORIGIN
+ *   xContentTypeOptions    — identical value (nosniff) either way; disabled
+ *                            here purely to stop the duplicate header
+ *   strictTransportSecurity — nginx now sends this on every response,
+ *                            document included, which Helmet never could
+ *
+ * Left enabled — Helmet is still the only layer that sets these, nginx does
+ * not, and none of them conflicts with anything nginx sends:
+ *   crossOriginOpenerPolicy, crossOriginResourcePolicy, originAgentCluster,
+ *   xDnsPrefetchControl, xDownloadOptions, xPermittedCrossDomainPolicies,
+ *   xPoweredBy (hides the header, no conflict), xXssProtection
+ */
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    referrerPolicy: false,
+    xFrameOptions: false,
+    xContentTypeOptions: false,
+    strictTransportSecurity: false,
+  }),
+);
 app.use(cors(corsDelegate));
 
 /**

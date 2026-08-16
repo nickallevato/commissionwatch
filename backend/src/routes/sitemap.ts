@@ -65,6 +65,7 @@ const STATIC_PATHS = [
   "/bot",
   "/methodology",
   "/privacy",
+  "/accessibility",
   "/subscribe",
 ] as const;
 
