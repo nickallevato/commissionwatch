@@ -147,3 +147,23 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   a minute, and the limit sits deliberately above what a scripted client needs so it nudges bulk
   users toward `/api/data/*.csv` instead of punishing them. On a transparency site a limit set too
   low is its own failure.
+- **08:39Z** — Tree clean of my own work; head `b8a9015` matches `origin/main`, deploy in flight for
+  the v7 and backup commits. Backend agent is mid-6.10 (three files touched) so I ran **no** backend
+  suite this tick — measuring a tree someone is editing produces a number that means nothing either
+  way.
+
+  Filled the free frontend slot with **7.2 + 7.4** rather than the higher-risk 6.9. Reasoning, since
+  it departs from strict risk-ranking: 6.9 is an end-to-end browser test of the review→publish path
+  and would need the test database, which the backend agent is currently using — two agents
+  contending for one Postgres is how a suite starts failing for reasons that have nothing to do with
+  the code. 6.9 goes to the backend slot when it frees.
+
+  **Policy decisions made, not delegated.** The agent is writing up decisions I made: two stability
+  tiers with experimental surfaces obliged to say so; a withdrawal announced on the corrections log
+  rather than 404'd, because withdrawing data people depend on is the same category of act as
+  changing a published claim; 90 days' notice; additive changes explicitly not breaking so the
+  policy cannot be used to block ordinary work; and bus factor stated as **one** rather than implied
+  away by writing "we". The parity matrix supplies the reason this is urgent — ProPublica's Congress
+  API is dead and Open States has been absorbed into commercial Plural. A newsroom and a flagship
+  civic-data project both failed to keep a public API alive, and this project invites people to
+  build on four.
