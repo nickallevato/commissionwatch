@@ -56,32 +56,64 @@ carefully the file is written.
 
 ## The DORA four keys — what is measurable today, and what isn't
 
-Measured 2026-08-16 by `docs/superpowers/specs/2026-08-16-maturity-review.md` §3, against the Gitea
-Actions API. Restated here because MTTR's status changes with this directory's existence (from
-"unmeasurable" to "not yet measured, but now possible"), even though no number changes.
+Re-measured 2026-08-16, directly against the Gitea Actions API (`${GITEA_URL}/api/v1/repos/${GITEA_REPO}/actions/runs`,
+paged to exhaustion, filtered to `deploy.yml@refs/heads/main`). This supersedes the figures first
+taken by `docs/superpowers/specs/2026-08-16-maturity-review.md` §3 and restated by
+`2026-08-16-maturity-review-2.md`, both of which were already several hours and several deploys old
+by the time this file was last touched. MTTR's status is unchanged from "unmeasurable" to "not yet
+measured, but now possible" by this directory's existence, not by anything below.
 
 | DORA key | Measurable today? | Value, and why |
 |---|---|---|
-| **Deployment frequency** | **Yes** | 244 `deploy.yml` runs on `push`; 88 concluded `success`. Elite band. |
-| **Change failure rate** | **Yes** | All-time: 84 failures / 172 concluded (excluding 71 `cancelled`) = **48.8%**. Last 100 deploy runs: 11 / 70 concluded = **15.7%**. DORA elite is 0–5%, high 10–15% — this project sits at the medium band on its best recent window. |
+| **Deployment frequency** | **Yes** | 257 `deploy.yml` runs on `push` (1 still in progress); 96 concluded `success`. Elite band, unchanged in character from the earlier count. |
+| **Change failure rate** | **Yes** | All-time: 84 failures / 180 concluded (excluding 76 `cancelled`) = **46.7%**. Last 100 concluded deploy runs: 11 / 67 = **16.4%**. DORA elite is 0–5%, high 10–15% — this project sits at the medium band on its best recent window, both essentially unchanged from the prior measurement (48.8% and 15.7%). |
 | **Lead time for changes** | **Partially** | Computable in principle from commit time → deploy run completion, but nothing computes it today, and see *Cancelled runs*, below, for why the naive per-commit figure would be wrong. |
 | **Mean time to restore (MTTR)** | **No, not yet** | This directory now exists and the *reason* it didn't exist is fixed, but neither backfilled incident has a complete start→resolution pair, so there is nothing to aggregate yet. MTTR becomes measurable the next time an incident is recorded with real timestamps at the time it happens. |
 
-### Cancelled runs distort deployment frequency's sibling metric and lead time
+### Cancelled runs distort deployment frequency's sibling metric and lead time — and the fix made it worse, not better
 
-**29% of recent deploy runs are `cancelled`, and that has a known, diagnosed cause worth recording
-rather than treating as noise.** `deploy.yml` runs under a concurrency group, so pushing again while
-a deploy is still in flight cancels the in-flight run rather than queuing behind it. During periods
-of rapid iteration — commits landing minutes apart — each push can cancel the deploy the previous
-push had just triggered, so a `cancelled` run usually means "superseded by a newer push," not "this
-deploy broke." `docs/STATUS.md:250` already carries this reasoning, restated here because it is the
-reason lead time is only "partially" measurable above: a naive per-commit lead-time figure would
-count every superseded commit as never having deployed, when in fact its successor deployed on its
-behalf almost immediately. **This project's own development loop changed its push behaviour once
-this pattern was diagnosed** — batching related changes rather than pushing on every small commit —
-specifically because repeated pushes were seen cancelling their own in-flight deploys.
+**33% of the last 100 deploy runs are `cancelled`**, up from the 29% this file previously cited as
+the problem — and that 29%→33% move is itself now superseded by a cleaner, directly-measured
+before/after split around the moment the fix was decided.
 
-The 71 all-time `cancelled` runs are excluded from the change-failure-rate denominator above for the
-same reason: a cancelled run is not a caught bad change and folding it into the failure count would
-overstate how often the pipeline is actually catching something wrong, rather than being superseded
-by something newer.
+`deploy.yml` runs under a concurrency group, so pushing again while a deploy is still in flight
+cancels the in-flight run rather than queuing behind it. During periods of rapid iteration — commits
+landing minutes apart — each push can cancel the deploy the previous push had just triggered, so a
+`cancelled` run usually means "superseded by a newer push," not "this deploy broke."
+`docs/STATUS.md:250` already carries this reasoning, restated here because it is the reason lead time
+is only "partially" measurable above: a naive per-commit lead-time figure would count every
+superseded commit as never having deployed, when in fact its successor deployed on its behalf almost
+immediately.
+
+**This project's own development loop changed its push behaviour once this pattern was
+diagnosed** — batching related changes rather than pushing on every small commit — specifically
+because repeated pushes were seen cancelling their own in-flight deploys. The batching decision was
+made and recorded around 08:20Z on 2026-08-16 (`docs/superpowers/plans/2026-08-16-maturity-loop.md`,
+tick "08:20Z"). Measured directly against the Gitea API rather than assumed:
+
+| Window | Cancelled | Concluded runs | Rate |
+|---|---:|---:|---:|
+| Last 100 concluded runs **before** 08:20Z | 30 | 100 | **30.0%** |
+| Every concluded run **since** 08:20Z | 4 | 11 | **36.4%** |
+
+**The rate did not improve after the batching decision — it got worse, on the numbers available.**
+This is worth recording plainly rather than softened: a fix the project's own log describes as
+adopted specifically to stop this did not stop it in the window measured so far.
+
+Two honest caveats belong next to that number rather than instead of it. First, the post-decision
+sample is **11 runs** — small enough that four cancellations either way would swing the rate by
+roughly nine points, so this is not strong evidence of the fix failing, only evidence that it has
+not (yet) shown up as working. Second, "cancelled" here still means what it meant before: usually a
+push superseded by a newer one, not a broken deploy — so a higher cancellation rate in a small,
+recent window is also consistent with a burst of legitimately rapid, correct iteration (this loop
+landed roughly a dozen items in the hours around the decision) rather than a regression in push
+discipline. Both readings are consistent with the same eleven data points, and the sample is too
+small to choose between them. What can be said without qualification is that **the rate has not
+dropped**, so the claim that batching "fixed" the cancellation pattern is not supported by the metric
+it sits next to, and should not be repeated as settled until a larger post-decision sample says
+otherwise.
+
+The 76 all-time `cancelled` runs are excluded from the change-failure-rate denominator above for the
+same reason as before: a cancelled run is not a caught bad change, and folding it into the failure
+count would overstate how often the pipeline is actually catching something wrong, rather than being
+superseded by something newer.
