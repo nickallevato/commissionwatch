@@ -188,6 +188,16 @@ export function parseSnapshotRun(raw: unknown): SnapshotRun {
  * outcome in the same second produce one row with `cycles = 2`, because the
  * unique index over `(run_day, outcome)` turns the second insert into an update
  * rather than into a duplicate or an error.
+ *
+ * **`snapshot_id` follows the newest cycle, for the same reason `detail` does.**
+ * The collapsed row is one fact about a day, so it has to name the snapshot that
+ * currently represents that day. Keeping the first id was harmless while the
+ * scheduler was the only writer — it takes at most one snapshot per day — but
+ * `npm run export:snapshot -- --force` can supersede that day's snapshot, and a
+ * `taken` row still naming the superseded one would leave this ledger and
+ * `export_snapshots` asserting different things about the same day. The CHECK
+ * `export_snapshot_runs_taken_names_snapshot` still refuses a `taken` row that
+ * names nothing, so this can narrow the claim but never erase it.
  */
 export async function recordSnapshotRun(
   db: Knex,
@@ -209,6 +219,8 @@ export async function recordSnapshotRun(
     .merge({
       cycles: db.raw("export_snapshot_runs.cycles + 1"),
       last_at: db.fn.now(),
+      // The snapshot that represents this day now — see the header.
+      snapshot_id: entry.snapshotId ?? null,
       // The newest detail wins: for a repeated failure the current error is more
       // useful than the first one, and for a skip the two are identical.
       detail: entry.detail ?? null,

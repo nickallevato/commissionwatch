@@ -1,5 +1,6 @@
 import db from "../config/database";
-import { listSnapshots, takeSnapshot } from "../services/export/archive";
+import { listSnapshots } from "../services/export/archive";
+import { parseSnapshotArgs, takeManualSnapshot } from "../services/export/manual-snapshot";
 
 /**
  * Record what the export holds right now, so the archive can answer for today.
@@ -11,6 +12,7 @@ import { listSnapshots, takeSnapshot } from "../services/export/archive";
  *
  *   npm run export:snapshot
  *   npm run export:snapshot -- --note "before the March bulk publish"
+ *   npm run export:snapshot -- --force
  *   npm run export:snapshot -- --list
  *
  * Cheap and safe to run at any time. It reads every dataset through the same
@@ -29,39 +31,17 @@ import { listSnapshots, takeSnapshot } from "../services/export/archive";
  * one snapshot per UTC day while `dated_export_archive` is on and records every
  * skipped cycle in `export_snapshot_runs`. This command stays for the case above:
  * recording before the flag goes on, and taking an extra snapshot with a `--note`
- * around a deliberate change. Running it on a day the scheduler has already
- * recorded is harmless — the scheduler's own next cycle sees the day is done and
- * no-ops — but it does add a second snapshot for that day, and the archive
- * resolves a date to the *latest* snapshot on or before it.
+ * around a deliberate change.
+ *
+ * On a day that already has a snapshot it **refuses**, naming the one that holds
+ * the day, and `--force` supersedes it deliberately. The archive resolves a date
+ * to the *latest* snapshot on or before it, so a second snapshot silently becomes
+ * that day's answer; see `services/export/manual-snapshot.ts` for why the refusal
+ * is the default and why the forced path writes the ledger row itself.
  */
 
-interface Args {
-  note: string | null;
-  list: boolean;
-}
-
-function parseArgs(argv: string[]): Args {
-  const args: Args = { note: null, list: false };
-  for (let index = 0; index < argv.length; index += 1) {
-    const flag = argv[index];
-    if (flag === "--list") {
-      args.list = true;
-      continue;
-    }
-    if (flag === "--note") {
-      const value = argv[index + 1];
-      if (value === undefined || value.trim() === "") {
-        throw new Error("--note needs a reason; omit the flag rather than passing an empty one");
-      }
-      args.note = value.trim();
-      index += 1;
-    }
-  }
-  return args;
-}
-
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseSnapshotArgs(process.argv.slice(2));
 
   if (args.list) {
     const snapshots = await listSnapshots(db);
@@ -81,8 +61,23 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { snapshot, datasets } = await takeSnapshot(db, { note: args.note });
+  const result = await takeManualSnapshot(db, { note: args.note, force: args.force });
+  if (result.outcome !== "taken") {
+    // Refusal is a failed command, not a quiet no-op: an operator scripting this
+    // must be able to tell "recorded" from "declined to record" by exit code.
+    console.error(result.reason);
+    process.exitCode = 1;
+    return;
+  }
+
+  const { snapshot, datasets } = result;
   const rows = datasets.reduce((total, dataset) => total + dataset.row_count, 0);
+  if (result.superseded !== null) {
+    console.log(
+      `Superseded snapshot ${result.superseded.id} (taken at ` +
+        `${result.superseded.taken_at.toISOString()}) as the archive's answer for ${result.day}.`,
+    );
+  }
   console.log(
     `Snapshot ${snapshot.id} taken at ${snapshot.taken_at.toISOString()}: ` +
       `${datasets.length} dataset(s), ${rows} row(s).`,
