@@ -99,3 +99,37 @@ describe("workflows keep the release-drift check switched on", () => {
     }
   });
 });
+
+/**
+ * `ci-backend` must audit its production dependencies, same as `ci-frontend`
+ * already does. A gate that only one of the two jobs runs is a gate a
+ * backend-only change never has to pass — and is deletable by an unrelated
+ * YAML edit while every run stays green, same failure mode as the
+ * release-drift check above.
+ */
+describe("ci-backend runs the production dependency audit", () => {
+  function backendJob(yaml: string): string {
+    const start = yaml.indexOf("ci-backend:");
+    assert.notEqual(start, -1, "deploy.yml has no ci-backend job");
+    const end = yaml.indexOf("ci-frontend:", start);
+    assert.notEqual(end, -1, "deploy.yml has no ci-frontend job after ci-backend");
+    return yaml.slice(start, end);
+  }
+
+  it("ci-backend has an audit step matching ci-frontend's flags", () => {
+    const job = backendJob(read("deploy.yml"));
+    assert.match(
+      job,
+      /npm audit --audit-level=high --omit=dev/,
+      "ci-backend does not run `npm audit --audit-level=high --omit=dev` — the same gate " +
+        "ci-frontend runs on its production dependencies is missing on the backend.",
+    );
+  });
+
+  it("the backend audit step runs before typecheck, mirroring ci-frontend's placement", () => {
+    const job = backendJob(read("deploy.yml"));
+    const auditIdx = job.indexOf("npm audit --audit-level=high --omit=dev");
+    const typecheckIdx = job.indexOf("npm run typecheck");
+    assert.ok(auditIdx !== -1 && typecheckIdx !== -1 && auditIdx < typecheckIdx);
+  });
+});

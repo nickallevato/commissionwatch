@@ -81,6 +81,21 @@ jobs:
           set -o pipefail
           npm ci 2>&1 | tee -a /tmp/ci-output.txt
 
+      # --omit=dev: a build-time advisory in a dev dependency (a linter, a test
+      # runner) never ships to a reader — it runs on a developer's machine or in
+      # this CI container, not in the API served at commissionwatch.bmux.sh.
+      # Failing the build on that would train everyone to ignore this check.
+      # Only what ships to the running backend counts here.
+      #
+      # --audit-level=high: moderates don't block. A high or critical advisory
+      # in a production dependency should break the build.
+      - name: Audit production dependencies
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high --omit=dev 2>&1 | tee -a /tmp/ci-output.txt
+
       - name: Typecheck
         working-directory: backend
         shell: bash
