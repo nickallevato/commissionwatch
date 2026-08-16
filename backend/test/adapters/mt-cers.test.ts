@@ -12,6 +12,7 @@ import {
   advanceSession,
   cersExchangeKey,
   createMtCersAdapter,
+  rotateWindow,
   dataTablesQuery,
   expectJson,
   isEmptyBody,
@@ -49,6 +50,9 @@ function buildAdapter(overrides: CersAdapterOptions = {}) {
     maxCandidatesPerTarget: 2,
     maxReportsPerCandidate: 2,
     now: () => new Date('2026-08-10T05:28:15.261Z'),
+    // Pinned: the tape recorded a specific set of candidates, and a window that
+    // moved with the calendar would make this suite pass or fail by date.
+    rosterOffset: 0,
     ...overrides,
   });
 }
@@ -382,5 +386,50 @@ describe('mt-cers response narrowing', () => {
     expect(query.get('iDisplayLength')).toBe('100');
     expect(query.get('iColumns')).toBe('9');
     expect(query.get('mDataProp_8')).toBe('8');
+  });
+});
+
+
+describe('rotateWindow', () => {
+  const roster = Array.from({ length: 42 }, (_, i) => i);
+
+  it('takes the first slice at offset zero', () => {
+    expect(rotateWindow(roster, 5, 0)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('moves the window, so a later candidate is not unreachable', () => {
+    // The defect this replaced: the cap took the first N of an alphabetically
+    // ordered roster, so candidate six of forty-two could never be swept.
+    expect(rotateWindow(roster, 5, 5)).toEqual([5, 6, 7, 8, 9]);
+  });
+
+  it('wraps past the end rather than returning a short window', () => {
+    expect(rotateWindow(roster, 5, 40)).toEqual([40, 41, 0, 1, 2]);
+  });
+
+  it('reaches every candidate across a cycle of sweeps', () => {
+    // The guarantee that matters. Not that a cycle sees each candidate exactly
+    // once — the roster can change length between sweeps — but that none is
+    // permanently invisible.
+    const seen = new Set<number>();
+    for (let sweep = 0; sweep < 9; sweep += 1) {
+      for (const candidate of rotateWindow(roster, 5, sweep * 5)) seen.add(candidate);
+    }
+    expect(seen.size).toBe(42);
+  });
+
+  it('returns the whole list when it is smaller than the window', () => {
+    expect(rotateWindow([1, 2], 5, 99)).toEqual([1, 2]);
+  });
+
+  it('handles an empty roster and a zero window without inventing rows', () => {
+    expect(rotateWindow([], 5, 3)).toEqual([]);
+    expect(rotateWindow(roster, 0, 3)).toEqual([]);
+  });
+
+  it('never returns a different length for the same inputs', () => {
+    for (let offset = 0; offset < 50; offset += 1) {
+      expect(rotateWindow(roster, 5, offset).length).toBe(5);
+    }
   });
 });

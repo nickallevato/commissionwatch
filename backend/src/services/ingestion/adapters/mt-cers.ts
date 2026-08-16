@@ -551,28 +551,58 @@ export interface CersAdapterOptions {
   maxReportsPerCandidate?: number;
   /** Rows requested per list page. */
   pageSize?: number;
+  /**
+   * Pins the roster window instead of deriving it from the day.
+   *
+   * For fixture-backed tests, which record a specific set of candidates: a
+   * window that moved with the calendar would make those suites pass or fail
+   * depending on the date they ran.
+   */
+  rosterOffset?: number;
   now?: () => Date;
 }
 
 /**
  * The caps, and why they are this small.
  *
- * At one request every two seconds a sweep's duration is arithmetic, not a
- * guess: a report costs five requests (open it, then one per schedule), a
- * candidate costs two plus its reports, and a target costs two plus its
- * candidates. Five candidates × three reports × four schedules across two
- * targets is roughly 300 requests, about ten minutes — which fits inside the
- * scheduler's sweep timeout. Twenty-five × twelve, the first draft, is over
- * three thousand requests and close to two hours: it would have timed out every
- * night, left its jobs queued, and looked like a broken scraper rather than an
- * unreasonable setting.
+ * A sweep's duration is arithmetic, not a guess: a report costs five requests
+ * (open it, then one per schedule), a candidate costs two plus its reports, and
+ * a target costs two plus its candidates. Five candidates × three reports ×
+ * four schedules across two targets is roughly 300 requests. Twenty-five ×
+ * twelve, the first draft, is over three thousand requests: it would have timed
+ * out every night, left its jobs queued, and looked like a broken scraper
+ * rather than an unreasonable setting.
  *
- * **Known limitation.** The cap slices the roster in the order CERS returns it,
- * which is alphabetical, so a target with more candidates than the cap always
- * sweeps the same ones and never reaches the rest. That is a real gap and it is
- * recorded here rather than hidden behind a comfortable default; closing it
- * needs a cursor in `ingestion_sources.config`, which is separate work.
+ * **These numbers moved on 2026-08-16** when the delay went from two seconds to
+ * five — see `MIN_DELAY_MS`. Those 300 requests are now about twenty-five
+ * minutes rather than ten, which is *longer than the scheduler's fifteen-minute
+ * sweep timeout*. That is survivable and not a defect: `discover` is one queued
+ * job, the deadline stops the sweep rather than the job, and the carry-forward
+ * exists precisely so a source larger than one window fills in across runs. It
+ * is written down here because the previous version of this comment claimed the
+ * work fit in the window, and a stale reassurance is worse than no comment.
+ *
+ * **The roster window rotates** — see {@link CersAdapter.rosterWindow}. The cap
+ * used to slice the roster in the order CERS returns it, which is alphabetical,
+ * so a target with more candidates than the cap swept the same five forever and
+ * the rest were unreachable by any number of sweeps.
  */
+/**
+ * The slice of a list this sweep walks, rotated by an offset.
+ *
+ * Module-level and pure so it can be proved exhaustively without a network
+ * fixture. The tape-backed suite cannot test this: it only ever recorded the
+ * candidates the *old* code could reach, and re-recording to cover a rotation
+ * would mean forty-two more requests to a state agency to prove an arithmetic
+ * property. Arithmetic is cheaper to test as arithmetic.
+ */
+export function rotateWindow<T>(items: readonly T[], size: number, offset: number): T[] {
+  if (size <= 0 || items.length === 0) return [];
+  if (items.length <= size) return [...items];
+  const start = ((offset % items.length) + items.length) % items.length;
+  return [...items.slice(start), ...items.slice(0, start)].slice(0, size);
+}
+
 const DEFAULT_MAX_CANDIDATES = 5;
 const DEFAULT_MAX_REPORTS = 3;
 const DEFAULT_PAGE_SIZE = 100;
@@ -617,6 +647,7 @@ export class CersAdapter implements SourceAdapter {
   private readonly targets: readonly CersSweepTarget[];
   private readonly schedules: readonly CersSchedule[];
   private readonly maxCandidates: number;
+  private readonly rosterOffset: number | undefined;
   private readonly maxReports: number;
   private readonly pageSize: number;
   private readonly now: () => Date;
@@ -649,6 +680,7 @@ export class CersAdapter implements SourceAdapter {
     this.targets = options.targets ?? DEFAULT_SWEEP_TARGETS;
     this.schedules = options.schedules ?? ALL_SCHEDULES;
     this.maxCandidates = options.maxCandidatesPerTarget ?? DEFAULT_MAX_CANDIDATES;
+    this.rosterOffset = options.rosterOffset;
     this.maxReports = options.maxReportsPerCandidate ?? DEFAULT_MAX_REPORTS;
     this.pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
     this.now = options.now ?? (() => new Date());
@@ -731,9 +763,9 @@ export class CersAdapter implements SourceAdapter {
         if (page.aaData.length === 0 || roster.length >= page.iTotalRecords) break;
       }
 
-      const candidates = roster
-        .filter((candidate) => this.isWithin(candidate, minimumYear))
-        .slice(0, this.maxCandidates);
+      const candidates = this.rosterWindow(
+        roster.filter((candidate) => this.isWithin(candidate, minimumYear)),
+      );
 
       for (const candidate of candidates) {
         const reports = await this.loadReports(candidate.candidateId);
@@ -748,6 +780,33 @@ export class CersAdapter implements SourceAdapter {
     }
 
     return refs;
+  }
+
+  /**
+   * The slice of the roster this sweep walks, rotated by the day.
+   *
+   * The cap has to exist — a statewide filing system is large and an unbounded
+   * sweep is one nobody authorised. Taking the *first* N was the defect: CERS
+   * returns the roster alphabetically, so candidate number six was unreachable
+   * by any number of sweeps, forever.
+   *
+   * Rotating by the day number covers the whole roster over a cycle at exactly
+   * the same cost per sweep — the gentleness is unchanged, only the offset
+   * moves. Derived from the clock rather than persisted in
+   * `ingestion_sources.config`, which is what an earlier note proposed: a
+   * cursor would need the adapter to reach the database, and this adapter is
+   * deliberately pure and injectable. The clock is already injected.
+   *
+   * **What this does not promise.** It is a rotation, not a bookmark. If the
+   * roster changes length between sweeps the window lands somewhere slightly
+   * different, so a cycle is not a guarantee that every candidate was seen
+   * exactly once. What it does guarantee is the thing that was broken: no
+   * candidate is permanently unreachable.
+   */
+  private rosterWindow(roster: CersCandidate[]): CersCandidate[] {
+    const offset =
+      this.rosterOffset ?? Math.floor(this.now().getTime() / 86_400_000) * this.maxCandidates;
+    return rotateWindow(roster, this.maxCandidates, offset);
   }
 
   private isWithin(candidate: CersCandidate, minimumYear: number): boolean {
