@@ -399,9 +399,7 @@ export function MeetingDetailPage() {
             ))}
           </div>
         ) : agendaQuery.isError ? (
-          <p className="mt-4 text-sm text-muted">
-            The agenda for this meeting could not be loaded.
-          </p>
+          <Absence reason="request-failed" subject="the agenda for this meeting" />
         ) : agendaItems && agendaItems.length > 0 ? (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[34rem] border-collapse text-left">
@@ -476,9 +474,7 @@ export function MeetingDetailPage() {
             </table>
           </div>
         ) : (
-          <p className="mt-4 text-sm text-muted">
-            No agenda items on file for this meeting.
-          </p>
+          <Absence reason="not-yet-ingested" subject="agenda items" />
         )}
 
         {unlinkedVotes > 0 && (

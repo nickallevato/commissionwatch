@@ -348,6 +348,10 @@ describe("the API surface the page advertises is the one that is mounted", () =>
     "/api/notifications": "operator-only; requireOperator on the router's first line",
     "/api/list-unsubscribe": "acted on from an email header, not browsed",
     "/sitemap.xml": "not JSON and not an API; it is named in robots.txt where crawlers look",
+    "/api":
+      "not a mount at all — the JSON 404 fall-through, registered last so it only " +
+      "sees paths no router matched. Advertising it would list the absence of an " +
+      "endpoint as an endpoint.",
   };
 
   it("lists every public mount, or says why one is absent", () => {

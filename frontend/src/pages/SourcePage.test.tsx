@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, delay } from "msw";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -155,6 +155,20 @@ describe("SourcePage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/no published source has this address/i)).toBeInTheDocument();
     expect(screen.queryByText(/withheld|unpublished meeting|does not exist/i)).toBeNull();
+  });
+
+  it("announces the wait rather than rendering it as inert text", () => {
+    server.use(
+      http.get("/api/source/:sha256", async () => {
+        await delay("infinite");
+        return HttpResponse.json({});
+      }),
+    );
+    renderAt(`/source/${SOURCE_SHA_WHOLE}`);
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Loading…");
+    expect(status).toHaveAttribute("aria-live", "polite");
   });
 });
 

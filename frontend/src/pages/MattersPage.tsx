@@ -136,7 +136,9 @@ export function MattersPage() {
       </div>
 
       {isLoading ? (
-        <p className="mt-8 text-sm text-ink-soft">Loading matters…</p>
+        <p className="mt-8 text-sm text-ink-soft" role="status" aria-live="polite">
+          Loading matters…
+        </p>
       ) : isError ? (
         /* A failure of ours, not an empty record — the distinction is the whole
            reason `<Absence>` exists. See its header. */

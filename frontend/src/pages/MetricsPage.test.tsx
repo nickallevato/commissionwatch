@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, delay } from "msw";
 import { renderWithProviders, screen } from "@/lib/test-utils";
 import { MetricsPage } from "./MetricsPage";
 import { server } from "@/mocks/server";
@@ -111,6 +111,20 @@ describe("MetricsPage", () => {
 
     expect(await screen.findByText(/failure on our side/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /the archive/i })).not.toBeInTheDocument();
+  });
+
+  it("announces the wait rather than rendering it as inert text", () => {
+    server.use(
+      http.get("/api/metrics", async () => {
+        await delay("infinite");
+        return HttpResponse.json(metrics);
+      }),
+    );
+    renderWithProviders(<MetricsPage />);
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Loading…");
+    expect(status).toHaveAttribute("aria-live", "polite");
   });
 
   it("states that the figures are aggregates and identify no record", async () => {

@@ -192,8 +192,37 @@ describe("StatusPage", () => {
     });
     renderWithProviders(<StatusPage />);
 
-    expect(await screen.findByText("failed")).toBeInTheDocument();
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("0 collected · 3 failed")).toBeInTheDocument();
+  });
+
+  /**
+   * The raw `ingestion_runs.status` enum ("running" | "succeeded" | "partial"
+   * | "failed") is a schema detail, not something a public, non-expert reader
+   * should have to parse. `partial` in particular must not read as success:
+   * it means some of the run's work succeeded and some did not.
+   */
+  it("labels a run's raw status in plain English, and does not call partial a success", async () => {
+    serve({
+      sources: [
+        source({
+          adapter_key: "partial-adapter",
+          verdict: "suspect",
+          latest_run: {
+            status: "partial",
+            started_at: "2026-08-09T07:17:00.000Z",
+            finished_at: "2026-08-09T07:19:00.000Z",
+            records: 4,
+            failures: 2,
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<StatusPage />);
+
+    expect(await screen.findByText("Partly succeeded")).toBeInTheDocument();
+    expect(screen.queryByText("partial")).toBeNull();
+    expect(screen.queryByText("Succeeded")).toBeNull();
   });
 
   it("says No sweep yet rather than inventing a timestamp", async () => {

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "./App";
 import { server } from "@/mocks/server";
+import { NOT_FOUND_HEADING } from "./pages/NotFoundPage";
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
@@ -66,14 +67,14 @@ describe("App shell", () => {
 
   it("renders the home page at the index route", () => {
     renderAt("/");
-    expect(screen.queryByText("Page Not Found")).toBeNull();
+    expect(screen.queryByText(NOT_FOUND_HEADING)).toBeNull();
   });
 });
 
 describe("App routing", () => {
   it.each(ROUTED_NAV_PATHS)("resolves %s to a page, not the 404", (path) => {
     renderAt(path);
-    expect(screen.queryByText("Page Not Found")).toBeNull();
+    expect(screen.queryByText(NOT_FOUND_HEADING)).toBeNull();
   });
 
   it("renders the votes record at /votes", () => {
@@ -90,7 +91,7 @@ describe("App routing", () => {
 
   it("renders the 404 page for an unknown path", () => {
     renderAt("/no-such-page");
-    expect(screen.getByText("Page Not Found")).toBeInTheDocument();
+    expect(screen.getByText(NOT_FOUND_HEADING)).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Go back home" }),
     ).toBeInTheDocument();
@@ -100,7 +101,7 @@ describe("App routing", () => {
 describe("App product boundary", () => {
   it("does not route /hub to a page", () => {
     renderAt("/hub");
-    expect(screen.getByText("Page Not Found")).toBeInTheDocument();
+    expect(screen.getByText(NOT_FOUND_HEADING)).toBeInTheDocument();
   });
 
   it.each(["/", "/hub", ...ROUTED_NAV_PATHS])(

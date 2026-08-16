@@ -287,10 +287,56 @@ function region(name: string) {
 
 describe("HomePage front page", () => {
   describe("lead finding", () => {
-    it("renders the kicker, the display headline and the dek", async () => {
+    /**
+     * This block used to assert the h1 read "No finding has been published yet"
+     * *while the mocked `/api/anomalies` returned four flags*. It passed,
+     * because the lead column rendered a hardcoded constant unconditionally
+     * even though this same component already imported and called
+     * `useAnomalies` for its rail. The test was pinning the defect: the front
+     * page would have gone on reporting no findings while `/findings` and the
+     * feeds carried them.
+     *
+     * So the assertions are inverted rather than removed, and the empty case is
+     * now tested explicitly — which is what the old test was *believed* to be
+     * doing.
+     */
+    it("leads with the most recently published finding", async () => {
       await renderFrontPage();
 
       expect(screen.getByText("Latest finding")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", {
+          level: 1,
+          name: flagTypeLabels["missing_minutes"],
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("No cancellation notice was filed."),
+      ).toBeInTheDocument();
+    });
+
+    /**
+     * The ordering decision, pinned. `f-medium` is the newest flag
+     * (2024-12-30); `f-critical` is the most severe. The lead takes the newest.
+     *
+     * A front page ordered by severity would pin the worst thing ever found to
+     * the masthead indefinitely and would be editorialising by ordering. The
+     * severity-ranked view is the rail beside it, which is asserted separately.
+     */
+    it("takes the newest finding, not the most severe one", async () => {
+      await renderFrontPage();
+
+      const headline = screen.getByTestId("lead-finding-headline");
+      expect(headline).toHaveTextContent(flagTypeLabels["missing_minutes"]);
+      expect(headline).not.toHaveTextContent(flagTypeLabels["quorum_issue"]);
+    });
+
+    it("says so honestly when nothing has been published", async () => {
+      server.use(
+        http.get("/api/anomalies", () => HttpResponse.json({ data: [], total: 0 })),
+      );
+      await renderFrontPage();
+
       expect(
         screen.getByRole("heading", {
           level: 1,

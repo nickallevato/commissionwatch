@@ -12,7 +12,7 @@ import type {
 } from "@/types";
 
 /* ---------------------------------------------------------------------------
-   The lead column, with no finding in it
+   The lead column, and the fallback for when there is no finding in it
    ------------------------------------------------------------------------- */
 
 /**
@@ -29,18 +29,35 @@ interface FrontPageFinding {
  * No finding has been published, and this says so.
  *
  * This used to be called `PLACEHOLDER_FINDING`, which invited exactly the wrong
- * repair: filling a placeholder in. There is nothing to fill in. Findings do
- * not exist in the data model — there is no `findings` table, no `/findings`
- * endpoint and no hook — so any headline here would be a claim this site
- * cannot source, and the subject of a front-page claim on this site is a real,
- * living, named official. That is the one thing the project must never do by
- * accident.
+ * repair: filling a placeholder in. There is nothing to fill in. Any headline
+ * here would otherwise be a claim this site cannot source, and the subject of a
+ * front-page claim on this site is a real, living, named official. That is the
+ * one thing the project must never do by accident.
  *
- * So this is the honest empty state and it is meant to be rendered, not
- * replaced with prose. W3 owns the findings table, the endpoint and the hook;
- * when they land, this constant is deleted and the lead column reads the latest
- * *published* finding from the hook. Until then it says, in as many words, that
- * there is no finding, and points the reader at the record instead.
+ * ## Corrected 2026-08-16: it is now a fallback, not the only thing rendered
+ *
+ * This docblock used to say findings "do not exist in the data model — there is
+ * no `findings` table, no `/findings` endpoint and no hook", and that "when they
+ * land, this constant is deleted and the lead column reads the latest
+ * *published* finding from the hook."
+ *
+ * They landed. `anomaly_flags` is the table, `GET /api/anomalies` is the
+ * endpoint, `useAnomalies` is the hook — and this very file already imported and
+ * called it, for the flags rail. Only the lead column was never wired, so it
+ * rendered this constant **unconditionally**.
+ *
+ * That made it a latent lie rather than an honest absence: correct only while
+ * zero findings are published, and wrong the moment the first one is. The front
+ * page would have gone on saying no finding had been published while `/findings`
+ * and the feeds carried one. A site whose purpose is to surface findings must
+ * not under-report its own.
+ *
+ * **It composes nothing.** The lead renders `flagTypeLabels[flag_type]` as the
+ * headline and the detector's own `description` as the dek — the same two fields
+ * `/findings` renders — because a finding here is the detector's sentence, not
+ * composed prose. And it can only ever show a **published** flag:
+ * `/api/anomalies` applies the publication wall server-side, so an unreviewed or
+ * held flag never reaches this component at all.
  */
 const NO_FINDING_YET: FrontPageFinding = {
   kicker: "Latest finding",
@@ -173,6 +190,21 @@ function pickUpcoming(meetings: readonly Meeting[]): Meeting[] {
     .slice(0, 4);
 }
 
+/**
+ * The finding the lead column carries: the most recently published one.
+ *
+ * Ordered by `created_at` alone, deliberately **not** by severity. The rail
+ * beside it is the severity-ranked view; a front page that led with the worst
+ * thing ever found rather than the latest would be editorialising by ordering,
+ * and would keep one finding at the masthead indefinitely.
+ *
+ * Every flag reaching here is already published — `/api/anomalies` applies the
+ * wall server-side.
+ */
+function pickLeadFinding(flags: readonly AnomalyFlag[]): AnomalyFlag | undefined {
+  return [...flags].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+}
+
 function pickOpenFlags(flags: readonly AnomalyFlag[]): AnomalyFlag[] {
   return [...flags]
     .sort(
@@ -223,6 +255,7 @@ export function HomePage() {
   const lastMeeting = pickLastMeeting(allMeetings);
   const upcoming = pickUpcoming(allMeetings);
   const openFlags = pickOpenFlags(flags ?? []);
+  const leadFinding = pickLeadFinding(flags ?? []);
   const meetingById = new Map(allMeetings.map((m) => [m.id, m]));
   const lastMeetingFlagCount = lastMeeting
     ? (flags ?? []).filter((f) => f.meeting_id === lastMeeting.id).length
@@ -242,10 +275,29 @@ export function HomePage() {
           beside it is an <aside> because that one really is complementary. */}
         <div className="lg:col-span-2 lg:pr-10">
           <p className="kicker">{NO_FINDING_YET.kicker}</p>
-          <h1 className="headline mt-2">{NO_FINDING_YET.headline}</h1>
+          <h1 className="headline mt-2" data-testid="lead-finding-headline">
+            {leadFinding ? flagTypeLabels[leadFinding.flag_type] : NO_FINDING_YET.headline}
+          </h1>
           <p className="mt-4 max-w-prose text-base text-ink-soft">
-            {NO_FINDING_YET.dek}
+            {leadFinding ? leadFinding.description : NO_FINDING_YET.dek}
           </p>
+          {leadFinding && (
+            <p className="mt-3 text-sm">
+              <Link
+                className="underline decoration-rule hover:decoration-accent"
+                to={`/meetings/${leadFinding.meeting_id}`}
+              >
+                The meeting this came from
+              </Link>
+              <span className="text-muted"> · </span>
+              <Link
+                className="underline decoration-rule hover:decoration-accent"
+                to="/findings"
+              >
+                Every published finding
+              </Link>
+            </p>
+          )}
           {/* This byline used to read "Generated {today} · N meetings
             reviewed". Both halves were false. Nothing was generated — there is
             no finding above it — and `allMeetings` is what the meetings

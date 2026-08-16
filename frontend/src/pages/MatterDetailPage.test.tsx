@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, delay } from "msw";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -112,5 +112,19 @@ describe("MatterDetailPage", () => {
       "href",
       "/matters",
     );
+  });
+
+  it("announces the wait rather than rendering it as inert text", () => {
+    server.use(
+      http.get("/api/matters/:id", async () => {
+        await delay("infinite");
+        return HttpResponse.json({});
+      }),
+    );
+    renderAt(SPANNING);
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Loading…");
+    expect(status).toHaveAttribute("aria-live", "polite");
   });
 });

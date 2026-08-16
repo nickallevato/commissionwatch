@@ -70,7 +70,9 @@ export function MatterDetailPage() {
     return (
       <div className="mx-auto max-w-3xl">
         <h1 className="headline text-3xl">Matter</h1>
-        <p className="mt-4 text-sm text-ink-soft">Loading…</p>
+        <p className="mt-4 text-sm text-ink-soft" role="status" aria-live="polite">
+          Loading…
+        </p>
       </div>
     );
   }

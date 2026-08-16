@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, delay } from "msw";
 import { renderWithProviders, screen } from "@/lib/test-utils";
 import { MattersPage } from "./MattersPage";
 import { server } from "@/mocks/server";
@@ -108,5 +108,19 @@ describe("MattersPage", () => {
 
     expect(await screen.findByText(/no sweep has collected matters yet/i)).toBeInTheDocument();
     expect(screen.queryByText(/failure on our side/i)).not.toBeInTheDocument();
+  });
+
+  it("announces the wait rather than rendering it as inert text", () => {
+    server.use(
+      http.get("/api/matters", async () => {
+        await delay("infinite");
+        return HttpResponse.json({ data: [], total: 0 });
+      }),
+    );
+    renderWithProviders(<MattersPage />);
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Loading matters…");
+    expect(status).toHaveAttribute("aria-live", "polite");
   });
 });

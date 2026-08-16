@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { CellLabel } from "@/components/ui/CellLabel";
 import type {
   ExtractionFailureReason,
+  IngestionRunStatus,
   PublicExtraction,
   PublicStatus,
   PublicStatusSource,
@@ -54,6 +55,19 @@ const VERDICT_LABEL: Record<PublicStatusSource["verdict"], string> = {
   failing: "Failing",
   suspect: "Suspect",
   healthy: "Healthy",
+};
+
+/**
+ * Plain English for the raw `ingestion_runs.status` enum, for a public reader
+ * who has never seen the schema. `partial` is deliberately not "Succeeded":
+ * it means some of the run's work succeeded and some did not, and rounding
+ * that up to a clean success would overstate what the run actually did.
+ */
+const RUN_STATUS_LABEL: Record<IngestionRunStatus, string> = {
+  running: "Running",
+  succeeded: "Succeeded",
+  partial: "Partly succeeded",
+  failed: "Failed",
 };
 
 /** Only `healthy` gets the green. Everything else is red or plain. */
@@ -549,7 +563,9 @@ function SourceRow({ source }: { source: PublicStatusSource }) {
           <span className="text-sm text-accent">Never run</span>
         ) : (
           <>
-            <span className="text-sm font-semibold text-ink">{source.latest_run.status}</span>
+            <span className="text-sm font-semibold text-ink">
+              {RUN_STATUS_LABEL[source.latest_run.status]}
+            </span>
             <span className="mt-1 block text-xs text-muted tabular">
               {formatStamp(source.latest_run.started_at)}
             </span>

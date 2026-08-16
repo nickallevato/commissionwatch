@@ -6,7 +6,14 @@ describe("NotFoundPage", () => {
   it("renders 404 message", () => {
     renderWithProviders(<NotFoundPage />);
     expect(
-      screen.getByRole("heading", { level: 1, name: "Page Not Found" }),
+      screen.getByRole("heading", { level: 1, name: "Page not found" }),
+    ).toBeInTheDocument();
+  });
+
+  it("uses a typographic apostrophe rather than a straight one", () => {
+    renderWithProviders(<NotFoundPage />);
+    expect(
+      screen.getByText(/The page you’re looking for doesn’t exist\./),
     ).toBeInTheDocument();
   });
 

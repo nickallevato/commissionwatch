@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "./App";
 import { server } from "@/mocks/server";
+import { NOT_FOUND_HEADING } from "./pages/NotFoundPage";
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());
@@ -65,7 +66,7 @@ describe("site chrome links", () => {
     const dead: string[] = [];
     for (const href of hrefs) {
       renderAt(href);
-      if (screen.queryByText("Page Not Found")) dead.push(href);
+      if (screen.queryByText(NOT_FOUND_HEADING)) dead.push(href);
       cleanup();
     }
 
@@ -95,7 +96,7 @@ describe("site chrome links", () => {
     // path renders the 404 inside the full chrome — masthead, colophon and all
     // — which is exactly what a dead nav link looked like before it was fixed.
     renderAt("/definitely-not-a-route");
-    expect(screen.getByText("Page Not Found")).toBeInTheDocument();
+    expect(screen.getByText(NOT_FOUND_HEADING)).toBeInTheDocument();
     expect(
       screen.getByRole("navigation", { name: "Primary" }),
     ).toBeInTheDocument();
@@ -106,7 +107,7 @@ describe("site chrome links", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Methodology" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Page Not Found")).toBeNull();
+    expect(screen.queryByText(NOT_FOUND_HEADING)).toBeNull();
   });
 
   it("serves the open data page at /data", () => {
@@ -114,7 +115,7 @@ describe("site chrome links", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Open data" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Page Not Found")).toBeNull();
+    expect(screen.queryByText(NOT_FOUND_HEADING)).toBeNull();
   });
 
   it("still serves the page at its original address, /data-license", () => {
@@ -125,7 +126,7 @@ describe("site chrome links", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Open data" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Page Not Found")).toBeNull();
+    expect(screen.queryByText(NOT_FOUND_HEADING)).toBeNull();
   });
 
   it("serves the meeting calendar at /calendar", () => {
@@ -133,6 +134,6 @@ describe("site chrome links", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "When these bodies sit" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Page Not Found")).toBeNull();
+    expect(screen.queryByText(NOT_FOUND_HEADING)).toBeNull();
   });
 });

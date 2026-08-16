@@ -76,7 +76,9 @@ export function MetricsPage() {
       </header>
 
       {isLoading ? (
-        <p className="mt-8 text-sm text-ink-soft">Loading…</p>
+        <p className="mt-8 text-sm text-ink-soft" role="status" aria-live="polite">
+          Loading…
+        </p>
       ) : isError || !metrics ? (
         <Absence reason="request-failed" subject="These figures" />
       ) : (

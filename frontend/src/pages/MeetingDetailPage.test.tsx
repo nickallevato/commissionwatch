@@ -552,11 +552,22 @@ describe("MeetingDetailPage", () => {
       renderPage();
 
       expect(
-        await screen.findByText("No agenda items on file for this meeting."),
+        await screen.findByText(/No sweep has collected agenda items yet\./i),
       ).toBeInTheDocument();
       expect(screen.queryByRole("table")).toBeNull();
+      // Not ours, so no status link is offered for a genuine absence.
+      expect(
+        screen.queryByRole("link", { name: /collection status/i }),
+      ).toBeNull();
     });
 
+    /**
+     * The empty agenda and the failed-to-load agenda used to render as the
+     * same inert paragraph, and a reader could not tell "nothing on file"
+     * from "we could not ask" without parsing the sentence. `<Absence>` marks
+     * the failure as ours with a link to the status page; the genuine absence
+     * gets none. That link is what a test — and a reader — can key off of.
+     */
     it("says the agenda failed to load instead of implying there was none", async () => {
       install();
       server.use(
@@ -572,12 +583,13 @@ describe("MeetingDetailPage", () => {
       renderPage();
 
       expect(
-        await screen.findByText(
-          "The agenda for this meeting could not be loaded.",
-        ),
+        await screen.findByText(/the agenda for this meeting could not be loaded/i),
       ).toBeInTheDocument();
       expect(
-        screen.queryByText("No agenda items on file for this meeting."),
+        screen.getByRole("link", { name: /collection status/i }),
+      ).toHaveAttribute("href", "/status");
+      expect(
+        screen.queryByText(/No sweep has collected agenda items yet\./i),
       ).toBeNull();
     });
 

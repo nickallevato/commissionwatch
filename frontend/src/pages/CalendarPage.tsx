@@ -28,11 +28,11 @@ import type {
 
 type LoadResult = { ok: true; data: CalendarJurisdiction[] } | { ok: false };
 
-/** `2026-08-14` → `Fri 14 Aug 2026`. Parsed as UTC so the day never shifts. */
+/** `2026-08-14` → `Fri, Aug 14, 2026`. Parsed as UTC so the day never shifts. */
 function formatDate(isoDate: string): string {
   const parsed = new Date(`${isoDate}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return isoDate;
-  return parsed.toLocaleDateString("en-GB", {
+  return parsed.toLocaleDateString("en-US", {
     weekday: "short",
     day: "numeric",
     month: "short",
