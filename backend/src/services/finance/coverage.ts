@@ -24,12 +24,39 @@
  * ## Montana CERS
  *
  * Montana's Commissioner of Political Practices runs CERS, which holds the
- * state and local filings that would answer for these officials. It is listed
- * below as `planned` with **no adapter in this codebase** — it is being probed
- * separately, and a coverage table that claimed it was consulted would be the
- * exact failure this module exists to prevent. When it lands, its entry moves
- * to `active` and every panel that already renders this object starts telling
- * the truth about it without a single component changing.
+ * state and local filings that would answer for these officials. A coverage
+ * table that claimed CERS was consulted when it was not would be the exact
+ * failure this module exists to prevent.
+ *
+ * ### Corrected 2026-08-16: the adapter landed, and this comment did not
+ *
+ * This docblock used to say CERS was planned **with no adapter in this
+ * codebase**. That stopped being true on 2026-08-10, when
+ * `ingestion/adapters/mt-cers.ts` landed, was registered **disabled**, and a
+ * real rate-limited sweep took 384 filers, 35 filed reports and 127 itemised
+ * transactions. The sentence stayed for six days.
+ *
+ * It also said that when the adapter lands, "its entry moves to `active` … and
+ * every panel starts telling the truth about it without a single component
+ * changing." **Nothing moves it.** `state` below is a hardcoded literal, and so
+ * is the last sentence of `FEDERAL_ONLY_CAVEAT`. Both have to be edited by
+ * hand.
+ *
+ * That is a live trap rather than a tidy-up. The instant an operator enables
+ * the CERS source in production, this site will render CERS-derived
+ * contribution figures **and**, on the same page, tell the reader that Montana
+ * filings are held by a system "which this site does not yet read". A false
+ * statement about our own sourcing, published on the one surface built to keep
+ * our sourcing honest, with nothing failing anywhere.
+ *
+ * `coverage-drift.test.ts` now fails the moment records exist from a system
+ * this table still calls `planned`. It does not attempt to fix the wording
+ * automatically: deriving `state` from stored rows is a real design question
+ * with a genuinely hard case — a system that swept and found nothing is not the
+ * same as a system never consulted, and the two want different sentences. That
+ * is specced in `docs/superpowers/specs/2026-08-16-finance-coverage-drift-design.md`
+ * and left to the operator. Until then the failure is loud instead of silent,
+ * which is the part that could not wait.
  */
 
 export type CoverageState = "active" | "planned";
