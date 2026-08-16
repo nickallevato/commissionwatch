@@ -18,7 +18,11 @@ import {
   MEETING_PAGE_MAX,
 } from "../../services/pressroom/meetings";
 import { getRun, ReparseError, reparseMeeting, reparseRun } from "../../services/pressroom/runs";
-import { readQueueStats, readRunWork } from "../../services/pressroom/queue-stats";
+import {
+  listRecentRuns,
+  readQueueStats,
+  readRunWork,
+} from "../../services/pressroom/queue-stats";
 import { ExtractionUnavailable } from "../../services/extraction/run";
 import { enqueueExtractionBatch, MAX_EXTRACT_BATCH, enqueueExtraction } from "../../services/extraction/stage";
 import { enqueueGovernance } from "../../services/governor/stage";
@@ -234,6 +238,38 @@ router.get("/queue", async (_req, res, next) => {
 // ---------------------------------------------------------------------------
 // Runs
 // ---------------------------------------------------------------------------
+
+/** How many recent sweeps `/runs` will return at most. */
+export const MAX_RECENT_RUNS = 25;
+
+/**
+ * `GET /runs` — the most recent sweeps across every source, newest first.
+ *
+ * The console could show one run per source and no history, so a pattern
+ * repeating *across* sweeps had nowhere to appear — and that pattern was the
+ * whole diagnosis on 2026-08-16: five consecutive sweeps, own work zero every
+ * time, while `processed` looked healthy because each was draining somebody
+ * else's backlog.
+ *
+ * Declared before `/runs/:id` so `runs` is not read as an id.
+ */
+router.get("/runs", async (req, res, next) => {
+  try {
+    const raw = req.query.limit;
+    const parsed = typeof raw === "string" ? Number(raw) : 5;
+    if (!Number.isInteger(parsed) || parsed <= 0 || parsed > MAX_RECENT_RUNS) {
+      res.status(400).json({
+        error: `limit must be an integer from 1 to ${MAX_RECENT_RUNS}`,
+        statusCode: 400,
+      });
+      return;
+    }
+    const data = await listRecentRuns(db, parsed);
+    res.json({ data, total: data.length });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get("/runs/:id", async (req, res, next) => {
   try {

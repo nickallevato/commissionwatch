@@ -160,6 +160,100 @@ export async function readQueueStats(db: Knex): Promise<QueueStats> {
   };
 }
 
+export interface RecentRun {
+  run_id: string;
+  adapter_key: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  /** Jobs of this run that completed — the sweep's own work. */
+  own_completed: number;
+  /** Jobs of this run still queued when it stopped. */
+  own_outstanding: number;
+  /**
+   * Jobs the sweep finished that belonged to some *other* run.
+   *
+   * `counts.processed` minus its own completions. This is the column that makes
+   * starvation visible across time: five consecutive sweeps reading own 0 /
+   * others 90 is a queue nobody's own work ever reaches, and no per-source view
+   * can show it.
+   */
+  others_completed: number;
+}
+
+/**
+ * The most recent sweeps across every source, newest first.
+ *
+ * Exists because the console could show one run per source and no history, so a
+ * pattern repeating across sweeps — the shape of the 2026-08-16 starvation bug —
+ * had nowhere to appear.
+ */
+export async function listRecentRuns(db: Knex, limit: number): Promise<RecentRun[]> {
+  const rows = await db("ingestion_runs as r")
+    .join("ingestion_sources as s", "s.id", "r.source_id")
+    .leftJoin("ingestion_jobs as j", "j.run_id", "r.id")
+    .groupBy("r.id", "s.adapter_key")
+    .orderBy("r.started_at", "desc")
+    .limit(limit)
+    .select<
+      Array<{
+        run_id: unknown;
+        adapter_key: unknown;
+        status: unknown;
+        started_at: unknown;
+        finished_at: unknown;
+        counts: unknown;
+        own_completed: unknown;
+        own_outstanding: unknown;
+      }>
+    >(
+      "r.id as run_id",
+      "s.adapter_key",
+      "r.status",
+      "r.started_at",
+      "r.finished_at",
+      "r.counts",
+      db.raw("count(j.id) filter (where j.status = 'done') as own_completed"),
+      db.raw(
+        "count(j.id) filter (where j.status in ('pending','running')) as own_outstanding",
+      ),
+    );
+
+  return rows.map((row) => {
+    const own = asCount(row.own_completed);
+    const processed = processedOf(row.counts);
+    return {
+      run_id: String(row.run_id),
+      adapter_key: String(row.adapter_key),
+      status: String(row.status),
+      started_at: asStamp(row.started_at),
+      finished_at: asStamp(row.finished_at),
+      own_completed: own,
+      own_outstanding: asCount(row.own_outstanding),
+      // Never negative: a sweep can complete fewer jobs than its own run owns
+      // when an earlier sweep already drained some of them.
+      others_completed: Math.max(0, processed - own),
+    };
+  });
+}
+
+/** `counts.processed`, however the driver hands the jsonb column back. */
+function processedOf(counts: unknown): number {
+  const source =
+    typeof counts === "string"
+      ? ((): unknown => {
+          try {
+            return JSON.parse(counts);
+          } catch {
+            return null;
+          }
+        })()
+      : counts;
+  if (typeof source !== "object" || source === null) return 0;
+  const value = (source as Record<string, unknown>).processed;
+  return asCount(value);
+}
+
 export interface RunWork {
   /** Jobs belonging to this run that completed. */
   own_completed: number;
