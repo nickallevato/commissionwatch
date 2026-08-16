@@ -418,3 +418,24 @@ instruction, not about the agents** — and I had the evidence after the second 
   Verified the re-scoped `StatusPage` test myself rather than accepting the explanation: it is bound
   to `findByTestId("reading-unmeasured")`, so the narrowing is a tightening to what the guard was
   always about, not a weakening to make a page pass.
+- **10:35Z** — Clean tick. Live `c2ce56a`; head `ff911e4` deploying.
+
+  **Gap 6 is worse than I recorded it, and the extra finding is the dangerous one.** I wrote it up as
+  a dead module carrying a third copy of the vote vocabulary. Grepping properly found **six** copies,
+  and the one that matters is `backend/src/routes/votes.ts`'s `VALID_VOTES` — **live input
+  validation**. If the enum gained a member and that list did not, a legitimate vote would be
+  rejected at the door while my enum-vs-frontend guard stayed green throughout.
+
+  So `vote-value-enum-drift.test.ts` covers **two of six** copies while its docblock reads as though
+  it protects the vocabulary. That is the precise failure this repository writes guards to prevent,
+  and I built it this morning. Dispatched to cover every copy, with the instruction to **not trust my
+  list** — my last enumeration of this was wrong twice — and to show each newly-guarded copy failing,
+  because a guard added for a copy and never seen to fail for it is not covering it.
+
+  Second slot took 7.5's remaining half: the console has never been axe-swept, its own docblock says
+  public routes only, and the `/accessibility` page now states WCAG 2.2 AA publicly — a commitment we
+  cannot evidence for half the product. Framed by consequence rather than compliance: **the console
+  is where the review bottleneck lives**, and if the review screens are unusable by keyboard then
+  7.1's "recruit a second reviewer" is narrower than it sounds. Told it specifically to check the
+  collapsible group headers added today, since a collapsible that cannot be operated by keyboard
+  makes the grouping worse than the flat list it replaced.
