@@ -458,6 +458,20 @@ function QueueSection({ queue, queueError }: { queue: QueueStats | null; queueEr
           {queue.depth}
         </span>
         <span className="text-sm text-muted">jobs queued, claimed oldest-first across every source</span>
+        {/* Outside the by_stage block deliberately: whether fetch drains
+            continuously is a standing fact about this deployment, not a
+            property of today's backlog. A deep queue that is not moving has two
+            very different causes — a broken worker, or a fetch stage that only
+            runs inside a fifteen-minute window each night — and until this was
+            shown the screen could not tell them apart. */}
+        <span
+          data-testid="queue-fetch-loop"
+          className={`text-sm ${queue.fetch_loop_enabled ? "text-muted" : "font-semibold text-accent"}`}
+        >
+          {queue.fetch_loop_enabled
+            ? "fetch drains continuously"
+            : "fetch only drains during a sweep"}
+        </span>
         {queue.oldest_pending_at !== null && (
           <span className="ml-auto text-sm font-semibold text-accent" data-testid="queue-oldest">
             oldest {formatTimestamp(queue.oldest_pending_at)}

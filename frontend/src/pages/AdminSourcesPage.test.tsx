@@ -77,6 +77,7 @@ const emptyQueue: QueueStats = {
   depth: 0,
   oldest_pending_at: null,
   drained_last_hour: 0,
+  fetch_loop_enabled: true,
   by_stage: [],
   by_source: [],
   read_at: "2026-08-16T12:00:00.000Z",
@@ -158,6 +159,17 @@ describe("AdminSourcesPage", () => {
     const facts = screen.getByTestId("facts-s2");
     expect(facts).toHaveTextContent("31 h ago");
     expect(facts).toHaveTextContent("expected every 12 h");
+  });
+
+  it("says whether anything drains fetch outside a sweep", async () => {
+    // A deep queue that is not moving has two very different causes. Before
+    // this line the screen could not tell a broken worker from a fetch stage
+    // that only runs for fifteen minutes a night — which is what production
+    // was doing while 1,639 jobs aged for three days.
+    server.use(...allHandlers({ queue: { ...emptyQueue, fetch_loop_enabled: false } }));
+    renderWithProviders(<AdminSourcesPage />);
+
+    expect(await screen.findByText("fetch only drains during a sweep")).toBeInTheDocument();
   });
 
   it("says the archive is empty beside the state of the machinery, not instead of it", async () => {
@@ -289,6 +301,7 @@ describe("AdminSourcesPage", () => {
       depth: 976,
       oldest_pending_at: "2026-08-13T00:00:00.000Z",
       drained_last_hour: 0,
+      fetch_loop_enabled: true,
       by_stage: [
         { stage: "fetch", pending: 972 },
         { stage: "discover", pending: 4 },

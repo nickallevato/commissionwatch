@@ -1,4 +1,5 @@
 import type { Knex } from "knex";
+import { fetchWorkerEnabled } from "../ingestion";
 
 /**
  * What the shared ingestion queue looks like right now.
@@ -72,6 +73,20 @@ export interface QueueStats {
   drained_last_hour: number;
   by_stage: QueueStageStat[];
   by_source: QueueSourceStat[];
+  /**
+   * Whether the standing fetch loop is running in this process.
+   *
+   * Here rather than anywhere else because "why is the queue not draining?" is
+   * the question this endpoint exists to answer, and until 2026-08-16 the most
+   * common answer was invisible: `fetch` drained only inside a sweep, so a
+   * backlog of 1,639 jobs and a `drained_last_hour` of zero were the correct,
+   * healthy behaviour of a system that could never catch up — and nothing on
+   * this screen said so.
+   *
+   * A capability that is off is a different fact from one that was never built,
+   * and reporting the difference is the whole point.
+   */
+  fetch_loop_enabled: boolean;
   /** When these figures were read, so a stale console can say so. */
   read_at: string;
 }
@@ -156,6 +171,7 @@ export async function readQueueStats(db: Knex): Promise<QueueStats> {
       oldest_pending_at: asStamp(row.oldest_pending_at),
       completed_lifetime: asCount(row.completed_lifetime),
     })),
+    fetch_loop_enabled: fetchWorkerEnabled(),
     read_at: new Date().toISOString(),
   };
 }

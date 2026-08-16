@@ -498,6 +498,14 @@ export interface QueueStats {
   drained_last_hour: number;
   by_stage: QueueStageStat[];
   by_source: QueueSourceStat[];
+  /**
+   * Whether anything is draining `fetch` outside a sweep.
+   *
+   * A deep backlog and a zero drain rate are the *correct* behaviour of a
+   * system whose fetch stage only runs inside a fifteen-minute nightly window.
+   * Without this flag the screen cannot tell that apart from a broken worker.
+   */
+  fetch_loop_enabled: boolean;
   /** When these figures were read, so a stale console can say so. */
   read_at: string;
 }

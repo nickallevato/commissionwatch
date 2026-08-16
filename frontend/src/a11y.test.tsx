@@ -242,6 +242,7 @@ const EMPTY_QUEUE_STATS: QueueStats = {
   depth: 0,
   oldest_pending_at: null,
   drained_last_hour: 0,
+  fetch_loop_enabled: true,
   by_stage: [],
   by_source: [],
   read_at: "2026-08-16T12:00:00.000Z",

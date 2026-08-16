@@ -212,6 +212,17 @@ describe("the queue endpoint", () => {
   });
 });
 
+describe("the queue says whether anything is draining it", () => {
+  it("reports the fetch loop's gate, so a stalled backlog has a visible cause", async () => {
+    // Until 2026-08-16 a depth of 1,639 with drained_last_hour of zero was the
+    // correct behaviour of a system that could never catch up, and nothing on
+    // this screen said so. Under NODE_ENV=test the flag is unset, so this also
+    // pins that the suite is not quietly enabling a crawl.
+    const stats = await readQueueStats(db);
+    assert.equal(stats.fetch_loop_enabled, false);
+  });
+});
+
 describe("a sweep's own work versus somebody else's", () => {
   const OWN_PREFIX = "queue-work-test";
 
