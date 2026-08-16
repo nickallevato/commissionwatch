@@ -574,3 +574,44 @@ instruction, not about the agents** — and I had the evidence after the second 
   therefore review-queue load. There are already 64 unreviewed claims and one reviewer. Whether the
   fix should wait on reviewer throughput is a product decision, and it deserves a stated answer
   rather than being discovered when the queue doubles.
+
+---
+
+## Tick 2026-08-16 12:27Z — the loop stops
+
+The third critical review returned **seven of seven categories pass** and answered its
+final question, *should this loop stop?*, with yes. The loop's own stopping rule was that
+it ends when the reviewer is satisfied, not when I am, so it ends here.
+
+**What closed the last category.** Operational readiness had been failing on one item:
+nothing could tell whether a backup had ever succeeded. The reviewer traced the chain
+rather than its ends — the success event is emitted even when the offsite leg fails, so
+the check is not hostage to a bucket that does not exist yet; recording happens
+unconditionally, before and outside dispatch; migration 107 is applied in production — and
+then ran the monitor against the live site, which printed `BLOCKED` with the real state.
+
+**The known limitation, recorded rather than closed.** The check reports `blocked`, and
+`blocked` does not set `summary.failed`, so the run returns before building an alert.
+Production's backup state is therefore published but not paged. The reviewer declined to
+count this against the category and gave its reasoning; I accept it, and it is written
+here so the next person meets it as a documented limit instead of a surprise.
+
+**Four findings left open, none blocking.** A stuck sweep the monitor reports as passing,
+because `evaluateSource` reads a failure count rather than the verdict against a 168-hour
+interval on a nightly cron — filed as gap 8, and not blocking because `/status` renders
+the verdict truthfully, so nothing false is published. The other three are documentation
+that understates the project: a workflow asserting in capitals that a schedule does not
+fire, against 617 runs proving it does, and two files saying ingestion is off when both
+sources are enabled.
+
+**That all three doc errors err toward self-doubt is worth naming as a result, not a
+coincidence.** A codebase disciplined to distrust its own claims will drift toward
+understating itself. That is the correct direction for a civic transparency platform to be
+wrong in, and it is the opposite of the failure this project exists to refuse.
+
+**What the loop should not be read as having established.** Maturity here was assessed
+against process and code — tests, coverage, headers, observability, retention, a11y. It
+was not assessed against public use, because there has not been any. The 64 held claims
+are unreviewed, one meeting is published, and `PRERENDER_ENABLED` is still off, so that
+meeting is invisible to crawlers. Those are operator decisions, and none of them is a
+thing more looping could have produced.
