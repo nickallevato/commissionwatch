@@ -317,3 +317,24 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   rather than an alarm. The test that matters is the one asserting the sweep is *wired*, not merely
   exported: being defined and uncalled is the entire bug, and a test of the function alone would
   have passed against today's broken state.
+
+## The stall, finally diagnosed — and it was my instruction
+
+Four agents "stalled waiting on a test run" today. I logged it three times as agent behaviour. It
+was not.
+
+**The backend suite takes ~150 s. A subagent's default foreground Bash limit is 120 s.** So "run it
+in the foreground", which I wrote into every brief, was an instruction that could not be followed:
+the agent was forced to background the run, and then waited on a notification that never came in a
+useful form. Two of them additionally piped output through `grep`, so when a run was killed the
+buffered output vanished and the failure presented as silence.
+
+**Fix, adopted for every future brief:**
+- Tell agents to pass `timeout: 600000` on the Bash call rather than "run in the foreground".
+- Tell them to write output to a file and read the file, never to pipe a long run through `grep` or
+  `head`.
+- Tell them to check for their own leftover `node --test` processes before re-running.
+
+I made the same buffering mistake myself twice this morning and still wrote the bad instruction four
+times. **The lesson is that a repeated failure across independent agents is evidence about the
+instruction, not about the agents** — and I had the evidence after the second one.
