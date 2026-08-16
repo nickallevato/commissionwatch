@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router";
 import { Layout } from "./components/Layout";
 import { PressroomAuthLayout, PressroomLayout } from "./components/PressroomLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";

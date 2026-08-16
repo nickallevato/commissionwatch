@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { SeverityMark } from "@/components/AnomalyBadge";
 import { flagTypeLabels } from "@/components/flag-labels";
 import { FindingSource } from "@/components/ui/FindingSource";

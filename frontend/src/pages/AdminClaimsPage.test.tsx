@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { http, HttpResponse } from "msw";
 import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { AdminClaimsPage } from "./AdminClaimsPage";
 import { server } from "@/mocks/server";
 import type { ClaimGovernorVerdict, ClaimQueueResponse, ClaimReviewItem } from "@/types";

@@ -1,5 +1,5 @@
 import { useState, useMemo, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { useMeetings, useJurisdictions } from "@/hooks/useMeetings";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { StatusBadge } from "@/components/StatusBadge";

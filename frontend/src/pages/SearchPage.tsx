@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 import { useSearch, splitSnippet } from "@/hooks/useSearch";
 import { formatDay } from "@/lib/dates";
 import type { SearchResult } from "@/types";

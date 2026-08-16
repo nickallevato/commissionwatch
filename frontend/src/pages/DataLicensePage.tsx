@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { formatDay, formatTimestamp } from "@/lib/dates";
 import type {
   DataArchiveIndex,

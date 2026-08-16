@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 /**
  * `/bot` — the page for machines, written for the person who sent one.

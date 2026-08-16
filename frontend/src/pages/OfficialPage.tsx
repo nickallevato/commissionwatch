@@ -1,4 +1,4 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import { Tile, Tiles } from "@/components/PressroomUI";
 import { ActivityStrip } from "@/components/officials/ActivityStrip";
 import { DonorOverlay } from "@/components/officials/DonorOverlay";

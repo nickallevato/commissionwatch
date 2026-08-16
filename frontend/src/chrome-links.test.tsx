@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import type { ReactNode } from "react";
 import { render, screen, within, cleanup } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { App } from "./App";
 import { server } from "@/mocks/server";
 import { NOT_FOUND_HEADING } from "./pages/NotFoundPage";

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "../contexts/useAuth";
 import { ACTION_PRIMARY, FIELD, FOCUS_RING } from "../components/PressroomUI";
 

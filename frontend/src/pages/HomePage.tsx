@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { useAgendaItems, useMeetings } from "@/hooks/useMeetings";
 import { useMeetingVotes } from "@/hooks/useVotes";
 import { useAnomalies } from "@/hooks/useAnomalies";

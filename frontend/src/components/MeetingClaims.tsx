@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Absence } from "@/components/ui/Absence";
 import { Citation, ReviewStamp } from "@/components/ui/Citation";
 import { useMeetingClaims } from "@/hooks/useClaims";

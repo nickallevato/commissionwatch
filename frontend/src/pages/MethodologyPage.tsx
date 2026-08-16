@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 /**
  * `/methodology` — the standing account of how this site produces what it

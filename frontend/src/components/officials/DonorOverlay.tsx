@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { FlagBar } from "@/components/PressroomUI";
 import { MatchConfidenceChip } from "@/components/officials/MatchQuality";
 import type { FinanceCoverage, OfficialFinding, VoteDonorEvidence } from "@/types";

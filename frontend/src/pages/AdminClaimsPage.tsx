@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { FlagBar, PressroomCard, WorkTitle } from "@/components/PressroomUI";
 import { Absence } from "@/components/ui/Absence";
 import { Citation, ReviewStamp } from "@/components/ui/Citation";

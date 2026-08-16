@@ -1,4 +1,4 @@
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router";
 import { Absence } from "@/components/ui/Absence";
 import { formatBytes, formatCount, highlightSegments, useSource } from "@/hooks/useSource";
 import { formatTimestamp } from "@/lib/dates";

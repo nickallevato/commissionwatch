@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "react-router";
 
 /**
  * Move focus to the new page when the route changes.

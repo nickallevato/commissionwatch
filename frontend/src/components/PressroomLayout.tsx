@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import { useAuth } from "../contexts/useAuth";
 import { ACTION_QUIET, FOCUS_RING } from "./PressroomUI";
 import type { PressroomSource } from "@/types";

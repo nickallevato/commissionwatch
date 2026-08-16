@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Absence } from "@/components/ui/Absence";
 import { formatCount } from "@/hooks/useSource";
 import { useMetrics } from "@/hooks/useMetrics";

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render as baseRender, screen } from "@testing-library/react";
-import type { ReactElement } from "react";
-import { MemoryRouter } from "react-router-dom";
+import type { ReactElement, ReactNode } from "react";
+import { MemoryRouter } from "react-router";
 import { Citation, ReviewStamp, type CitationRef } from "./Citation";
 import { abbreviateSha, sourceHref } from "./citation-source";
 
@@ -9,8 +9,16 @@ import { abbreviateSha, sourceHref } from "./citation-source";
  * A router, because the content address is now an in-app `Link` to
  * `/source/{sha}` rather than a bare anchor.
  */
+function Wrapper({ children }: { children: ReactNode }) {
+  return (
+    <MemoryRouter>
+      {children}
+    </MemoryRouter>
+  );
+}
+
 function render(ui: ReactElement) {
-  return baseRender(ui, { wrapper: MemoryRouter });
+  return baseRender(ui, { wrapper: Wrapper });
 }
 
 const REF: CitationRef = {

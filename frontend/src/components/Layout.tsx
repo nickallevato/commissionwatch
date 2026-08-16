@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Outlet, NavLink, Link } from "react-router-dom";
+import { Outlet, NavLink, Link } from "react-router";
 import {
   formatSweepAge,
   useIngestionStatus,

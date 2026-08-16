@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { Absence } from "@/components/ui/Absence";
 import { formatCount } from "@/hooks/useSource";
 import { useMetrics } from "@/hooks/useMetrics";

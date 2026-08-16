@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { http, HttpResponse } from "msw";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { AdminRosterPage } from "./AdminRosterPage";
 import { server } from "@/mocks/server";
 import type { RosterRoll, RosterRollRow } from "@/types";

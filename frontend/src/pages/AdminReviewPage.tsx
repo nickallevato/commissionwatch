@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { DisputeQueue } from "@/components/DisputeQueue";
 import { FlagBar, PressroomCard, SegmentedControl, WorkTitle } from "@/components/PressroomUI";
 import { MatchQualityPanel } from "@/components/officials/MatchQuality";
