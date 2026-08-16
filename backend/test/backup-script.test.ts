@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -152,6 +152,75 @@ describe("deploy/backup.sh: retention and restore are documented in the header",
       /has been run|has NOT been exercised|untested/i,
       "the header states a restore capability without saying what was and " +
         "was not actually tested",
+    );
+  });
+});
+
+/**
+ * 2026-08-16 maturity review, finding H1: `deploy/Caddyfile` routed `/api/*`
+ * straight to the backend, bypassing nginx. That was harmless while Helmet
+ * carried its own copies of the security headers; once 6.4 removed them on
+ * the stated ground that "nginx is the one layer in the request path for
+ * BOTH" (`backend/src/app.ts`, `frontend/nginx.conf`), a Caddyfile that split
+ * `/api/*` off from nginx would have shipped every API response with no CSP,
+ * no HSTS, no `X-Frame-Options`. Nothing consumed the file
+ * (`grep -rn "Caddyfile" deploy/*.sh deploy/*.yml .gitea/workflows/*.yml` —
+ * verified empty), it used the local-dev container name
+ * (`commissionwatch-frontend`) rather than production's
+ * (`commissionwatch-web`), and `deploy/README.md`'s own §5 already described
+ * the real, live edge as a single `reverse_proxy commissionwatch-web:3000`
+ * for the whole host, applied entirely outside this repository in
+ * `your-org/platform-aws`. The file was a stale orphan, not a template
+ * anything applies, so it was deleted rather than corrected.
+ *
+ * This is the guard against it — or anything shaped like it — coming back.
+ * Same technique `workflow-monitor-env.test.ts` and this file's own header
+ * comment use: read the artefact as text, because no YAML/Caddyfile parser is
+ * a backend dependency and adding one so a guard can run is how a guard
+ * acquires a reason not to run.
+ */
+describe("deploy/ edge config cannot route /api/* around nginx", () => {
+  it("no Caddyfile exists in deploy/", () => {
+    // The guard for "stayed deleted", per the maturity review's instruction:
+    // if a Caddyfile is ever reintroduced, the next two assertions inspect
+    // it; until then, its absence is the property being guarded.
+    const exists = existsSync(path.resolve(__dirname, "..", "..", "deploy", "Caddyfile"));
+    assert.equal(
+      exists,
+      false,
+      "deploy/Caddyfile has reappeared. Before adding one back: does it route " +
+        "/api/* through the same upstream as the HTML document (today, " +
+        "production's single `reverse_proxy commissionwatch-web:3000` for the " +
+        "whole host)? A Caddyfile that gives /api/* its own upstream would " +
+        "bypass nginx, and nginx is the only thing that sets the security " +
+        "headers now that Helmet's copies are gone (backend/src/app.ts, " +
+        "6.4). If you are adding a real one back, also update this test to " +
+        "assert the property on it rather than deleting the guard.",
+    );
+  });
+
+  it("no committed deploy script or workflow references a Caddyfile", () => {
+    // Regression guard for the fact that found it in the first place: a
+    // Caddyfile that nothing applies is exactly how the stale one went
+    // unnoticed. If something starts consuming a Caddyfile again, that is a
+    // deliberate enough change that this test should be revisited by name,
+    // not silently defeated by adding the reference.
+    const deployDir = path.resolve(__dirname, "..", "..", "deploy");
+    const workflowsDir = path.resolve(__dirname, "..", "..", ".gitea", "workflows");
+    const candidates = [
+      ...readdirSync(deployDir)
+        .filter((f) => (f.endsWith(".sh") || f.endsWith(".yml")) && f !== "Caddyfile")
+        .map((f) => path.join(deployDir, f)),
+      ...readdirSync(workflowsDir)
+        .filter((f) => f.endsWith(".yml"))
+        .map((f) => path.join(workflowsDir, f)),
+    ];
+
+    const offenders = candidates.filter((file) => readFileSync(file, "utf8").includes("Caddyfile"));
+    assert.deepEqual(
+      offenders,
+      [],
+      `these files reference a Caddyfile this repository does not apply: ${offenders.join(", ")}`,
     );
   });
 });

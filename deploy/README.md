@@ -13,7 +13,6 @@ Deploys onto the shared bmux platform host over **SSM Run Command**. Not SSH.
 | `deploy-aws-ssm.sh` | The deploy. CI calls it; you call it by hand. Same code either way. |
 | `test-deploy-aws-ssm.sh` | Tests for the payload and the host-side secret resolution. Runs in CI. |
 | `docker-compose.shared.yml` | The production stack on the shared host. |
-| `Caddyfile` | Reference copy of the site block. The live one lives in `your-org/platform-aws`. |
 | `docker-compose.yml` | Local development, not production. |
 | `backup.sh` | Nightly `pg_dump` + MinIO mirror, retention, off-instance copy, ops event. |
 | `restore-drill.sh` | Restores a backup into a scratch database and compares row counts. |
@@ -249,10 +248,41 @@ the compose file actually consumes. Trust the parameter over the prose.
 
 ### 5. Caddy site block
 
-Request `commissionwatch.bmux.sh` → `commissionwatch-web:3000` on the `edge` network, in
-`your-org/platform-aws`. To go public, delete the two `@blocked` lines from that block. **Do not**
-touch the security group — its 443 allowlist is shared with seven other products, so opening it
-exposes all of them at once.
+The edge is entirely owned by `your-org/platform-aws`, not this repository. There is no `Caddyfile`
+here — one existed at `deploy/Caddyfile` until 2026-08-16 and was deleted: it described a two-upstream
+split (`/api/*` straight to `commissionwatch-backend:3001`, everything else to
+`commissionwatch-frontend:3000`) that nothing ever applied. `grep -rn "Caddyfile" deploy/*.sh
+deploy/*.yml .gitea/workflows/*.yml` returned nothing that consumed it, and the container name it used
+(`commissionwatch-frontend`) is the **local dev** name from `docker-compose.yml`, not the production
+name (`commissionwatch-web`) from `docker-compose.shared.yml`. It never matched either environment
+it could plausibly have described, and after 6.4 removed Helmet's own copies of the security headers
+on the theory that "nginx is the only layer in the request path for both" (`backend/src/app.ts:95-125`,
+`frontend/nginx.conf:135-140`), a committed file that routed `/api/*` around nginx stopped being a
+harmless drift and became a config that — if anyone ever *did* apply it — would ship every API
+response with no CSP, no HSTS, no `X-Frame-Options`. See the 2026-08-16 maturity review, finding H1.
+
+The block that actually runs is the one `docs/superpowers/plans/2026-08-04-w4-public-launch.md` Task 3
+put in `caddy/Caddyfile` in `your-org/platform-aws`:
+
+```
+commissionwatch.bmux.sh {
+	reverse_proxy commissionwatch-web:3000
+}
+```
+
+**One upstream, the whole host** — `commissionwatch-web` is the nginx container
+(`docker-compose.shared.yml:35`) that serves the SPA *and* proxies `/api/*` to the backend
+internally, so nginx is genuinely the only layer in the request path for both, which is what makes
+6.4's header centralisation correct in production. Verified live: `server: nginx/1.31.3` appears on
+`curl -sSI https://commissionwatch.bmux.sh/api/version`, and the security headers on `/` and
+`/api/version` are identical with no duplicates. `backend/test/backup-script.test.ts` carries a guard
+(describe block "deploy/ edge config cannot route /api/* around nginx") for the property this file
+used to contradict: no `Caddyfile` may reappear in `deploy/` describing `/api/*` routed anywhere
+other than through the same layer as the HTML document.
+
+To go public, delete the two `@blocked` lines from that block in `platform-aws`. **Do not** touch the
+security group — its 443 allowlist is shared with seven other products, so opening it exposes all of
+them at once.
 
 ## Backups and the restore drill
 

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   buildAlertMessage,
   DISCORD_CONTENT_LIMIT,
+  DEFAULT_BACKUP_MAX_AGE_HOURS,
   DEFAULT_MAX_DRIFT_MINUTES,
+  evaluateBackupFreshness,
   evaluateHealth,
   evaluatePrerender,
   evaluateReleaseDrift,
@@ -201,6 +203,106 @@ describe("external monitor — resource pressure", () => {
 
   it("blocks on a malformed /api/health body rather than reading it as fine", () => {
     const outcome = evaluateResources(response(200, "<html>it worked!</html>"));
+    assert.equal(outcome.state, "blocked");
+  });
+});
+
+/**
+ * Backup freshness — the 2026-08-16 maturity review's rank-1 gap. Nothing
+ * could tell whether a backup had ever succeeded; `deploy/backup.sh`'s
+ * critical-exit guard only fires when the script actually runs. `/api/health`
+ * now reports `backup.lastSuccessAt` from `ops_event_log`, and this is the
+ * judgement over it.
+ */
+function backupHealthBody(backup: unknown): string {
+  return JSON.stringify({ status: "ok", database: "connected", backup });
+}
+
+describe("external monitor — backup freshness", () => {
+  it("passes when the last success is well within the allowance", () => {
+    const succeededAt = new Date(NOW.getTime() - 3 * 3_600_000).toISOString();
+    const outcome = evaluateBackupFreshness(
+      response(200, backupHealthBody({ lastSuccessAt: succeededAt })),
+      NOW,
+    );
+    assert.equal(outcome.state, "pass");
+    assert.match(outcome.detail, /3 h ago/);
+  });
+
+  it(`fails when the last success is older than the ${DEFAULT_BACKUP_MAX_AGE_HOURS}-hour allowance`, () => {
+    const succeededAt = new Date(NOW.getTime() - 30 * 3_600_000).toISOString();
+    const outcome = evaluateBackupFreshness(
+      response(200, backupHealthBody({ lastSuccessAt: succeededAt })),
+      NOW,
+    );
+    assert.equal(outcome.state, "fail");
+    assert.match(outcome.detail, /30 h ago/);
+    assert.match(outcome.detail, /stopped landing/);
+  });
+
+  it("honours a MONITOR_BACKUP_MAX_AGE_HOURS-shaped override passed explicitly", () => {
+    const succeededAt = new Date(NOW.getTime() - 10 * 3_600_000).toISOString();
+    const outcome = evaluateBackupFreshness(
+      response(200, backupHealthBody({ lastSuccessAt: succeededAt })),
+      NOW,
+      5,
+    );
+    assert.equal(outcome.state, "fail");
+  });
+
+  it("BLOCKS — never passes — when no backup has ever been recorded", () => {
+    // This is the assertion that matters most in this whole file: "nothing
+    // has ever succeeded" must never read as a clean bill of health borrowed
+    // from an absence. See the MUTATION-VERIFY note in the module doc for
+    // `evaluateBackupFreshness`.
+    const outcome = evaluateBackupFreshness(
+      response(200, backupHealthBody({ lastSuccessAt: null })),
+      NOW,
+    );
+    assert.equal(outcome.state, "blocked");
+    assert.notEqual(outcome.state, "pass");
+    assert.match(outcome.detail, /no backup has ever been recorded/);
+  });
+
+  it("blocks when the backup field is entirely absent — an older backend", () => {
+    const outcome = evaluateBackupFreshness(
+      response(200, JSON.stringify({ status: "ok", database: "connected" })),
+      NOW,
+    );
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /no `backup` object/);
+  });
+
+  it("blocks when backup is present but not an object", () => {
+    const outcome = evaluateBackupFreshness(response(200, backupHealthBody("fine")), NOW);
+    assert.equal(outcome.state, "blocked");
+  });
+
+  it("blocks when lastSuccessAt is a number instead of a string or null", () => {
+    const outcome = evaluateBackupFreshness(
+      response(200, backupHealthBody({ lastSuccessAt: 12345 })),
+      NOW,
+    );
+    assert.equal(outcome.state, "blocked");
+  });
+
+  it("blocks when lastSuccessAt is not a parseable date", () => {
+    const outcome = evaluateBackupFreshness(
+      response(200, backupHealthBody({ lastSuccessAt: "not a date" })),
+      NOW,
+    );
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /not a date/);
+  });
+
+  it("blocks when /api/health itself could not be read", () => {
+    const outcome = evaluateBackupFreshness(unreachable("timeout"), NOW);
+    assert.equal(outcome.state, "blocked");
+    assert.match(outcome.detail, /could not read \/api\/health/);
+  });
+
+  it("blocks on a malformed /api/health body rather than reading it as fine", () => {
+    const outcome = evaluateBackupFreshness(response(200, "<html>it worked!</html>"), NOW);
     assert.equal(outcome.state, "blocked");
   });
 });

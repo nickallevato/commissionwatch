@@ -3,6 +3,7 @@ import os from "os";
 import { promises as fsPromises } from "fs";
 import db from "../config/database";
 import { probeStorage, type StorageState } from "../services/storage";
+import { lastOpsEventOccurredAt } from "../services/delivery/ops-events";
 
 /**
  * Health, in two endpoints, because they answer two different questions and
@@ -317,6 +318,38 @@ async function checkResources(): Promise<ResourcesStatus> {
   return { disk, memory };
 }
 
+/* ── Backup freshness ──────────────────────────────────────────────── */
+
+/**
+ * When `deploy/backup.sh` last recorded a successful run, or `null` if it
+ * never has.
+ *
+ * This process never runs the backup itself — `backup.sh` runs on the host
+ * under cron and calls `docker exec … emit-ops-event.js`, which writes to
+ * `ops_event_log` (migration `107_create_ops_event_log`). Reading that table
+ * here is what lets `/api/health` — public, unauthenticated, and already the
+ * one thing `scripts/external-monitor.ts` can reach from outside the box —
+ * answer "has a backup ever succeeded" honestly, the same way `resources`
+ * already answers "is the disk full" for a monitor that cannot read the host
+ * directly.
+ *
+ * `null` is reported as `null`, not folded into a timestamp of convenience:
+ * an absence here means no evidence exists, and the caller (the monitor's
+ * `evaluateBackupFreshness`) is the one that decides that is `blocked`, never
+ * `pass`.
+ */
+async function checkBackup(): Promise<{ lastSuccessAt: string | null }> {
+  try {
+    const at = await withTimeout(lastOpsEventOccurredAt(db, "ops.backup_succeeded"));
+    return { lastSuccessAt: at?.toISOString() ?? null };
+  } catch {
+    // The table could not be read — an older schema mid-migration, or a
+    // database blip already reflected elsewhere in this response. `null` is
+    // still the honest answer: this process does not know of a success.
+    return { lastSuccessAt: null };
+  }
+}
+
 /* ── The routes ─────────────────────────────────────────────────────── */
 
 const router = Router();
@@ -330,11 +363,12 @@ router.get("/live", (_req, res) => {
 });
 
 router.get("/", async (_req, res) => {
-  const [database, migrations, storage, resources] = await Promise.all([
+  const [database, migrations, storage, resources, backup] = await Promise.all([
     checkDatabase(),
     checkMigrations(),
     checkStorage(),
     checkResources(),
+    checkBackup(),
   ]);
 
   const digest = digestStatusFn
@@ -353,6 +387,7 @@ router.get("/", async (_req, res) => {
     migrations,
     storage,
     resources,
+    backup,
     digest: {
       running: digest.running,
       dailyLastRun: digest.dailyLastRun?.toISOString() ?? null,

@@ -991,6 +991,147 @@ export function evaluateResources(health: ProbeResult): CheckOutcome {
   return { name, state: "pass", detail };
 }
 
+/* ── Probe 5b: backup freshness ─────────────────────────────────────── */
+
+/**
+ * How long a backup may go unrecorded before this check calls it a failure.
+ *
+ * `deploy/README.md` installs `deploy/backup.sh` at `17 4 * * *` — once every
+ * 24 hours. 27 hours is that cadence plus a 3-hour margin: generous enough
+ * that a run which starts a little late, or a host that is briefly busy with
+ * something else at 04:17, does not page anybody for finishing at 04:40
+ * instead — but tight enough that missing one entire night's run (the next
+ * attempt would land roughly 24 hours after the last success, not 27) is
+ * caught on the very next monitor tick rather than silently rolling into a
+ * second missed night. The same reasoning `DEFAULT_MAX_DRIFT_MINUTES` writes
+ * out for release drift applies here: a threshold that fires on every normal
+ * night is a threshold people mute, and muting this one is exactly how the
+ * 2026-08-15 incident's shape — "no signal is not the same as no problem" —
+ * repeats itself with backups instead of disk.
+ */
+export const DEFAULT_BACKUP_MAX_AGE_HOURS = 27;
+
+/** A non-negative hour count from the environment, or the default. */
+function readBackupMaxAgeHours(env: Record<string, string | undefined>): number {
+  const raw = (env.MONITOR_BACKUP_MAX_AGE_HOURS ?? "").trim();
+  if (raw === "") return DEFAULT_BACKUP_MAX_AGE_HOURS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BACKUP_MAX_AGE_HOURS;
+}
+
+/**
+ * Has a backup succeeded recently enough to trust that the corpus is
+ * recoverable?
+ *
+ * **The finding this exists for.** `deploy/backup.sh` was hardened on
+ * 2026-08-16 to emit `ops.backup_offsite_missing` at `critical` and exit 60
+ * when the off-instance leg is missing or unverified — but that guard only
+ * fires *when the script runs*. If the cron was never installed, or the host
+ * was down at 04:17, or the script silently stopped being invoked at all,
+ * every other signal in this system stays green: `/api/health` answers 200,
+ * `resources` reports `ok`, the site is genuinely up. That is precisely the
+ * 2026-08-15 shape — "no signal is not the same as no problem" — applied to
+ * the backup cron instead of the disk.
+ *
+ * **The honest channel.** This monitor runs outside the box over HTTP and
+ * cannot read the host, so it cannot see the cron directly. `backup.sh` calls
+ * `emit-ops-event.js` on every run, but until 2026-08-16 that only produced a
+ * `deliveries` row *if* an operator had already routed `ops.*` to a channel —
+ * on a host with none configured, a backup that had never once succeeded and
+ * a host with the cron simply never installed were indistinguishable, both
+ * reporting nothing anywhere this monitor could reach. So the recording side
+ * was built alongside this check: `ops_event_log` (migration
+ * `107_create_ops_event_log`) now records every `ops.*` event unconditionally,
+ * and `/api/health`'s new `backup.lastSuccessAt` field reports the latest
+ * `ops.backup_succeeded` row from it — public, unauthenticated, and reachable
+ * exactly the way `resources` already is.
+ *
+ * **`blocked`, never `pass`, on absent evidence.** A backend predating this
+ * field, a malformed `backup` object, or `lastSuccessAt: null` (nothing has
+ * ever been recorded — a fresh host, an uninstalled cron, or a cron that has
+ * run zero times since this field shipped) are all `blocked`. Collapsing any
+ * of them into `pass` is the exact failure this check exists to refuse — a
+ * clean bill of health borrowed from an absence, the same error `evaluateResources`
+ * already refuses for disk and memory.
+ *
+ * **`fail` is a known-stale timestamp past its allowance** — real evidence
+ * that says the backup stopped landing, not a guess.
+ */
+export function evaluateBackupFreshness(
+  health: ProbeResult,
+  now: Date,
+  maxAgeHours: number = DEFAULT_BACKUP_MAX_AGE_HOURS,
+): CheckOutcome {
+  const name = "backup";
+
+  const failure = transportFailure(health);
+  if (failure !== null) {
+    return { name, state: "blocked", detail: `could not read /api/health: ${failure}` };
+  }
+
+  const parsed = parseJsonObject(health.body);
+  if (!parsed.ok) {
+    return { name, state: "blocked", detail: `could not read /api/health: ${parsed.reason}` };
+  }
+
+  const backup = parsed.value.backup;
+  if (!isRecord(backup)) {
+    return {
+      name,
+      state: "blocked",
+      detail:
+        "response has no `backup` object — either an older backend that predates this check, " +
+        "or a malformed one. Not a pass",
+    };
+  }
+
+  const lastSuccessAt = backup.lastSuccessAt;
+  if (lastSuccessAt !== null && typeof lastSuccessAt !== "string") {
+    return {
+      name,
+      state: "blocked",
+      detail: `backup.lastSuccessAt is neither null nor a string: ${JSON.stringify(lastSuccessAt)}. Not a pass`,
+    };
+  }
+
+  if (lastSuccessAt === null) {
+    return {
+      name,
+      state: "blocked",
+      detail:
+        "no backup has ever been recorded as succeeded — this could be a fresh host, an " +
+        "uninstalled cron, or a cron that has never once run. Absent evidence is not a pass",
+    };
+  }
+
+  const succeededAt = new Date(lastSuccessAt);
+  if (Number.isNaN(succeededAt.getTime())) {
+    return {
+      name,
+      state: "blocked",
+      detail: `backup.lastSuccessAt is not a date: ${JSON.stringify(lastSuccessAt)}. Not a pass`,
+    };
+  }
+
+  const hours = (now.getTime() - succeededAt.getTime()) / 3_600_000;
+  const rounded = Math.round(hours * 10) / 10;
+  if (hours > maxAgeHours) {
+    return {
+      name,
+      state: "fail",
+      detail:
+        `last successful backup was ${rounded} h ago, past the ${maxAgeHours}-hour allowance ` +
+        `(cron runs nightly at 04:17 UTC) — the backup stopped landing`,
+    };
+  }
+
+  return {
+    name,
+    state: "pass",
+    detail: `last successful backup ${rounded} h ago, within the ${maxAgeHours}-hour allowance`,
+  };
+}
+
 /* ── Probe 6: prerender split ───────────────────────────────────────── */
 
 /**
@@ -1365,6 +1506,7 @@ export async function main(): Promise<number> {
   const outcomes: CheckOutcome[] = [
     evaluateHealth(health),
     evaluateResources(health),
+    evaluateBackupFreshness(health, now, readBackupMaxAgeHours(process.env)),
     version,
     drift,
     evaluatePrerender({ browser: prerenderBrowser, crawler: prerenderCrawler }),

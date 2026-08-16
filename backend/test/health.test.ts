@@ -6,12 +6,16 @@ import { registerDigestStatus } from "../src/routes/health";
 import db from "../src/config/database";
 
 describe("GET /api/health", () => {
-  afterEach(() => {
+  afterEach(async () => {
     registerDigestStatus(() => ({
       dailyLastRun: null,
       weeklyLastRun: null,
       running: false,
     }));
+    // The backup fixtures below write rows to a table no other test in this
+    // file touches; clear them so a later test in this same describe block
+    // never sees state a previous one left behind.
+    await db("ops_event_log").where({ event_type: "ops.backup_succeeded" }).del();
   });
 
   it("returns status ok with database connected", async () => {
@@ -69,6 +73,31 @@ describe("GET /api/health", () => {
     // to fill the disk. See routes/health.ts for the reasoning.
     assert.equal(typeof res.body.resources.disk, "string");
     assert.equal(res.body.resources.disk.match(/^\d/), null);
+  });
+
+  it("includes a backup object reporting no recorded success on a fresh table", async () => {
+    // The test database has never had `ops_event_log` written to, which is
+    // exactly the "fresh host, uninstalled cron" state `evaluateBackupFreshness`
+    // in `external-monitor.ts` treats as BLOCKED, never PASS.
+    await db("ops_event_log").where({ event_type: "ops.backup_succeeded" }).del();
+    const res = await request(app).get("/api/health").expect(200);
+
+    assert.ok("backup" in res.body);
+    assert.equal(res.body.backup.lastSuccessAt, null);
+  });
+
+  it("reports the most recent ops.backup_succeeded row as backup.lastSuccessAt", async () => {
+    await db("ops_event_log").where({ event_type: "ops.backup_succeeded" }).del();
+    const older = new Date("2026-08-14T04:17:00Z");
+    const newer = new Date("2026-08-16T04:17:00Z");
+    await db("ops_event_log").insert([
+      { event_type: "ops.backup_succeeded", detail: "older", source: "backup.sh", host: "test", occurred_at: older },
+      { event_type: "ops.backup_succeeded", detail: "newer", source: "backup.sh", host: "test", occurred_at: newer },
+    ]);
+
+    const res = await request(app).get("/api/health").expect(200);
+
+    assert.equal(res.body.backup.lastSuccessAt, newer.toISOString());
   });
 
   it("reports object storage as unconfigured when MINIO_ENDPOINT is unset", async () => {

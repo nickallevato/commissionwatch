@@ -1,6 +1,6 @@
 import db from "../config/database";
 import { DeliveryDispatcher } from "../services/delivery/dispatcher";
-import { opsEventPayload, parseOpsEventArgs } from "../services/delivery/ops-events";
+import { opsEventPayload, parseOpsEventArgs, recordOpsEvent } from "../services/delivery/ops-events";
 
 /**
  * Emit one operational event through the delivery dispatcher.
@@ -21,6 +21,16 @@ import { opsEventPayload, parseOpsEventArgs } from "../services/delivery/ops-eve
 
 async function main(): Promise<number> {
   const args = parseOpsEventArgs(process.argv.slice(2));
+  const host = process.env.HOSTNAME ?? "unknown";
+
+  // Written unconditionally, before dispatch is even attempted. `dispatch()`
+  // only persists a row per matched channel route — on a host where nobody
+  // has wired `ops.*` to a channel, that is zero rows, and "did the backup
+  // ever succeed" would have nothing durable to answer it from. This is the
+  // record `/api/health` and `external-monitor.ts` read; see
+  // `services/delivery/ops-events.ts` and migration `107_create_ops_event_log`.
+  await recordOpsEvent(db, { ...args, host });
+
   const dispatcher = new DeliveryDispatcher(db);
   try {
     const result = await dispatcher.dispatch({

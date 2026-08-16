@@ -1,3 +1,4 @@
+import type { Knex } from "knex";
 import type { EventPayload } from "./dispatcher";
 
 /**
@@ -79,4 +80,45 @@ export function parseOpsEventArgs(argv: readonly string[]): OpsEventArgs {
 
 export function opsEventPayload(args: OpsEventArgs, host: string): EventPayload {
   return { detail: args.detail, source: args.source, host };
+}
+
+/**
+ * Write one row to `ops_event_log`, unconditionally.
+ *
+ * This is deliberately separate from `DeliveryDispatcher.dispatch()`, and
+ * called whether or not dispatch finds a single matching channel route. The
+ * dispatcher's `deliveries` table answers "who did we tell"; this table
+ * answers "did this happen at all" — and the second question has to have an
+ * answer even on a host where nobody has configured a channel for `ops.*`
+ * yet. See migration `107_create_ops_event_log` for the full reasoning: this
+ * is the record `external-monitor.ts` reads to judge backup freshness, and a
+ * check with nothing durable to read is theatre.
+ */
+export async function recordOpsEvent(
+  db: Knex,
+  args: OpsEventArgs & { host: string; occurredAt?: Date },
+): Promise<void> {
+  await db("ops_event_log").insert({
+    event_type: args.event,
+    detail: args.detail,
+    source: args.source,
+    host: args.host,
+    occurred_at: args.occurredAt ?? new Date(),
+  });
+}
+
+/**
+ * The most recent time an event of this type was recorded, or `null` if it
+ * never has been.
+ *
+ * `null` is not "no backup"; it is "no *evidence*". Callers — `evaluateBackupFreshness`
+ * in `external-monitor.ts` — must treat it as `blocked`, never as a clean bill
+ * of health borrowed from an empty table.
+ */
+export async function lastOpsEventOccurredAt(db: Knex, event: OpsEvent): Promise<Date | null> {
+  const row = await db("ops_event_log")
+    .where({ event_type: event })
+    .orderBy("occurred_at", "desc")
+    .first<{ occurred_at: Date } | undefined>("occurred_at");
+  return row?.occurred_at ?? null;
 }
