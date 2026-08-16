@@ -8,6 +8,7 @@ import claimsRouter from './claims';
 import placeLinksRouter from './place-links';
 import rosterRouter from './roster';
 import featuresRouter from './features';
+import errorsRouter from './errors';
 import { requireOperator } from '../../middleware/requireOperator';
 
 const router = Router();
@@ -46,6 +47,10 @@ router.use('/roster', rosterRouter);
 // keys come from the compiled manifest, and `feature-registry-audit.test.ts`
 // holds that key set to capabilities rather than checks.
 router.use('/features', featuresRouter);
+// Roadmap 6.8. 5xx counts by route since process start — see
+// services/logging/error-metrics.ts for why this is here and not on the
+// public /api/health.
+router.use('/errors', errorsRouter);
 
 // A guarded catch-all. Without it an unknown admin path 404s before the guard
 // runs, which confirms to an unauthenticated caller which routes exist.

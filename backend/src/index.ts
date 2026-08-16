@@ -14,6 +14,7 @@ import { DisputeMailer, ensureDisputeReplyChannel } from "./services/dispute-not
 import { FeatureRegistry, setFeatureRegistry } from "./services/features/registry";
 import { ExportSnapshotScheduler } from "./services/export/snapshot-scheduler";
 import { SessionSweepScheduler } from "./services/auth/session-sweep";
+import { logger } from "./services/logging/logger";
 
 const PORT = process.env.PORT || 3001;
 
@@ -34,7 +35,7 @@ registerPressroomStack({ queue: ingestion.queue, scheduler: ingestion.scheduler 
 // can sign into beats a site that will not start.
 operatorAuthService()
   .seedFirstOperator()
-  .catch((err) => console.error("Operator seed failed", err));
+  .catch((err: unknown) => logger.error("Operator seed failed", { error: err }));
 
 /**
  * The delivery dispatcher, constructed by a running server for the first time.
@@ -127,7 +128,7 @@ const exportSnapshots = new ExportSnapshotScheduler(db);
 const sessionSweep = new SessionSweepScheduler(operatorAuthService());
 
 const server = app.listen(PORT, () => {
-  console.log(`CommissionWatch backend listening on port ${PORT}`);
+  logger.info("CommissionWatch backend listening", { port: PORT });
   digestScheduler.start();
 
   // The scheduler registers its sources and arms its cron jobs. It deliberately
@@ -135,7 +136,9 @@ const server = app.listen(PORT, () => {
   // tick, so a crash-looping container cannot turn into a crawl of a county web
   // server. A failure to arm is logged and not fatal — a site that serves the
   // records it already has beats a site that will not start.
-  startIngestion(db, ingestion).catch((err) => console.error("Ingestion start failed", err));
+  startIngestion(db, ingestion).catch((err: unknown) =>
+    logger.error("Ingestion start failed", { error: err }),
+  );
 
   // Both loops arm their timer unconditionally and re-read their flag per cycle,
   // so an operator turning one on from the console gets it within one interval
@@ -166,12 +169,12 @@ const server = app.listen(PORT, () => {
   // attribute alone leaves the event unroutable or routable to a webhook.
   // Nothing sends regardless until the `event_drain` feature is on.
   ensureDisputeReplyChannel(db).catch((err: unknown) =>
-    console.error("Dispute reply channel setup failed", err),
+    logger.error("Dispute reply channel setup failed", { error: err }),
   );
 });
 
 function shutdown() {
-  console.log("Shutting down gracefully...");
+  logger.info("Shutting down gracefully...");
   digestScheduler.stop();
   ingestion.scheduler.stop();
   ingestion.worker.stop();
@@ -195,7 +198,7 @@ function shutdown() {
     // pool closes, since flushing needs the database.
     dispatcher
       .flushAll()
-      .catch((err: unknown) => console.error("Delivery flush on shutdown failed", err))
+      .catch((err: unknown) => logger.error("Delivery flush on shutdown failed", { error: err }))
       .finally(() => {
         void db.destroy().then(() => process.exit(0));
       });

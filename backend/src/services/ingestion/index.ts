@@ -15,6 +15,7 @@ import { createGovernorClient, GovernorMisconfigured } from "../governor/model";
 import { createGovernHandler, GOVERN_CONCURRENCY } from "../governor/stage";
 import { CensusGeocoder } from "../locate/census";
 import { createLocateHandler, LOCATE_CONCURRENCY } from "../locate/stage";
+import { logger as structuredLogger } from "../logging/logger";
 
 /**
  * Assembles the ingestion stack.
@@ -137,7 +138,10 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
       db,
       registry,
       artifacts: options.artifacts ?? minioArtifactWriter,
-      logger: { info: (message) => console.log(message), warn: (message) => console.warn(message) },
+      logger: {
+        info: (message) => structuredLogger.info(message, { service: "ingestion-handlers" }),
+        warn: (message) => structuredLogger.warn(message, { service: "ingestion-handlers" }),
+      },
     }),
     artifacts: createArtifactStore(options.read ?? downloadDocument),
     // One job at a time: the adapter serialises its own requests anyway, and a
@@ -159,7 +163,10 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
       db,
       registry,
       artifacts: options.artifacts ?? minioArtifactWriter,
-      logger: { info: (message) => console.log(message), warn: (message) => console.warn(message) },
+      logger: {
+        info: (message) => structuredLogger.info(message, { service: "ingestion-handlers" }),
+        warn: (message) => structuredLogger.warn(message, { service: "ingestion-handlers" }),
+      },
     }),
     artifacts: createArtifactStore(options.read ?? downloadDocument),
     batchSize: 1,
@@ -214,7 +221,10 @@ export function buildIngestionStack(db: Knex, options: BuildOptions = {}): Inges
     }
     // Loud, and it names the fix. A governor that quietly does not exist is the
     // same failure as a backlog nobody counts.
-    console.error(`Ingestion: the governor will not run — ${error.message}`);
+    structuredLogger.error("Ingestion: the governor will not run", {
+      service: "ingestion",
+      reason: error.message,
+    });
   }
   /**
    * The location loop.
@@ -268,10 +278,12 @@ export async function startIngestion(
   });
   for (const source of registered) {
     if (source.created) {
-      console.log(
-        `Ingestion: registered source ${source.adapterKey} (${source.sourceId}), disabled — ` +
-          "enable it and set cron_expression in ingestion_sources when you want it to sweep",
-      );
+      structuredLogger.info("Ingestion: registered source, disabled", {
+        service: "ingestion",
+        adapterKey: source.adapterKey,
+        sourceId: source.sourceId,
+        detail: "enable it and set cron_expression in ingestion_sources when you want it to sweep",
+      });
     }
   }
   /**
@@ -286,7 +298,10 @@ export async function startIngestion(
    */
   const recovered = await stack.queue.recoverStalled();
   if (recovered > 0) {
-    console.log(`Ingestion: requeued ${recovered} job(s) abandoned by a stopped worker`);
+    structuredLogger.info("Ingestion: requeued job(s) abandoned by a stopped worker", {
+      service: "ingestion",
+      recovered,
+    });
   }
 
   await stack.scheduler.start();
@@ -327,13 +342,13 @@ export async function startIngestion(
    */
   if (schedulerEnabled()) {
     void stack.stationaryWorker.start().catch((error: unknown) => {
-      console.error("Ingestion: parse/analyze worker loop stopped", error);
+      structuredLogger.error("Ingestion: parse/analyze worker loop stopped", { service: "ingestion", error });
     });
     // Same gate, same reasoning, its own loop: without it an operator's
     // "extract" button would enqueue a job nothing ever claims — which is the
     // failure re-parse had for a day, reported as success and producing silence.
     void stack.extractionWorker.start().catch((error: unknown) => {
-      console.error("Ingestion: extract worker loop stopped", error);
+      structuredLogger.error("Ingestion: extract worker loop stopped", { service: "ingestion", error });
     });
     // Third loop, same gate. Absent when the governor pins are misconfigured —
     // see `buildIngestionStack` — in which case govern jobs are held in
@@ -344,7 +359,7 @@ export async function startIngestion(
     // `ingestion.governorWorker?.stop();` beside them.
     if (stack.governorWorker !== null) {
       void stack.governorWorker.start().catch((error: unknown) => {
-        console.error("Ingestion: govern worker loop stopped", error);
+        structuredLogger.error("Ingestion: govern worker loop stopped", { service: "ingestion", error });
       });
     }
     // Fourth loop, same gate. Without it a queued `locate` job would sit
@@ -356,7 +371,7 @@ export async function startIngestion(
     // `ingestion.locateWorker.stop();` beside the other two, and
     // `ingestion.governorWorker?.stop();` which is still missing.
     void stack.locateWorker.start().catch((error: unknown) => {
-      console.error("Ingestion: locate worker loop stopped", error);
+      structuredLogger.error("Ingestion: locate worker loop stopped", { service: "ingestion", error });
     });
   }
 

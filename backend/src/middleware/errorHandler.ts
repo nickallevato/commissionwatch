@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from "express";
+import { logger } from "../services/logging/logger";
+import { getRequestId } from "./requestContext";
 
 interface AppError extends Error {
   statusCode?: number;
@@ -33,6 +35,17 @@ export function errorHandler(
   // Express's own final handler delegates here and destroys the socket, which
   // is the only honest ending: the response is already wrong and cannot be
   // unsaid, so it must not be allowed to look complete.
+  //
+  // Deliberately no logging added on this path. `next(err)` must return
+  // synchronously and must not touch `res` beyond what it already does — this
+  // branch exists because the previous code called `res.status()` from here
+  // and turned a handled error into an unhandled one. A structured log call
+  // touches neither, but the failure mode this branch guards against is
+  // exactly "one more thing done in here that turns out to throw", so nothing
+  // is added beyond the delegation. The `finish` handler in
+  // `middleware/requestContext.ts` still logs the request and its final
+  // status code once the response actually ends, so the event is not silent —
+  // it is just not logged from inside this function.
   if (res.headersSent) {
     next(err);
     return;
@@ -47,7 +60,12 @@ export function errorHandler(
   const message = statusCode === 500 ? "Internal server error" : err.message;
 
   if (statusCode === 500) {
-    console.error(err);
+    // The requestId correlates this line with the one `finish` produces in
+    // `middleware/requestContext.ts` — that one carries the route and status,
+    // this one carries what actually threw. Still exactly one console.error
+    // call per 500, same as before this logger existed; `error-handler.test.ts`
+    // depends on that count.
+    logger.error(err.message, { requestId: getRequestId(), stack: err.stack });
   }
 
   res.status(statusCode).json({ error: message, statusCode });

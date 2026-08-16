@@ -32,6 +32,7 @@ import calendarRouter from "./routes/calendar";
 import adminRouter from "./routes/admin";
 import { publicRateLimit } from "./services/rate-limit";
 import { errorHandler } from "./middleware/errorHandler";
+import { requestContext } from "./middleware/requestContext";
 
 const app = express();
 
@@ -47,6 +48,17 @@ const app = express();
  * reason: `true` trusts the whole chain, including anything the client wrote.
  */
 app.set("trust proxy", 1);
+
+/**
+ * Roadmap 6.8. First in the chain, before CORS, the rate limiter and the
+ * body parser — see `middleware/requestContext.ts` for why it has to run
+ * ahead of all three rather than slot in between them: it needs to see every
+ * request, including the ones the rate limiter refuses and the preflights
+ * CORS answers before any route runs, so the one summary log line per request
+ * and the request id on it cover the whole surface rather than only the
+ * requests that got past both.
+ */
+app.use(requestContext);
 
 /**
  * Origins permitted to make credentialed requests to /api/admin. Comma

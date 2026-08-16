@@ -16,6 +16,7 @@ import {
   type ParseTarget,
   type StageTargets,
 } from "./queue";
+import { logger as structuredLogger } from "../logging/logger";
 
 /**
  * The ingestion worker: a poll loop that claims jobs, dispatches them by stage
@@ -197,10 +198,13 @@ export interface WorkerLogger {
   error(message: string): void;
 }
 
+// Roadmap 6.8. See the identical note in ingestion/scheduler.ts: this swaps
+// only the default, so every this.logger.info/warn/error call site below is
+// unchanged and already gets structured JSON lines through it.
 const defaultLogger: WorkerLogger = {
-  info: (message) => console.log(message),
-  warn: (message) => console.warn(message),
-  error: (message) => console.error(message),
+  info: (message) => structuredLogger.info(message, { service: "ingestion-worker" }),
+  warn: (message) => structuredLogger.warn(message, { service: "ingestion-worker" }),
+  error: (message) => structuredLogger.error(message, { service: "ingestion-worker" }),
 };
 
 export interface WorkerOptions {

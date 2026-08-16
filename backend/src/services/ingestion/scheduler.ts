@@ -4,6 +4,7 @@ import type { AdapterRegistry } from "./adapters/registry";
 import { errorMessage, IngestionQueue } from "./queue";
 import { rebuildMatters } from "../matters";
 import type { IngestionWorker } from "./worker";
+import { logger as structuredLogger } from "../logging/logger";
 
 /**
  * The thing that has never existed: something that actually calls the ingestion
@@ -92,10 +93,14 @@ export interface SchedulerLogger {
   error(message: string): void;
 }
 
+// Roadmap 6.8. This is the default handed to every scheduler nothing else
+// configures — see services/logging/logger.ts for why the migration is "swap
+// the default, leave every this.logger.info/warn/error call site alone" and
+// not a call-by-call rewrite.
 const consoleLogger: SchedulerLogger = {
-  info: (message) => console.log(message),
-  warn: (message) => console.warn(message),
-  error: (message) => console.error(message),
+  info: (message) => structuredLogger.info(message, { service: "scheduler" }),
+  warn: (message) => structuredLogger.warn(message, { service: "scheduler" }),
+  error: (message) => structuredLogger.error(message, { service: "scheduler" }),
 };
 
 /** Just enough of node-cron's task to start, stop and inspect one. */
