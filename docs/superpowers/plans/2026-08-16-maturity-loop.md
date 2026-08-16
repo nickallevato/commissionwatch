@@ -103,3 +103,23 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
 
   Also noted for later: a remote branch `fix/operator-guard-public-writes` exists at `7373488` that
   this loop did not create. Not touched; recorded so it is not mistaken for mine.
+- **08:28Z** — Frontend advisory work verified myself: **829 tests / 69 files**, typecheck lint build
+  clean. Committed `0b4f0ed`.
+
+  **The agent found a ceiling and stopped, correctly.** `react-router-dom@6.30.4` is the *last* v6
+  release, and all three advisories against it are fixed only in 7.13.0+. Verified independently:
+  `npm view react-router-dom@6 version` → 6.30.4, latest → 7.18.2. So the v6 line can never clear
+  this, and the agent was right to refuse a framework migration on its own initiative.
+
+  **Decision, mine: migrate to v7.** An open redirect on a site whose value is being trustworthy
+  about the public record is worse than its moderate CVSS — a link that looks like our domain and
+  lands on a phishing page damages precisely what this project sells. And the migration is
+  incremental: the suite already emits `v7_startTransition` and `v7_relativeSplatPath` warnings, so
+  the codebase is already being told the deltas. Dispatched in **two verifiable steps** — future
+  flags on v6 first, then the version bump — so a behaviour change is never confounded with a
+  version change.
+
+  Instructed it to mutation-verify a broken `Navigate` redirect specifically. `/anomalies` →
+  `/findings` and `/members` → `/officials` exist because public URLs were renamed; a silently
+  broken redirect there is a broken published URL, and if no test catches it that missing guard
+  matters more than the migration.
