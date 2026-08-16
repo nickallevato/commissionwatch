@@ -451,6 +451,55 @@ export interface SweepOutcome {
   kind: string;
 }
 
+// ---------------------------------------------------------------------------
+// The shared ingestion queue — mirrors backend/src/services/pressroom/queue-stats.ts
+// ---------------------------------------------------------------------------
+
+export interface QueueStageStat {
+  stage: string;
+  pending: number;
+}
+
+export interface QueueSourceStat {
+  source_id: string;
+  adapter_key: string;
+  enabled: boolean;
+  /** Jobs of this source's runs still waiting. */
+  pending: number;
+  /** When the oldest of them became eligible. Null when none are waiting. */
+  oldest_pending_at: string | null;
+  /** Jobs of this source's runs that have ever completed. */
+  completed_lifetime: number;
+}
+
+export interface QueueStats {
+  /** Pending jobs across every source. The number the claim walks. */
+  depth: number;
+  /** `next_attempt_at` of the oldest pending job, across all sources. */
+  oldest_pending_at: string | null;
+  /** Jobs that reached `done` in the last hour. Approximate — see the backend. */
+  drained_last_hour: number;
+  by_stage: QueueStageStat[];
+  by_source: QueueSourceStat[];
+  /** When these figures were read, so a stale console can say so. */
+  read_at: string;
+}
+
+/** One row of `GET /runs` — the most recent sweeps across every source, newest first. */
+export interface RecentRun {
+  run_id: string;
+  adapter_key: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  /** Jobs of this run that completed — the sweep's own work. */
+  own_completed: number;
+  /** Jobs of this run still queued when it stopped. */
+  own_outstanding: number;
+  /** Jobs the sweep finished that belonged to some *other* run. */
+  others_completed: number;
+}
+
 export interface RunFailure {
   id: string;
   stage: string;
