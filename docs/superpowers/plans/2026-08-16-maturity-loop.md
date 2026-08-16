@@ -293,3 +293,27 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   The work is genuinely incomplete — 2 `it` blocks against a 7-step chain — so it is **not**
   committed. Approve, public visibility, and the retraction half are all still missing, and the wall
   mutation has still never been run.
+- **09:50Z** — **The 6.4 debt is paid, and paid with a measurement.** `6db1d09` deployed, so the
+  production `curl` I have been carrying since 09:22 finally ran. Findings 1 and 2 are closed:
+
+  | | Before | After |
+  |---|---|---|
+  | HSTS on `GET /` | absent | `max-age=31536000` |
+  | `X-Frame-Options` on `/api/health` | **2** (`SAMEORIGIN` + `DENY`) | **1** (`DENY`) |
+
+  All six security headers are singular on both the document and the API. **One duplicate remains
+  and is deliberate** — two `Server` headers, because stock `nginx:alpine` has no headers-more
+  module. Version disclosure, not a control; recorded rather than dropped.
+
+  This is the check no test in the repo could perform. `nginx-headers.test.ts` reads the config as
+  text and `security-headers.test.ts` reads Express's own output, and **neither can see the merged
+  response a real client gets**. Carrying that debt for three ticks instead of calling the commit
+  done was the right call.
+
+  Process hygiene: **0** stale test processes now, against the 31-hour zombie found last tick.
+
+  Free slot took the `sweepExpiredSessions()` defect. Told the agent the honest severity up front —
+  **not** an auth bypass, since validity is checked at use — so it builds proportionate disclosure
+  rather than an alarm. The test that matters is the one asserting the sweep is *wired*, not merely
+  exported: being defined and uncalled is the entire bug, and a test of the function alone would
+  have passed against today's broken state.
