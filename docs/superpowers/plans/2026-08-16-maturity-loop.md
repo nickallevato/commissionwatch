@@ -372,3 +372,28 @@ instruction, not about the agents** — and I had the evidence after the second 
   The assertion I care about most there is that an **absent** `resources` field reports `blocked`
   rather than `pass`. That is the exact shape of the 2026-08-15 failure — everything green, disk
   full, nothing determinable — and its mutation reproduces the original incident.
+- **10:20Z** — 6.3 verified myself and pushed (`c2ce56a`); backend **2166 / 526**, 0 fail, lint and
+  build clean, and I checked directly that no raw capacity number reaches the public health endpoint.
+  Roadmap row corrected — it still read Planned for work already committed, the third status drift
+  today inside the loop's own output.
+
+  **I corrected a public claim of mine about 6.9.** I described it as "two of seven steps" twice. It
+  was complete — organised as two `it()` blocks where the second walks approve → three surfaces show
+  it → retract → three surfaces hide it, plus a tombstone check. I counted blocks, read two modest
+  test names, and inferred incompleteness without reading the bodies. Same shortcut as trusting a
+  summary, taken against my own rule, and I blamed an agent for an environment problem I had caused.
+  Correction committed in `85b5d01`.
+
+  The retraction mutation has now been run and is the piece that was genuinely missing: removing
+  `retracted_at` from the wall fails with *"the meeting claims surface still showed a retracted
+  claim"*. Both halves of the wall are proven — publication and withdrawal.
+
+  Dispatched **6.2-backend + 6.7** (one agent, so `backend/package.json` has a single writer) and
+  **7.3 + 6.6's reader-facing halves**. The pairing is deliberate: both remaining doc items produced
+  a good spec that never reached a reader, and a policy in `docs/superpowers/specs/` is a private
+  intention. `PrivacyPage` currently says there is no considered retention policy — true when
+  written, false now.
+
+  Told the 6.2 agent to **stop and report** rather than commit a gate the backend cannot pass today:
+  a CI gate that fails on landing gets an allow-list bolted on within the hour, and then it is
+  decoration.
