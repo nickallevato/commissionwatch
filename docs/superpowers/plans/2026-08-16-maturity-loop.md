@@ -88,3 +88,18 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   **Decision made and recorded:** the CI audit gate runs `--omit=dev --audit-level=high`. Failing on
   build-time moderates would train everyone to ignore the check, and a gate people route around is
   worse than no gate. The current moderates are being fixed rather than tolerated.
+- **08:20Z** — Tick one minute after dispatch; both agent slots full, nothing to verify. Did **not**
+  run the frontend suite: `package.json` and the lock were mid-upgrade, and a suite run against a
+  half-installed tree measures nothing.
+
+  **Found a problem of my own making.** Production is on `f50d65e` while head is `944e8d1`, so the
+  dark theme and the review-queue rebuild are committed, verified and **not live**. Four of the last
+  eight CI runs are `cancelled`: pushing after every commit means each push kills the previous
+  deploy. A verified commit that never reaches production is worth nothing, and I had been treating
+  the push as the finish line.
+
+  **Decision: batch pushes.** Hold until the in-flight run for `af09468` lands, then push the
+  accumulated commits as one. Push at verified milestones, not per commit.
+
+  Also noted for later: a remote branch `fix/operator-guard-public-writes` exists at `7373488` that
+  this loop did not create. Not touched; recorded so it is not mistaken for mine.
