@@ -486,3 +486,33 @@ instruction, not about the agents** — and I had the evidence after the second 
   already owns this shape of problem, so the check goes there. Told the agent to **establish what
   production actually does first** — prerendering may be shipped dark, and building a check for
   something that is not happening would be worse than leaving the gap named.
+
+## Second review — six of seven pass
+
+- **11:33Z** — Reviewer returned. Operational readiness 2→3, security 2→3, delivery 2→3,
+  sustainability 1→3, product 3→4; testing and data governance held. **Six of seven pass.**
+  Operational readiness is the holdout, on one item.
+
+  **It withdrew its own figures unprompted** after I asked it to stop running the full suite —
+  recognised its three runs as the source of false failures I had been chasing, discarded its
+  numbers as contended, cited mine, and downgraded its own flake finding to an unresolved
+  observation because it could not separate contention from accumulated state. That is this loop's
+  standard applied by an agent to itself, and it is the strongest evidence yet that the
+  verify-it-yourself rule is worth its cost.
+
+  **It also corrected me on prerender.** I reported the split as broken; it is **shipped dark**, and
+  the reviewer reclassified it from hollow work to working discipline — `nginx.conf` predicts the
+  behaviour, `CHANGELOG.md` marks it *Shipped dark*, `STATUS.md` names the operator task. It
+  defended the unconditional `Vary` too: the flag lives in Parameter Store, nginx cannot know its
+  state, and emitting it conditionally would open a window where a cache serves a crawler's document
+  to a human.
+
+  **The finding that matters is not a defect.** `sitemap.xml` advertises the published meeting, and
+  every crawler currently receives an empty shell for it — the project's only published record is
+  invisible to search and produces no link preview. One line in Parameter Store and a restart. It is
+  the only operator-blocked item costing a **decision** rather than a purchase, and I have surfaced
+  it to the operator rather than sitting on it.
+
+  Two of the five must-land items dispatched: the backup freshness check with `deploy/Caddyfile`,
+  and the `PrivacyPage` contradiction. The remaining three all touch `backend/package.json` and go
+  together next tick, to keep that file to one writer.
