@@ -247,3 +247,26 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   decision and it shipped, and its description still repeats my false unthrottled claim. Told the
   agent to check every status against the tree and to say plainly if it finds something I marked
   done that is not. That finding would be worth more than the retention policy.
+- **09:27Z** — Docs slot landed (`be3baa8`) and **found two of my own errors**, which is why it was
+  told not to take my word. 6.2 was marked wholly Planned while a frontend audit gate had already
+  shipped in `0b4f0ed` — my own work, three hours old, under-reported. And 7.5 is **Partially** done,
+  not Done: the accessibility page shipped but the operator console's keyboard and screen-reader
+  testing does not exist, and the axe sweep covers public routes only. I would have marked that done.
+
+  **New defect, verified independently:** `sweepExpiredSessions()` at `operators.ts:297` is called by
+  nothing — the only occurrence in the tree is its own definition. Expired operator sessions
+  accumulate forever. Not an auth bypass, since validity is checked at use, but a method somebody
+  wrote intending it to run. Backend slot next tick.
+
+  Also corrected a figure this project has repeated, including by me: `record_corrections` at 14,528
+  rows is **test-database fixture growth, not production**.
+
+  **The 6.4 debt is now measured rather than asserted.** Live is still `21391e2`, and against it the
+  document returns **0** HSTS headers and `/api/health` returns **2** `X-Frame-Options` — precisely
+  the defect the fix targets, confirmed present pre-deploy. Run 29289 for `6db1d09` carries the fix
+  and is in flight. **I am holding the push of `be3baa8`** rather than cancelling it, which is the
+  mistake diagnosed at 08:20.
+
+  6.9's agent stalled on a backgrounded test run — the third agent today to do that. Resumed with
+  foreground-only instructions and a specific ask: if breaking the publication wall does **not** fail
+  its test, say so, because that finding would matter more than the test.
