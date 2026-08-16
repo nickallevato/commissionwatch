@@ -168,6 +168,51 @@ const ENDPOINTS: readonly string[] = [
 ];
 
 /* ---------------------------------------------------------------------------
+   API stability tiers
+   ------------------------------------------------------------------------- */
+
+/**
+ * Two named tiers, stated per surface, written 2026-08-16.
+ *
+ * The project asks people to build on `/api/data`, the feeds and the OCD
+ * export. Two organisations this project researched for the parity matrix
+ * failed at exactly that: the ProPublica Congress API issues no new keys, and
+ * Open States has been absorbed into commercial Plural and is deprecating its
+ * public tooling. A well-resourced newsroom and a flagship civic-data project
+ * both could not keep a public API alive. Deciding the policy now, rather
+ * than at the moment something has to change, is the whole point of writing
+ * it down before it is tested.
+ */
+interface StabilityTier {
+  readonly tier: string;
+  readonly surfaces: readonly string[];
+  readonly promise: string;
+}
+
+const STABILITY_TIERS: readonly StabilityTier[] = [
+  {
+    tier: "Stable",
+    surfaces: [
+      "/api/data — the manifest and every table in the bulk export",
+      "/api/data/ocd.json",
+      "/feed.xml and /feed.rss",
+      "The per-record read API listed under Getting the data, above",
+    ],
+    promise:
+      "Breaking changes get 90 days' notice, announced where a change to a published claim is announced: the corrections log. The notice states what replaces the endpoint or field, or says plainly that nothing does.",
+  },
+  {
+    tier: "Experimental",
+    surfaces: [
+      "The MCP endpoint — built and tested, not yet switched on for a reader to reach",
+      "Anything else CHANGELOG.md records as shipped dark",
+    ],
+    promise:
+      "May change shape or disappear without notice. Said here so nobody builds on it believing otherwise — an experimental surface is not a smaller stable one, it is a different promise.",
+  },
+];
+
+/* ---------------------------------------------------------------------------
    Small parts
    ------------------------------------------------------------------------- */
 
@@ -564,6 +609,58 @@ export function DataLicensePage() {
           </Prose>
         </section>
 
+        {/* -------------------------------------------------- Stability */}
+        <section className="mt-12" aria-labelledby="stability">
+          <SectionHeading id="stability">API stability</SectionHeading>
+          <Prose>
+            Every public surface falls into one of two tiers, stated here so
+            you can decide what to build on before you build on it.
+          </Prose>
+
+          <div className="mt-6 space-y-6">
+            {STABILITY_TIERS.map((tier) => (
+              <div key={tier.tier} className="border-l-2 border-rule pl-4">
+                <p className="label-sm">{tier.tier}</p>
+                <ul className="mt-2 max-w-prose">
+                  {tier.surfaces.map((surface) => (
+                    <li
+                      key={surface}
+                      className="font-mono text-xs leading-relaxed text-ink"
+                    >
+                      {surface}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
+                  {tier.promise}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <Prose>
+            <strong className="font-semibold text-ink">
+              A new field is not a breaking change.
+            </strong>{" "}
+            A stable endpoint may gain a field or a dataset at any time without
+            notice. A consumer of this API has to tolerate a field it does not
+            recognise — that is what makes additive work possible without
+            waiting on the notice period above.
+          </Prose>
+          <Prose>
+            A retirement is announced, never silently 404&rsquo;d. Withdrawing
+            data that people depend on is the same category of act as changing
+            a published claim, so it is announced on the same surface:{" "}
+            <Link
+              to="/corrections"
+              className="underline underline-offset-2 hover:text-accent"
+            >
+              the corrections log
+            </Link>
+            .
+          </Prose>
+        </section>
+
         {/* -------------------------------------------------- The bulk export */}
         <section className="mt-12" aria-labelledby="export">
           <SectionHeading id="export">The bulk export</SectionHeading>
@@ -752,6 +849,62 @@ export function DataLicensePage() {
             are none to withhold. Party affiliation is blank for nonpartisan
             offices because it was never inferred — blank means unknown, not
             independent.
+          </Prose>
+        </section>
+
+        {/* -------------------------------------------------- Continuity */}
+        <section className="mt-12" aria-labelledby="continuity">
+          <SectionHeading id="continuity">
+            Who runs this, and what happens if it stops
+          </SectionHeading>
+          <Prose>
+            CommissionWatch is a volunteer project, not a newsroom or a
+            nonprofit — there is no staff, no board, and no funding beyond what
+            its publisher pays for out of pocket to keep the host, the domain
+            and the model tokens running. It takes no money from any
+            government, candidate, committee or party, and none from anyone
+            with an interest in what it publishes.
+          </Prose>
+          <Prose>
+            <strong className="font-semibold text-ink">
+              Bus factor is one.
+            </strong>{" "}
+            <span className="font-mono text-xs">
+              git shortlog -sne --all
+            </span>{" "}
+            shows one human commit author beside the automated identity that
+            writes most of this project&rsquo;s code. The same person reviews
+            every finding before it publishes. That is not a hidden risk being
+            disclosed after the fact — it is the honest shape of a project this
+            size, and the reason to say it plainly rather than write &ldquo;we&rdquo;
+            in a way that implies a team.
+          </Prose>
+          <Prose>
+            <strong className="font-semibold text-ink">
+              If this project stops, the record does not stop existing.
+            </strong>{" "}
+            The three layers above are licensed the way they are for exactly
+            this reason. The compiled dataset is CC BY 4.0 and the code is MIT
+            — both survive this project by design, under terms that do not
+            require anyone&rsquo;s permission to keep using. The government
+            documents underneath were never this project&rsquo;s to relicense in
+            the first place: they are public records, and they stay obtainable
+            from the jurisdictions that produced them whether or not this site
+            is still running. If the project ends, the final export is
+            published as of that date and left reachable for as long as the
+            domain is held.
+          </Prose>
+          <Prose>
+            If this site goes quiet and you need something it would have shown
+            you, the same records are available from the custodians directly —{" "}
+            <Link
+              to="/public-records"
+              className="underline underline-offset-2 hover:text-accent"
+            >
+              Request a record
+            </Link>{" "}
+            drafts that letter today, and works the same way whether or not
+            this project is the one reading the answer.
           </Prose>
         </section>
 

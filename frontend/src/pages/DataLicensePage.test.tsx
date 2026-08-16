@@ -99,6 +99,10 @@ const ROUTED_PATHS = [
   "/data-license",
   "/calendar",
   "/status",
+  // 7.2/7.4. The stability and continuity sections link to the corrections
+  // log and to the records-request generator.
+  "/corrections",
+  "/public-records",
 ];
 
 describe("DataLicensePage", () => {
@@ -310,6 +314,84 @@ describe("DataLicensePage", () => {
       "https://commissionwatch.bmux.sh/api/data/meetings.csv",
       "https://commissionwatch.bmux.sh/api/data/meetings.json",
     ]);
+  });
+
+  /* --------------------------------------------------------- 7.2: API stability */
+
+  describe("API stability", () => {
+    it("states the two tiers and which surfaces are in each", () => {
+      renderWithProviders(<DataLicensePage />);
+      expect(
+        screen.getByRole("heading", { name: "API stability" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Stable")).toBeInTheDocument();
+      expect(screen.getByText("Experimental")).toBeInTheDocument();
+      expect(
+        screen.getByText(/The MCP endpoint — built and tested, not yet switched on/),
+      ).toBeInTheDocument();
+    });
+
+    it("promises 90 days' notice and an announcement on the corrections log, never a silent 404", () => {
+      const { container } = renderWithProviders(<DataLicensePage />);
+      expect(container.textContent).toMatch(/90 days' notice/);
+      expect(container.textContent).toMatch(
+        /announced on the same surface.*the corrections log/s,
+      );
+      expect(container.textContent).toMatch(
+        /A retirement is announced, never silently\s+404/,
+      );
+    });
+
+    it("says an additive change — a new field — is not breaking", () => {
+      renderWithProviders(<DataLicensePage />);
+      expect(
+        screen.getByText(/A new field is not a breaking change/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/has to tolerate a field it does not\s+recognise/),
+      ).toBeInTheDocument();
+    });
+  });
+
+  /* --------------------------------------------------------- 7.4: continuity */
+
+  describe("funding and continuity", () => {
+    it("states plainly that bus factor is one", () => {
+      renderWithProviders(<DataLicensePage />);
+      expect(
+        screen.getByRole("heading", {
+          name: "Who runs this, and what happens if it stops",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Bus factor is one/)).toBeInTheDocument();
+    });
+
+    it("names this as a volunteer project with no staff, board or funding beyond the publisher", () => {
+      const { container } = renderWithProviders(<DataLicensePage />);
+      expect(container.textContent).toMatch(
+        /volunteer project, not a newsroom or a\s+nonprofit/,
+      );
+      expect(container.textContent).toMatch(/no staff, no board/);
+    });
+
+    it("says the record outlives the project, and why the licences make that true", () => {
+      const { container } = renderWithProviders(<DataLicensePage />);
+      expect(container.textContent).toMatch(
+        /If this project stops, the record does not stop existing/,
+      );
+      expect(container.textContent).toMatch(
+        /public records, and they stay obtainable/,
+      );
+      expect(container.textContent).toMatch(
+        /the final export is\s+published as of that date and left reachable/,
+      );
+    });
+
+    it("points a reader who finds this site gone quiet to the records-request route", () => {
+      const { container } = renderWithProviders(<DataLicensePage />);
+      const link = container.querySelector('a[href="/public-records"]');
+      expect(link).not.toBeNull();
+    });
   });
 
   it("says so plainly when the manifest cannot be loaded", async () => {
