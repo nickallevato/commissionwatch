@@ -338,3 +338,15 @@ buffered output vanished and the failure presented as silence.
 I made the same buffering mistake myself twice this morning and still wrote the bad instruction four
 times. **The lesson is that a repeated failure across independent agents is evidence about the
 instruction, not about the agents** — and I had the evidence after the second one.
+- **09:58Z** — Checked the concurrency risk I had flagged and it held: both `publish-path.e2e.test.ts`
+  and `session-sweep.test.ts` appear in the running suite's file list, so two agents editing
+  `backend/package.json` did not clobber each other's registration. That was the one failure mode
+  here with no error attached — a dropped entry means a file silently never runs again.
+
+  Stopped resuming the session-sweep agent. It was deadlocked on a background run started *before*
+  my corrected instruction reached it, so no amount of re-prompting frees it; the run has to finish.
+  It has now started a clean full suite. Verifying myself next tick rather than re-prompting a third
+  time.
+
+  Nothing committed from either agent. 6.9 still has half its chain missing and its wall mutation
+  unrun; the session sweep is unverified. **Neither is going in on an agent's word.**
