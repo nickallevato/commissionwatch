@@ -17,6 +17,13 @@ import {
   type Severity,
   type SparkBar,
 } from "@/components/PressroomUI";
+import { formatTimestamp } from "@/lib/dates";
+import {
+  failuresIn,
+  outstandingIn,
+  processedIn,
+  recordsIn,
+} from "@/lib/ingestion-counts";
 import type { PressroomSource, SweepOutcome } from "@/types";
 
 /**
@@ -83,11 +90,7 @@ type LoadResult = { ok: true; sources: PressroomSource[] } | { ok: false };
 
 function formatStamp(value: string | null): string {
   if (!value) return "Never";
-  return new Date(value).toLocaleString();
-}
-
-function countRecords(counts: Record<string, number>): number {
-  return Object.values(counts).reduce((total, value) => total + value, 0);
+  return formatTimestamp(value);
 }
 
 /**
@@ -113,20 +116,37 @@ function sweepBars(source: PressroomSource): { bars: SparkBar[]; label: string }
     };
   }
 
-  const records = countRecords(run.counts);
+  const records = recordsIn(run.counts);
+  const failures = failuresIn(run.counts);
+  const processed = processedIn(run.counts);
+  const outstanding = outstandingIn(run.counts);
+
+  // The bar's height is the work the sweep did, which is `processed` when it was
+  // draining a backlog. Sizing it on `records` alone drew a productive sweep as
+  // the shortest possible bar.
+  const work = Math.max(records, processed);
   bars[SPARK_SLOTS - 1] = {
     kind: run.status === "failed" ? "bad" : run.status === "partial" ? "warn" : "ok",
     // 6px floor so a zero-record sweep is still visibly a sweep, and not
     // mistakable for the grey nothing beside it.
-    height: Math.max(6, Math.min(20, 6 + records)),
+    height: Math.max(6, Math.min(20, 6 + work)),
   };
+
+  // Each figure is named for what it is. Folding them into one number is how
+  // this line came to read "91 records" for a sweep that landed none — see
+  // `lib/ingestion-counts.ts` for why `processed` and `outstanding` are neither
+  // records nor failures.
+  const parts = [`${records} new record${records === 1 ? "" : "s"}`];
+  if (processed > 0) parts.push(`${processed} job${processed === 1 ? "" : "s"} processed`);
+  if (outstanding > 0) parts.push(`${outstanding} still queued`);
+  if (failures > 0) parts.push(`${failures} failed or blocked`);
 
   return {
     bars,
     label:
-      `${source.adapter_key}: one sweep on record — ${run.status}, ${records} record` +
-      `${records === 1 ? "" : "s"}. The other ${SPARK_SLOTS - 1} slots hold no sweep, because ` +
-      `no earlier run is kept on this screen.`,
+      `${source.adapter_key}: one sweep on record — ${run.status}, ${parts.join(", ")}. ` +
+      `The other ${SPARK_SLOTS - 1} slots hold no sweep, because no earlier run is kept ` +
+      `on this screen.`,
   };
 }
 

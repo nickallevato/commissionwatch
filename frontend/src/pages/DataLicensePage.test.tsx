@@ -12,6 +12,7 @@ import { http, HttpResponse } from "msw";
 import { waitFor } from "@testing-library/react";
 import { renderWithProviders, screen } from "../lib/test-utils";
 import { DataLicensePage } from "./DataLicensePage";
+import { formatDay } from "../lib/dates";
 import { server } from "@/mocks/server";
 import type { DataManifestDataset } from "@/types";
 
@@ -246,7 +247,7 @@ describe("DataLicensePage", () => {
     );
     // And it points somewhere useful — the earliest date it can answer for.
     expect(container.textContent).toMatch(
-      new RegExp(new Date("2026-03-12T00:00:00.000Z").toLocaleDateString()),
+      new RegExp(formatDay("2026-03-12T00:00:00.000Z")),
     );
     expect(
       container.querySelector('a[href="/api/data/archive"]'),

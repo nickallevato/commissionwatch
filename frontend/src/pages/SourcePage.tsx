@@ -1,6 +1,7 @@
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Absence } from "@/components/ui/Absence";
-import { formatBytes, highlightSegments, useSource } from "@/hooks/useSource";
+import { formatBytes, formatCount, highlightSegments, useSource } from "@/hooks/useSource";
+import { formatTimestamp } from "@/lib/dates";
 
 /**
  * `/source/:sha256` — the address every citation on this site points at.
@@ -33,14 +34,6 @@ function readIntParam(raw: string | null): number {
   if (raw === null) return 0;
   const value = Number(raw);
   return Number.isInteger(value) && value >= 0 ? value : 0;
-}
-
-/** `2026-03-12 at 17:02 UTC`. UTC named, because a fetch time is an instant. */
-function formatFetchedAt(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const iso = date.toISOString();
-  return `${iso.slice(0, 10)} at ${iso.slice(11, 16)} UTC`;
 }
 
 export function SourcePage() {
@@ -126,7 +119,7 @@ export function SourcePage() {
           <dt className="label-sm">Fetched</dt>
           <dd className="mt-0.5 text-sm figure">
             {source.fetched_at ? (
-              formatFetchedAt(source.fetched_at)
+              formatTimestamp(source.fetched_at)
             ) : (
               <span className="text-ink-soft">Not recorded.</span>
             )}
@@ -152,17 +145,17 @@ export function SourcePage() {
         {source.truncated ? (
           <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
             You are reading characters{" "}
-            <span className="figure">{source.window_start.toLocaleString("en-US")}</span>
+            <span className="figure">{formatCount(source.window_start)}</span>
             {" to "}
-            <span className="figure">{source.window_end.toLocaleString("en-US")}</span>
+            <span className="figure">{formatCount(source.window_end)}</span>
             {" of "}
-            <span className="figure">{source.char_count.toLocaleString("en-US")}</span>. This
+            <span className="figure">{formatCount(source.char_count)}</span>. This
             is a window around the quote, not the whole document.
           </p>
         ) : (
           <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
             This is the whole extracted text of the document —{" "}
-            <span className="figure">{source.char_count.toLocaleString("en-US")}</span>{" "}
+            <span className="figure">{formatCount(source.char_count)}</span>{" "}
             characters.
           </p>
         )}

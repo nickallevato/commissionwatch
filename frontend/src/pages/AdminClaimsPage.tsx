@@ -6,6 +6,8 @@ import { Citation, ReviewStamp } from "@/components/ui/Citation";
 import { abbreviateSha } from "@/components/ui/citation-source";
 import { markUnsupported } from "@/components/ui/governor-quote";
 import { reliedInWindow, type ReliedSpan } from "@/components/ui/relied-spans";
+import { formatTimestamp } from "@/lib/dates";
+import { formatCount } from "@/hooks/useSource";
 import type {
   ClaimGovernorVerdict,
   ClaimQueueResponse,
@@ -102,7 +104,7 @@ function statusChip(status: string, retractedAt: string | null): string {
 
 function formatStamp(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString();
+  return formatTimestamp(value);
 }
 
 /**
@@ -139,10 +141,10 @@ function QuoteInContext({
   return (
     <div className="mt-2">
       <p className="text-xs text-muted">
-        Characters <span className="figure">{context.window_offset.toLocaleString("en-US")}</span>
+        Characters <span className="figure">{formatCount(context.window_offset)}</span>
         {" to "}
         <span className="figure">
-          {(context.window_offset + context.text.length).toLocaleString("en-US")}
+          {formatCount(context.window_offset + context.text.length)}
         </span>{" "}
         of the stored document.
         {!context.offset_matches_stored && (

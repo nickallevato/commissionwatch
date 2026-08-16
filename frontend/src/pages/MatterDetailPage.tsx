@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { useMatter } from "@/hooks/useMatters";
+import { formatDay } from "@/lib/dates";
 import type { MatterAppearance, MatterState } from "@/types";
 
 /**
@@ -43,7 +44,7 @@ function AppearanceRow({ appearance }: { appearance: MatterAppearance }) {
             to={`/meetings/${appearance.meeting_id}`}
             className="font-medium hover:underline underline-offset-2"
           >
-            <span className="figure">{appearance.meeting_date}</span>
+            <span className="figure">{formatDay(appearance.meeting_date)}</span>
           </Link>
           <span className="text-ink-soft">
             {" · item "}

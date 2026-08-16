@@ -4,6 +4,7 @@ import { FlagBar, PressroomCard, SegmentedControl, WorkTitle } from "@/component
 import { Absence } from "@/components/ui/Absence";
 import { Citation } from "@/components/ui/Citation";
 import { PRECISION_GRADES, precisionOf } from "@/components/places/precision";
+import { formatCount } from "@/hooks/useSource";
 import {
   PLACE_LINK_STATUSES,
   PLACE_SUBJECT_KINDS,
@@ -14,6 +15,7 @@ import {
   type PlacePrecision,
   type PlaceSubjectKind,
 } from "@/types";
+import { formatTimestamp } from "@/lib/dates";
 
 /**
  * `/admin/place-links` — the screen `place_links` waited for.
@@ -148,7 +150,7 @@ function subjectKindLabel(kind: string): string {
 
 function formatStamp(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString();
+  return formatTimestamp(value);
 }
 
 /**
@@ -222,8 +224,8 @@ function Coordinate({
           className="text-[11px] font-semibold uppercase tracking-label text-muted"
         >
           {grade === null ? `Precision: ${precision}` : PRECISION_GRADES[grade].label}
-          {placed && grade !== null && (
-            <> · ±{PRECISION_GRADES[grade].uncertainty_metres?.toLocaleString("en-US")} m</>
+          {placed && grade !== null && PRECISION_GRADES[grade].uncertainty_metres !== null && (
+            <> · ±{formatCount(PRECISION_GRADES[grade].uncertainty_metres)} m</>
           )}
         </span>
       </p>
@@ -264,10 +266,10 @@ function QuoteInContext({ context, linkId }: { context: PlaceQuoteContext; linkI
   return (
     <div className="mt-2">
       <p className="text-xs text-muted">
-        Characters <span className="figure">{context.window_offset.toLocaleString("en-US")}</span>
+        Characters <span className="figure">{formatCount(context.window_offset)}</span>
         {" to "}
         <span className="figure">
-          {(context.window_offset + context.text.length).toLocaleString("en-US")}
+          {formatCount(context.window_offset + context.text.length)}
         </span>{" "}
         of the stored document.
         {!context.offset_matches_stored && (

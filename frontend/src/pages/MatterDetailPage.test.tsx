@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { MatterDetailPage } from "./MatterDetailPage";
+import { formatDay } from "@/lib/dates";
 import { server } from "@/mocks/server";
 
 beforeAll(() => server.listen());
@@ -43,11 +44,15 @@ describe("MatterDetailPage", () => {
     await screen.findByRole("heading", { name: /on the agenda/i });
 
     const dates = screen
-      .getAllByRole("link", { name: /^\d{4}-\d{2}-\d{2}$/ })
+      .getAllByRole("link", { name: /^[A-Z][a-z]+ \d{1,2}, \d{4}$/ })
       .map((link) => link.textContent);
     // A timeline reads forwards: a reader is following a story, not checking
     // for news.
-    expect(dates).toEqual(["2024-11-06", "2024-11-20", "2024-12-04"]);
+    expect(dates).toEqual([
+      formatDay("2024-11-06"),
+      formatDay("2024-11-20"),
+      formatDay("2024-12-04"),
+    ]);
   });
 
   /**
@@ -73,7 +78,7 @@ describe("MatterDetailPage", () => {
 
   it("links each appearance to its meeting", async () => {
     renderAt(SPANNING);
-    const link = await screen.findByRole("link", { name: "2024-11-06" });
+    const link = await screen.findByRole("link", { name: formatDay("2024-11-06") });
     expect(link).toHaveAttribute("href", "/meetings/30000000-0000-4000-8000-000000000001");
   });
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CellLabel } from "@/components/ui/CellLabel";
+import { formatTimestamp } from "@/lib/dates";
 import type {
   ExtractionFailureReason,
   IngestionRunStatus,
@@ -83,7 +84,7 @@ function formatStamp(value: string | null): string {
   if (value === null) return "Never";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Never";
-  return parsed.toLocaleString();
+  return formatTimestamp(value);
 }
 
 type LoadResult = { ok: true; status: PublicStatus } | { ok: false };

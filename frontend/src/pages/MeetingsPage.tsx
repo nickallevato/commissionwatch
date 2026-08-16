@@ -5,43 +5,12 @@ import { useAnomalies } from "@/hooks/useAnomalies";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AnomalyBadge } from "@/components/AnomalyBadge";
 import { severityOrder } from "@/components/severity";
+import { formatDayShort } from "@/lib/dates";
 import type { Meeting, AnomalyFlag } from "@/types";
 
 /** Hairline control on paper — square corners, ink on hover. No pills. */
 const controlClass =
   "rounded-none border border-rule bg-paper px-2 py-1 text-sm text-ink hover:border-ink focus:border-ink";
-
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-/**
- * Format a `YYYY-MM-DD` meeting date in UTC, so a date-only value never slides
- * a day backwards for a reader west of Greenwich.
- */
-function formatMeetingDate(value: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (!match) return value;
-  const [, year, month, day] = match;
-  const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return value;
-  return `${WEEKDAYS[date.getUTCDay()]}, ${MONTHS[Number(month) - 1]} ${Number(
-    day,
-  )}, ${year}`;
-}
 
 /** `18:00:00` → `18:00`. The seconds the API sends are never meaningful here. */
 function formatMeetingTime(value: string): string {
@@ -250,7 +219,7 @@ interface MeetingRowProps {
  */
 function MeetingRow({ meeting, anomalies }: MeetingRowProps) {
   const name = meeting.commission?.name ?? "Commission meeting";
-  const date = formatMeetingDate(meeting.date);
+  const date = formatDayShort(meeting.date);
   const maxSeverity = anomalies?.length
     ? (severityOrder.find((s) => anomalies.some((a) => a.severity === s)) ??
       "low")

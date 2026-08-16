@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Absence } from "@/components/ui/Absence";
+import { formatCount } from "@/hooks/useSource";
 import { useMetrics } from "@/hooks/useMetrics";
 import { useTranscriptCoverage } from "@/hooks/useTranscriptCoverage";
 import { sumTranscriptCoverage } from "@/lib/transcript-coverage";
@@ -39,12 +40,12 @@ function Figure({
       <dt className="label-sm">{label}</dt>
       <dd className="mt-1">
         <span className="figure text-2xl">
-          {value === null ? "—" : value.toLocaleString()}
+          {value === null ? "—" : formatCount(value)}
         </span>
         {of !== undefined ? (
           <span className="text-sm text-muted">
             {" of "}
-            <span className="figure">{of.toLocaleString()}</span>
+            <span className="figure">{formatCount(of)}</span>
           </span>
         ) : null}
         {note ? <p className="mt-1 text-xs leading-relaxed text-muted">{note}</p> : null}

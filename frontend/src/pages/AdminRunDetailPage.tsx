@@ -15,6 +15,7 @@ import {
   WorkTitle,
   type Severity,
 } from "@/components/PressroomUI";
+import { formatTimestamp } from "@/lib/dates";
 import type { IngestionRunStatus, ReparseResult, RunDetail } from "@/types";
 
 /**
@@ -175,7 +176,7 @@ type LoadResult = { ok: true; detail: RunDetail } | { ok: false };
 
 function formatStamp(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString();
+  return formatTimestamp(value);
 }
 
 function duration(started: string, finished: string | null): string {

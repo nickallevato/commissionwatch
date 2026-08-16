@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { formatDayShort } from "@/lib/dates";
 import type {
   CalendarJurisdiction,
   CalendarMeetingSummary,
@@ -27,19 +28,6 @@ import type {
  */
 
 type LoadResult = { ok: true; data: CalendarJurisdiction[] } | { ok: false };
-
-/** `2026-08-14` → `Fri, Aug 14, 2026`. Parsed as UTC so the day never shifts. */
-function formatDate(isoDate: string): string {
-  const parsed = new Date(`${isoDate}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return isoDate;
-  return parsed.toLocaleDateString("en-US", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
 
 /** `19:00` → `7:00 PM`. The value is already local to the jurisdiction. */
 function formatTime(time: string | null): string | null {
@@ -253,7 +241,7 @@ function MeetingRow({ meeting }: { meeting: CalendarMeetingSummary }) {
     <li className="py-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <time dateTime={meeting.date} className="figure text-sm text-ink tabular">
-          {formatDate(meeting.date)}
+          {formatDayShort(meeting.date)}
         </time>
         {time === null ? (
           // Never 12:00 AM. The record does not state a start time, and saying

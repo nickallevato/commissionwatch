@@ -62,5 +62,15 @@ export function highlightSegments(
 
 /** `12,345 bytes`, with the separators a body of numbers on this site uses. */
 export function formatBytes(bytes: number): string {
-  return `${bytes.toLocaleString("en-US")} bytes`;
+  return `${formatCount(bytes)} bytes`;
+}
+
+/**
+ * `12,345`, comma-separated. Kept here rather than inline in a page so
+ * `frontend/src/lib/dates.test.ts`'s scan for bare `toLocaleString(` calls in
+ * `src/pages/` — there to catch an unlabelled-timezone date creeping back in —
+ * does not also have to special-case a plain number.
+ */
+export function formatCount(count: number): string {
+  return count.toLocaleString("en-US");
 }

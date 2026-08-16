@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSearch, splitSnippet } from "@/hooks/useSearch";
+import { formatDay } from "@/lib/dates";
 import type { SearchResult } from "@/types";
 
 /**
@@ -31,29 +32,6 @@ import type { SearchResult } from "@/types";
  * branch reads `artifact_texts` with no filter on `document_type` at all — so
  * it stays true when a ninth kind is added, which an enumeration cannot.
  */
-
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-/** `YYYY-MM-DD` in UTC, so a date-only value never slides a day west of Greenwich. */
-function formatDate(value: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (!match) return value;
-  const [, year, month, day] = match;
-  return `${MONTHS[Number(month) - 1]} ${Number(day)}, ${year}`;
-}
 
 /**
  * `Record<SearchResult["kind"], string>` rather than a partial map, so widening
@@ -104,15 +82,15 @@ function hrefOf(result: SearchResult): string | null {
 function datelineOf(result: SearchResult): string {
   switch (result.kind) {
     case "agenda_item":
-      return `Item ${result.item_number} · ${result.commission_name} · ${formatDate(
+      return `Item ${result.item_number} · ${result.commission_name} · ${formatDay(
         result.meeting_date,
       )}`;
     case "meeting":
-      return `${result.jurisdiction_name} · ${formatDate(result.meeting_date)}`;
+      return `${result.jurisdiction_name} · ${formatDay(result.meeting_date)}`;
     case "member":
       return result.jurisdiction_name;
     case "document":
-      return `${result.commission_name} · ${formatDate(result.meeting_date)}`;
+      return `${result.commission_name} · ${formatDay(result.meeting_date)}`;
     case "finding":
       // Severity and type, not a date: a finding's dateline is what kind of
       // thing it is, and the flag type is stored snake_case.

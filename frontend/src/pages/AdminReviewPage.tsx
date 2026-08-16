@@ -15,6 +15,7 @@ import type {
   ReviewQueueSort,
   ReviewRequestStatus,
 } from "@/types";
+import { formatTimestamp } from "@/lib/dates";
 
 /**
  * `/admin/review` — the operator queue. B-a.
@@ -130,7 +131,7 @@ function severityLabel(value: string): string {
 
 function formatStamp(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString();
+  return formatTimestamp(value);
 }
 
 function shortHash(sha256: string): string {

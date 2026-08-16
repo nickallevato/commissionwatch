@@ -3,6 +3,7 @@ import { useAgendaItems, useMeetings } from "@/hooks/useMeetings";
 import { useMeetingVotes } from "@/hooks/useVotes";
 import { useAnomalies } from "@/hooks/useAnomalies";
 import { flagTypeLabels } from "@/components/flag-labels";
+import { formatDay } from "@/lib/dates";
 import type {
   AnomalyFlag,
   AnomalySeverity,
@@ -72,34 +73,6 @@ const NO_FINDING_YET: FrontPageFinding = {
 /* ---------------------------------------------------------------------------
    Formatting helpers
    ------------------------------------------------------------------------- */
-
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-] as const;
-
-/**
- * Format a `YYYY-MM-DD` (or full ISO timestamp) as "March 4, 2026".
- *
- * Parsed off the string rather than through `Date`, because `new Date("2024-12-10")`
- * is UTC midnight and renders as the previous day west of Greenwich.
- */
-function formatDay(iso: string): string {
-  const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
-  const name = MONTHS[month - 1];
-  if (!year || !name || !day) return iso;
-  return `${name} ${day}, ${year}`;
-}
 
 function jurisdictionOf(meeting: Meeting | undefined): string | null {
   const jurisdiction = meeting?.commission?.jurisdiction;

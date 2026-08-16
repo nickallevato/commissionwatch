@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { formatTimestamp } from "@/lib/dates";
 import type { PublicCorrection, PublicCorrectionResponse } from "@/types";
 
 /**
@@ -46,11 +47,6 @@ const WILL_NOT: readonly string[] = [
   "Promise a response time. Nothing in this project measures one, and a clock nothing enforces is the kind of claim this site exists to find in other people's publications.",
   "Email you. No part of this product sends mail. Your reference is shown on screen when you submit — keep it.",
 ];
-
-function formatStamp(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
 
 export function CorrectionsPage() {
   const [corrections, setCorrections] = useState<PublicCorrection[]>([]);
@@ -251,7 +247,7 @@ export function CorrectionsPage() {
                 <li key={correction.id} className="py-5">
                   <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
                     <span className="label-sm tabular">
-                      {formatStamp(correction.created_at)}
+                      {formatTimestamp(correction.created_at)}
                     </span>
                     <span className="label-sm">{correction.record_label}</span>
                     {correction.dispute_reference && (

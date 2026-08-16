@@ -20,27 +20,10 @@ import { flagTypeLabels } from "@/components/flag-labels";
 import { SeverityMark } from "@/components/AnomalyBadge";
 import { severityRank } from "@/components/severity";
 import { tallyVotes, type VoteTally } from "@/components/vote-tally";
+import { formatDay } from "@/lib/dates";
 import type { MeetingDocument, Vote, VoteValue } from "@/types";
 
 /* ---------------------------------------------------------------- formatting */
-
-/**
- * `meetings.date` is a calendar date (`YYYY-MM-DD`). Parsing it with `new
- * Date()` would read it as UTC midnight and render the previous day west of
- * Greenwich, so the parts are assembled in local time instead.
- */
-function formatMeetingDate(value: string): string {
-  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  const parsed = parts
-    ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
-    : new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-}
 
 /** `meetings.time` is a clock string (`18:00`, `18:00:00`). */
 function formatClock(value: string | null): string | null {
@@ -207,7 +190,7 @@ export function MeetingDetailPage() {
 
         <div className="mt-2 flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
           <h1 className="headline text-4xl sm:text-5xl">
-            {typeLabel} of {formatMeetingDate(meeting.date)}
+            {typeLabel} of {formatDay(meeting.date)}
           </h1>
           <div className="pt-2">
             <StatusBadge status={meeting.status} />
@@ -492,7 +475,7 @@ export function MeetingDetailPage() {
         because a claim is never its own page. See MeetingClaims. */}
       <MeetingClaims
         meetingId={meeting.id}
-        sourceLabel={`Minutes, ${bodyName}, ${formatMeetingDate(meeting.date)}`}
+        sourceLabel={`Minutes, ${bodyName}, ${formatDay(meeting.date)}`}
       />
 
       {/* Transcript ---------------------------------------------------- */}

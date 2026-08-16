@@ -10,6 +10,7 @@ import {
   Tiles,
   WorkTitle,
 } from "@/components/PressroomUI";
+import { formatTimestamp } from "@/lib/dates";
 import type { PressroomSource, ReviewQueueResponse } from "@/types";
 
 /**
@@ -239,7 +240,7 @@ export function AdminHomePage() {
                 {
                   key: "Previous sign-in",
                   value: operator.last_login_at
-                    ? new Date(operator.last_login_at).toLocaleString()
+                    ? formatTimestamp(operator.last_login_at)
                     : "First session",
                 },
               ]}

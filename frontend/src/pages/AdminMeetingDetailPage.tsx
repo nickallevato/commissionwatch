@@ -14,6 +14,7 @@ import {
   WorkTitle,
   type Severity,
 } from "@/components/PressroomUI";
+import { formatDay, formatTimestamp } from "@/lib/dates";
 import type {
   ConfidenceLevel,
   CorrectionTargetTable,
@@ -83,7 +84,7 @@ type LoadResult = { ok: true; detail: MeetingDetailPayload } | { ok: false };
 
 function formatStamp(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString();
+  return formatTimestamp(value);
 }
 
 /**
@@ -314,7 +315,7 @@ export function AdminMeetingDetailPage() {
       setNotice(
         body.published_at === null
           ? "Withdrawn from the public site. The record stays here."
-          : `Published ${new Date(body.published_at).toLocaleString()}.`,
+          : `Published ${formatTimestamp(body.published_at)}.`,
       );
       setPublishReason("");
       await reload();
@@ -433,7 +434,7 @@ export function AdminMeetingDetailPage() {
       <WorkTitle
         title={
           detail
-            ? `${detail.commission.name} — ${new Date(detail.meeting.date).toLocaleDateString()}`
+            ? `${detail.commission.name} — ${formatDay(detail.meeting.date)}`
             : "Meeting record"
         }
         stamp={
@@ -548,7 +549,7 @@ export function AdminMeetingDetailPage() {
           >
             {detail.meeting.published_at === null
               ? "Ingested, not published"
-              : `Published ${new Date(detail.meeting.published_at).toLocaleString()}`}
+              : `Published ${formatTimestamp(detail.meeting.published_at)}`}
           </p>
           <p className="max-w-prose text-sm leading-relaxed text-ink-soft">
             {detail.meeting.published_at === null

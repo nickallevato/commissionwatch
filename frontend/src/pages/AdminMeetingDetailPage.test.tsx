@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AdminMeetingDetailPage } from "./AdminMeetingDetailPage";
+import { formatTimestamp } from "@/lib/dates";
 import { server } from "@/mocks/server";
 import type {
   MeetingParseStatus, DisputeItem, MeetingDetailPayload } from "@/types";
@@ -200,7 +201,7 @@ describe("AdminMeetingDetailPage", () => {
     renderMeeting();
 
     const state = await screen.findByTestId("publication-state");
-    expect(state).toHaveTextContent(new Date(PUBLISHED_AT).toLocaleString());
+    expect(state).toHaveTextContent(formatTimestamp(PUBLISHED_AT));
     expect(screen.getByRole("button", { name: "Unpublish" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Publish" })).not.toBeInTheDocument();
   });

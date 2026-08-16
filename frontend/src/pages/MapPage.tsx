@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Absence } from "@/components/ui/Absence";
+import { formatCount } from "@/hooks/useSource";
 import { useMetrics } from "@/hooks/useMetrics";
 import { Citation, type CitationRef } from "@/components/ui/Citation";
 import { PRECISION_GRADES, distanceText, precisionOf } from "@/components/places/precision";
@@ -200,7 +201,7 @@ function PlacesAbsence({
     return (
       <Absence reason="not-reviewed" subject="located decisions">
         We have tied{" "}
-        <span className="figure">{totalPlaces.toLocaleString("en-US")}</span>{" "}
+        <span className="figure">{formatCount(totalPlaces)}</span>{" "}
         decisions to a place and none has been through review yet. A pin is a
         claim about where something happened, so a person checks it first.
       </Absence>
@@ -210,7 +211,7 @@ function PlacesAbsence({
   // Now, and only now, is silence about the neighbourhood rather than about us.
   return (
     <Absence reason="none-exist" subject="located decisions near this point">
-      <span className="figure">{publicPlaces.toLocaleString("en-US")}</span>{" "}
+      <span className="figure">{formatCount(publicPlaces)}</span>{" "}
       located decisions are published elsewhere — try a wider radius.
     </Absence>
   );
@@ -440,7 +441,7 @@ export function MapPage() {
           >
             {RADIUS_OPTIONS.map((option) => (
               <option key={option} value={option}>
-                {option.toLocaleString("en-US")} m
+                {formatCount(option)} m
               </option>
             ))}
           </select>
@@ -553,7 +554,7 @@ export function MapPage() {
             Subscribe to this area
           </a>{" "}
           — a feed of anything new on the record within{" "}
-          {radius.toLocaleString("en-US")} metres of that point. No account, no
+          {formatCount(radius)} metres of that point. No account, no
           email address, and we keep no record of who is subscribed: the URL is
           the subscription, and it lives in your reader rather than in our
           database.

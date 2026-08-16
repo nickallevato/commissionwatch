@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { formatDay, formatTimestamp } from "@/lib/dates";
 import type {
   DataArchiveIndex,
   DataManifest,
@@ -363,7 +364,7 @@ function ArchiveCadence({ state }: { state: ArchiveState }) {
           <>
             The archive answers from{" "}
             <span className="figure">
-              {new Date(state.answerableFrom).toLocaleDateString()}
+              {formatDay(state.answerableFrom)}
             </span>{" "}
             onward — the first snapshot. Publication state is a single mutable
             column, so what was public before that cannot be reconstructed from
@@ -633,7 +634,7 @@ export function DataLicensePage() {
                 </span>
                 . Manifest generated{" "}
                 <span className="figure">
-                  {new Date(manifest.generated_at).toLocaleString()}
+                  {formatTimestamp(manifest.generated_at)}
                 </span>
                 .
               </p>

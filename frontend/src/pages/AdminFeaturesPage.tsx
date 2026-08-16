@@ -22,6 +22,7 @@ import {
   type SnapshotRunOutcome,
   type SnapshotRunRow,
 } from "@/types";
+import { formatTimestamp } from "@/lib/dates";
 
 /**
  * `/admin/features` — what is running, what decided it, and the one place to
@@ -128,7 +129,7 @@ function riskOf(risk: string): FeatureRisk | null {
 
 function formatStamp(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString();
+  return formatTimestamp(value);
 }
 
 function seconds(ms: number): number {
