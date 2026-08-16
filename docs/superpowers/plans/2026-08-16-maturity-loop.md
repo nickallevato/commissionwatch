@@ -539,3 +539,24 @@ instruction, not about the agents** — and I had the evidence after the second 
   by a reviewer or by accident, never by a check.** So it is to propose what would make this class of
   drift self-detecting, and to be honest about whether the checkable subset is worth a guard or
   whether these documents should simply stop quoting numbers they cannot verify.
+- **12:12Z** — Deliberately dispatched **nothing** into the free slot. The reviewer is deciding
+  whether the loop stops; new work landing mid-assessment would invalidate it, and would be wasted if
+  the answer is stop. Spent the tick verifying production instead.
+
+  **Every check built today is firing correctly in production.** Monitor run 29339 against `0cb66ac`:
+  resources pass, release-drift passes, prerender passes with an honest message that the split is not
+  serving crawlers and that this may be deliberate, and — the one that matters —
+  `BLOCKED backup: no backup has ever been recorded as succeeded … Absent evidence is not a pass`.
+  The gap the reviewer named as the single blocker is now visible, refuses to pass, and names its
+  three possible causes.
+
+  **Then the jobs endpoint earned its keep.** Gallatin still shows 0 collected, so I asked it why —
+  the first time that was answerable from outside the database. Three pending `discover` jobs, one
+  with `attempts=1` and `AbortError: This operation was aborted`.
+
+  That **corrects a claim of mine**: I said starvation was why Gallatin collected nothing. Starvation
+  was why it never *attempted*. `attempts=1` proves phase-1 draining now reaches it; the discover
+  then aborts against CivicPlus. And nothing deduplicates an outstanding discover, so three
+  identical attempts have piled up for one source — while `enqueueExtraction` refuses exactly that
+  with a 409. Recorded as gap 7, with the instruction to probe rather than reason from the error
+  string.

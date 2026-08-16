@@ -219,6 +219,35 @@ Deliverable: decide whether `vote-events.ts` is deleted or wired, extend the dri
 copy of the vocabulary it claims to protect, and consider whether "exported but never imported" is
 worth a repository-wide check of its own — three findings in a week is a pattern, not a coincidence.
 
+### 7. Gallatin's discover aborts, and its jobs pile up
+
+Found 2026-08-16 12:15Z with the jobs endpoint built that morning — which is the first time this
+question was answerable from outside the database.
+
+`GET /api/admin/pressroom/jobs?source_id=<gallatin>` returns **three pending `discover` jobs**, one
+carrying `attempts=1` and `AbortError: This operation was aborted`.
+
+Three things follow, and the first corrects an earlier claim of this loop's.
+
+1. **The starvation fix works.** `attempts=1` is proof that phase-1 draining reached Gallatin's own
+   job — which had never happened before `d886bce`. The loop previously said starvation was why
+   Gallatin had collected nothing; more precisely, starvation was why it never *attempted*.
+2. **Discover aborts against CivicPlus.** That is the actual reason `lifetime_records` is 0 after
+   weeks enabled. An `AbortError` is a timeout or a cancelled fetch, not a parse failure, so the
+   likely candidates are the sweep deadline cutting a slow request or a client-side timeout shorter
+   than the source's response. **Probe before designing** — this is exactly the case where reasoning
+   from the error string would pick the wrong fix.
+3. **Discover jobs accumulate one per sweep.** Three now, for one source, all pending. Nothing
+   deduplicates an outstanding `discover` for a source that already has one queued, so a source that
+   cannot discover grows a queue of identical attempts. Compare `enqueueExtraction`, which refuses a
+   duplicate with a 409 naming the existing job — that pattern exists and is not applied here.
+
+Deliverable: probe the CivicPlus fetch to establish what aborts and why; fix it; and refuse a
+duplicate `discover` the way extraction already refuses a duplicate extract. Note that a fix here
+makes Gallatin start collecting for the first time, which will produce claims about named people and
+therefore review-queue load — so it interacts with the reviewer-throughput work rather than being
+independent of it.
+
 ## Gaps this roadmap does not name
 
 Added 2026-08-16. Everything above describes **building capability**. The platform's actual
