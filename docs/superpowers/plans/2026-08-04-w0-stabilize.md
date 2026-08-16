@@ -1,3 +1,13 @@
+> **SUPERSEDED — marked 2026-08-16.**
+>
+> Predates the 2026-08-09 through 2026-08-16 releases. The type-alignment work it describes landed;
+> the frontend types are checked against the schema in CI now.
+>
+> The unchecked boxes below are **not outstanding work**. They are the step-by-step transcript
+> of work that shipped; nobody went back to tick them. They are left unticked rather than ticked
+> retroactively, because ticking a box nobody watched pass would be a claim, and this project does
+> not make those. Read `CHANGELOG.md` and `docs/STATUS.md` for what is actually true now.
+
 # W0 — Stabilize `main` Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

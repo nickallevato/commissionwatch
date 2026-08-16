@@ -1,3 +1,16 @@
+> **SUPERSEDED — built and shipped dark, marked 2026-08-16.**
+>
+> Verified present on 2026-08-16: `backend/migrations/024_unify_subscription_delivery.ts` and the
+> `delivery_channels` consumers in `backend/src/services/delivery/`.
+>
+> **Built is not on.** These surfaces are deliberately dormant behind `EVENT_DRAIN_ENABLED` and
+> send no product events. Superseded here means the code exists, not that delivery is live.
+>
+> The unchecked boxes below are **not outstanding work**. They are the step-by-step transcript
+> of work that shipped; nobody went back to tick them. They are left unticked rather than ticked
+> retroactively, because ticking a box nobody watched pass would be a claim, and this project does
+> not make those. Read `CHANGELOG.md` and `docs/STATUS.md` for what is actually true now.
+
 # Subscriptions and Delivery Unification Implementation Plan (B-e)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -1,3 +1,14 @@
+> **SUPERSEDED — closed 2026-08-09, marked 2026-08-16.**
+>
+> Verified present on 2026-08-16: `backend/src/services/auth/password.ts`,
+> `backend/test/operator-password.test.ts`, `backend/migrations/022_create_operators.ts`,
+> `backend/migrations/023_create_operator_sessions.ts`.
+>
+> The unchecked boxes below are **not outstanding work**. They are the step-by-step transcript
+> of work that shipped; nobody went back to tick them. They are left unticked rather than ticked
+> retroactively, because ticking a box nobody watched pass would be a claim, and this project does
+> not make those. Read `CHANGELOG.md` and `docs/STATUS.md` for what is actually true now.
+
 # Operator Authentication Implementation Plan (A1)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

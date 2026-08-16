@@ -1,3 +1,19 @@
+> **SUPERSEDED — landed via migration 035, marked 2026-08-16.**
+>
+> Verified present on 2026-08-16: `backend/migrations/035_add_full_text_search.ts`,
+> `backend/src/routes/search.ts` mounted at `/api/search` in `app.ts`, and
+> `backend/test/search.test.ts`.
+>
+> The acceptance criterion that mattered was checked rather than assumed: *an unpublished meeting,
+> its agenda items and its document text never appear.* `search.test.ts` asserts that wall **in
+> both directions** — absent while unpublished, present once published — because a test proving only
+> absence would also pass against a search that returns nothing at all.
+>
+> The unchecked boxes below are **not outstanding work**. They are the step-by-step transcript
+> of work that shipped; nobody went back to tick them. They are left unticked rather than ticked
+> retroactively, because ticking a box nobody watched pass would be a claim, and this project does
+> not make those. Read `CHANGELOG.md` and `docs/STATUS.md` for what is actually true now.
+
 # P6 · Full-text search over the record — implementation plan
 
 > 2026-08-10. Spec: `docs/superpowers/specs/2026-08-09-phase-2-design.md` § P6.

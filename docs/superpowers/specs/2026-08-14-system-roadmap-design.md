@@ -389,6 +389,14 @@ outreach emails (Montana Free Press has city newsletters for four Montana cities
 Bozeman; Agenda Watch does this product and has never covered Montana; the Chronicle has four
 general-assignment reporters and no city-hall beat).
 
+> **Status note added 2026-08-16.** Four of these are built and were built before this note: server
+> rendering (`backend/src/services/prerender/`), OCD export (`backend/src/services/export/ocd.ts`),
+> the `/bot` page (`frontend/src/pages/BotPage.tsx`), and the record receipt
+> (`backend/src/services/export/receipt.ts`). Server rendering and the feeds are **shipped dark**.
+> What remains of Tier 6 is the outreach — three emails to named newsrooms, which is a person
+> sending mail, not a build task. Left in place rather than deleted because the tier ordering is
+> still the argument; only the "future work" reading of it is wrong.
+
 ---
 
 ## 12. Decisions still open

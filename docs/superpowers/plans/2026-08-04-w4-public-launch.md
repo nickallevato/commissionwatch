@@ -1,3 +1,12 @@
+> **SUPERSEDED — the site is deployed and healthy, marked 2026-08-16.**
+>
+> Predates the 2026-08-09 through 2026-08-16 releases. Live at `https://commissionwatch.bmux.sh`.
+>
+> The unchecked boxes below are **not outstanding work**. They are the step-by-step transcript
+> of work that shipped; nobody went back to tick them. They are left unticked rather than ticked
+> retroactively, because ticking a box nobody watched pass would be a claim, and this project does
+> not make those. Read `CHANGELOG.md` and `docs/STATUS.md` for what is actually true now.
+
 # W4 — Public Launch on commissionwatch.bmux.sh
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans.
