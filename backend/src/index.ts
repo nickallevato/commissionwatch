@@ -13,6 +13,7 @@ import { PrerenderConsumer } from "./services/prerender/consumer";
 import { DisputeMailer, ensureDisputeReplyChannel } from "./services/dispute-notifications";
 import { FeatureRegistry, setFeatureRegistry } from "./services/features/registry";
 import { ExportSnapshotScheduler } from "./services/export/snapshot-scheduler";
+import { SessionSweepScheduler } from "./services/auth/session-sweep";
 
 const PORT = process.env.PORT || 3001;
 
@@ -113,6 +114,18 @@ const prerender = new PrerenderConsumer(db);
  */
 const exportSnapshots = new ExportSnapshotScheduler(db);
 
+/**
+ * Sweeps `operator_sessions` rows past their absolute expiry.
+ *
+ * `sweepExpiredSessions` existed since it was written and nothing called it —
+ * not an auth bypass (`validateSession` already refuses an expired row at
+ * use), but unbounded growth in a table holding session tokens. See
+ * `services/auth/session-sweep.ts` for the reasoning; this is the fourth loop
+ * on the pattern the drain, the prerender consumer and the export scheduler
+ * already use.
+ */
+const sessionSweep = new SessionSweepScheduler(operatorAuthService());
+
 const server = app.listen(PORT, () => {
   console.log(`CommissionWatch backend listening on port ${PORT}`);
   digestScheduler.start();
@@ -140,6 +153,12 @@ const server = app.listen(PORT, () => {
   // cannot turn a boot into a full read of every dataset.
   exportSnapshots.start();
 
+  // The session sweep. No feature flag to re-read — see the header in
+  // session-sweep.ts for why this one has nothing to gate — and, like the
+  // three loops above, it arms its timer and removes nothing on this tick;
+  // the first sweep is the first interval, not the first boot.
+  sessionSweep.start();
+
   // Without this row a dispute event resolves to nothing and the ledger stays
   // `queued` — the reply is composed, recorded, and never handed to anything.
   // It must be `audience: 'ops'` and `owner_kind: 'direct'`: migration 088's
@@ -166,6 +185,7 @@ function shutdown() {
   eventDrain.stop();
   prerender.stop();
   exportSnapshots.stop();
+  sessionSweep.stop();
   features.stop();
   server.close(() => {
     // `flushAll` sends whatever is buffered in the dispatcher's batching window
@@ -194,5 +214,6 @@ export {
   eventDrain,
   prerender,
   exportSnapshots,
+  sessionSweep,
   features,
 };
