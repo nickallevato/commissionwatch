@@ -27,8 +27,8 @@ import { Link } from "react-router";
  * detectors.
  */
 
-const REVISED = "August 14, 2026";
-const VERSION = "1.0";
+const REVISED = "August 16, 2026";
+const VERSION = "1.1";
 const CORRECTIONS_EMAIL = "corrections@commissionwatch.bmux.sh";
 
 interface Section {
@@ -93,10 +93,13 @@ export function PrivacyPage() {
             <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
               We run no analytics and set no cookie on a reader. We store no IP
               address when you contest a record. We have deleted donor home
-              addresses from our own database. The only personal information we
-              hold that you gave us is a contact you typed into the dispute
-              form, and we have not yet set a schedule for deleting it — which
-              is stated below rather than papered over.
+              addresses from our own database. What personal information we do
+              hold — a dispute contact, a subscriber's saved address — now has
+              a stated retention policy rather than an open-ended "indefinitely,"
+              and one record, our own ledger of corrections, can never be
+              deleted at all, by design. All of it is below, including the
+              parts of the policy that are a decision and not yet a running
+              system.
             </p>
           </div>
 
@@ -186,16 +189,44 @@ export function PrivacyPage() {
               disappearance.
             </Body>
             <Body>
-              <strong>Personal information you gave us has no deletion schedule
-              yet.</strong> A contact left on a dispute is currently kept
-              indefinitely. That is not a considered retention policy, it is the
-              absence of one, and saying so is more useful to you than a
-              schedule nothing enforces. If you want your contact removed after
-              your dispute is resolved, write to{" "}
+              <strong>A dispute contact is kept until you ask us to remove
+              it.</strong> There is no self-serve deletion button today — write
+              to{" "}
               <a className="underline underline-offset-2" href={`mailto:${CORRECTIONS_EMAIL}`}>
                 {CORRECTIONS_EMAIL}
               </a>{" "}
-              and we will remove it.
+              and a person removes it by hand. We have designed, but not yet
+              built, an automatic version of the same thing: redacting a
+              decided dispute's contact on request without touching the
+              decision it belongs to.
+            </Body>
+            <Body>
+              <strong>A subscriber's saved address is disabled, not deleted,
+              when you unsubscribe.</strong> The unsubscribe link has to keep
+              working even for a second click months later — so the row stays
+              in the database, switched off, rather than being erased.
+              Removing it outright is not self-serve either: it takes a
+              written request to us, and only an operator of this project can
+              carry it out.
+            </Body>
+            <Body>
+              <strong>One record about our own conduct can never be deleted at
+              all.</strong> Whenever this project corrects something it
+              published, that correction is written to a ledger that a
+              database rule forbids anyone — including us — from editing or
+              deleting, permanently. That is deliberate: a corrections record
+              that could quietly be changed would be worth nothing, and the
+              rule exists so you do not have to take our word for that.
+            </Body>
+            <Body>
+              Three pieces of this policy are a stated intention, not a
+              running system yet, and we are saying so rather than implying
+              otherwise: the automatic version of dispute-contact removal
+              described above, a time limit after which an unsubscribed
+              contact's saved address or phone number is purged rather than
+              only disabled, and a housekeeping job that would clear out old
+              operator sign-in records automatically instead of relying on
+              someone to run it by hand.
             </Body>
           </section>
 

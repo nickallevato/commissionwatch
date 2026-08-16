@@ -45,6 +45,11 @@ import type {
  *    printing that 0 would be the most flattering claim available made on no
  *    evidence at all. That is the exact failure this project reports in other
  *    people's publications.
+ * 6. **The reliability targets say what they refuse to promise, too.** A
+ *    published SLO that hides its own limits is marketing, not a target —
+ *    so this page states the numbers *and* that neither is a rolling,
+ *    measured figure yet, and lists what is explicitly not promised (no
+ *    on-call, no night paging, no dispute response clock, no error budget).
  *
  * Front-of-house, so the ground is `paper` and the chrome is the ordinary site
  * chrome. `PressroomUI` carries the console's, and this is not the console.
@@ -318,6 +323,83 @@ export function StatusPage() {
           <code className="font-mono text-sm">bozemanmt.gov</code> returns a
           blanket block to every client, including this one. Where a source is
           switched off above, the reason is printed with it.
+        </p>
+      </section>
+
+      {/* ---------------------------------------------------- reliability targets */}
+      <section className="mt-12 max-w-prose" aria-labelledby="slo">
+        <h2 id="slo" className="font-display text-xl font-semibold text-ink">
+          What this site promises to keep up
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+          This project is one person and one small server, with no on-call
+          rotation, no failover, and no second region. A target that
+          pretended otherwise would be exactly the kind of unenforced claim
+          this project exists to catch in other people&rsquo;s publications,
+          aimed at itself &mdash; so every number below is sized to what this
+          infrastructure can actually meet, and stated with how it is
+          checked.
+        </p>
+
+        <dl className="mt-6 space-y-6">
+          <div className="border-t border-rule pt-3">
+            <dt className="text-sm font-semibold text-ink">Site availability</dt>
+            <dd className="mt-1 text-sm leading-relaxed text-ink-soft">
+              <span className="figure font-semibold text-ink">99.0%</span>{" "}
+              monthly, measured as{" "}
+              <code className="font-mono text-sm">GET /api/health</code>{" "}
+              returning 200 with{" "}
+              <code className="font-mono text-sm">database: connected</code>,
+              checked from outside this server every 15 minutes. That allows
+              roughly 7.3 hours of downtime a month &mdash; deliberately loose
+              for a single instance with no failover.
+            </dd>
+          </div>
+          <div className="border-t border-rule pt-3">
+            <dt className="text-sm font-semibold text-ink">Ingestion freshness</dt>
+            <dd className="mt-1 text-sm leading-relaxed text-ink-soft">
+              An enabled source with a stated collection interval sweeps
+              successfully within{" "}
+              <span className="figure font-semibold text-ink">1.5&times;</span>{" "}
+              that interval, at least{" "}
+              <span className="figure font-semibold text-ink">95%</span> of
+              the time it is checked. This matters more than uptime for a
+              watchdog: a site that stays up while quietly failing to
+              collect looks identical to a healthy one on every check that
+              only asks whether the site is up.
+            </dd>
+          </div>
+          <div className="border-t border-rule pt-3">
+            <dt className="text-sm font-semibold text-ink">Publication latency</dt>
+            <dd className="mt-1 text-sm leading-relaxed text-ink-soft">
+              No target is set, and that is a decision, not an omission. The
+              review before anything is published is done by a person,
+              deliberately, and a numeric latency target on a single
+              reviewer&rsquo;s calendar would either pressure a faster review
+              than the record can support, or be a number this project
+              misses every month for a reason that is not a defect.
+            </dd>
+          </div>
+        </dl>
+
+        <p className="mt-6 text-sm leading-relaxed text-ink-soft">
+          <strong className="font-semibold text-ink">
+            Neither target above is aggregated into a rolling figure yet.
+          </strong>{" "}
+          The 15-minute checks that feed them already exist and run, but
+          nothing yet turns a month of pass/fail readings into the
+          percentage above &mdash; so today these are stated objectives, not
+          measured ones: checkable by hand, not published as a live number.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+          <strong className="font-semibold text-ink">
+            What this does not promise:
+          </strong>{" "}
+          no on-call rotation, no paging at night &mdash; nobody is woken by
+          this project &mdash; and no guaranteed response time to a dispute
+          or a correction. There is no error budget policy either: without a
+          live rolling percentage to spend one against, a stated error
+          budget would be a second invented number nobody can check.
         </p>
       </section>
 

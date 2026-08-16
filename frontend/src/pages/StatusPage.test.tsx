@@ -286,8 +286,10 @@ describe("StatusPage", () => {
     expect(panel).toHaveTextContent("Not measured.");
     expect(panel).toHaveTextContent(/nothing has attempted to read a document yet/i);
     expect(panel).toHaveTextContent(/unknown, not a clean sheet/i);
-    // No share, in any rendering of zero.
-    expect(document.body.textContent).not.toMatch(/0(\.0)?%/);
+    // No share, in any rendering of zero, within the reading panel itself.
+    // (Scoped to the panel, not the whole page: the reliability-targets
+    // section below legitimately states "99.0%" as a published target.)
+    expect(panel.textContent).not.toMatch(/0(\.0)?%/);
   });
 
   it("still reports attempts that never reached a passage", async () => {
@@ -296,7 +298,7 @@ describe("StatusPage", () => {
 
     const panel = await screen.findByTestId("reading-unmeasured");
     expect(panel).toHaveTextContent("4 attempts are on record");
-    expect(document.body.textContent).not.toMatch(/0(\.0)?%/);
+    expect(panel.textContent).not.toMatch(/0(\.0)?%/);
   });
 
   it("prints the measured share and what the failures were", async () => {
@@ -371,6 +373,55 @@ describe("StatusPage", () => {
     expect(
       screen.getByText(/never pretends to be a browser|It never/),
     ).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // The reliability targets. Roadmap 6.6 — publish the SLO and its refusals.
+  // -------------------------------------------------------------------------
+
+  it("publishes the availability and ingestion-freshness targets", async () => {
+    serve({ sources: [] });
+    renderWithProviders(<StatusPage />);
+
+    expect(await screen.findByText(/99\.0%/)).toBeInTheDocument();
+    expect(screen.getByText(/GET \/api\/health/)).toBeInTheDocument();
+    expect(screen.getByText(/database: connected/)).toBeInTheDocument();
+    expect(screen.getByText(/7\.3 hours of downtime a month/)).toBeInTheDocument();
+    expect(screen.getByText(/1\.5×/)).toBeInTheDocument();
+    expect(screen.getByText(/95%/)).toBeInTheDocument();
+  });
+
+  it("states publication latency has no target, and why, rather than inventing one", async () => {
+    serve({ sources: [] });
+    renderWithProviders(<StatusPage />);
+
+    expect(
+      await screen.findByText(/No target is set, and that is a decision, not an omission/),
+    ).toBeInTheDocument();
+  });
+
+  it("says the targets are not yet aggregated into a measured rolling figure", async () => {
+    serve({ sources: [] });
+    renderWithProviders(<StatusPage />);
+
+    expect(
+      await screen.findByText(/Neither target above is aggregated into a rolling figure yet/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/stated objectives, not\s*measured ones/),
+    ).toBeInTheDocument();
+  });
+
+  it("states the refusals: no on-call, no night paging, no dispute response clock, no error budget", async () => {
+    serve({ sources: [] });
+    renderWithProviders(<StatusPage />);
+
+    const promise = await screen.findByText(/What this does not promise:/);
+    const container = promise.closest("p");
+    expect(container).toHaveTextContent(/no on-call rotation/i);
+    expect(container).toHaveTextContent(/no paging at night/i);
+    expect(container).toHaveTextContent(/no guaranteed response time to a dispute/i);
+    expect(container).toHaveTextContent(/no error budget policy/i);
   });
 
   it("links to the full methodology and to the public-records route", async () => {

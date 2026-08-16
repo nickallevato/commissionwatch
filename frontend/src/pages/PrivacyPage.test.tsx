@@ -47,15 +47,54 @@ describe("PrivacyPage", () => {
   });
 
   /**
-   * The load-bearing admission. A privacy page that implies a retention
-   * schedule nobody implemented is worse than one that admits there is none,
-   * and this assertion is what stops the admission being quietly softened
-   * before the schedule actually exists.
+   * The load-bearing admission. `record_corrections` is enforced immutable by
+   * a database trigger (migration 031) — this assertion is what stops that
+   * claim being quietly softened into something implying a deletion path that
+   * must never exist.
    */
-  it("admits that personal information has no deletion schedule yet", () => {
+  it("states that the corrections ledger can never be deleted, and why", () => {
     renderPage();
-    expect(screen.getByText(/no deletion schedule/i)).toBeInTheDocument();
-    expect(screen.getByText(/it is the absence of one/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/can never be deleted at all/i).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/forbids anyone — including us — from editing or deleting/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/a corrections record that could quietly be changed would be worth nothing/i),
+    ).toBeInTheDocument();
+  });
+
+  it("states that a subscriber channel is disabled on unsubscribe, not deleted", () => {
+    renderPage();
+    expect(
+      screen.getByText(/disabled, not deleted, when you unsubscribe/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/switched off, rather than being erased/i)).toBeInTheDocument();
+  });
+
+  it("states there is no self-serve deletion for a dispute contact, only a written request", () => {
+    renderPage();
+    expect(
+      screen.getByText(/kept until you ask us to remove it/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/no self-serve deletion button today/i)).toBeInTheDocument();
+  });
+
+  it("names the retention gaps that are a decision but not yet built, without implying they exist", () => {
+    renderPage();
+    expect(
+      screen.getByText(/stated intention, not a running system yet/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/time limit after which an unsubscribed contact's saved address/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/housekeeping job that would clear out old operator sign-in records/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not cite the test-fixture correction row count as if it were production", () => {
+    renderPage();
+    expect(screen.queryByText(/14,?528/)).not.toBeInTheDocument();
   });
 
   it("offers a route to have a dispute contact removed", () => {
