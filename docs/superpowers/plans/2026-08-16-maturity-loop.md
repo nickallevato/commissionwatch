@@ -188,3 +188,22 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   7.2/7.4 landed on `/data`, not duplicated onto `/bot`, and the agent's reasoning was better than
   my brief: `/bot` links to `/data` for terms by convention, and a second hand-kept copy would be
   the drift failure that page's own docblock warns about.
+- **08:53Z** — Both slots free at tick; dispatched **6.4** (code) and **6.5 + 6.6** (docs only).
+  Deliberately did **not** dispatch 6.9, the end-to-end review→publish test, for the second tick
+  running: it needs the database, and so does 6.4's suite. Two agents contending for one Postgres
+  produces failures that have nothing to do with the code. 6.9 gets a slot to itself.
+
+  **Cheap disproof paid off on 6.4.** I had told the operator I would not touch edge config without
+  seeing it — but `deploy/Caddyfile` is *in the repo*, and grepping it settled the question I had
+  been guessing at: **Caddy sets no security headers at all.** The two sources are
+  `frontend/nginx.conf` and the backend's Helmet. Nothing about that needed the operator.
+
+  **Decision, and it reverses what I said earlier today.** I had recommended Helmet as the single
+  owner because it travels with the code and is testable. That was wrong: nginx serves the HTML
+  document and Helmet never sees a request for `/`, so Helmet **cannot** fix the missing HSTS at any
+  configuration. An owner that cannot cover the whole surface is not an owner. **nginx owns the
+  headers.**
+
+  Flagged the `add_header` merge trap to the agent explicitly — `nginx.conf` already carries a
+  comment saying a `location` declaring any `add_header` discards every inherited one, which is why
+  the file repeats itself. That is the regression most likely to pass review silently.
