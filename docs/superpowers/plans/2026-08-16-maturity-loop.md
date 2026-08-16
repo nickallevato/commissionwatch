@@ -123,3 +123,27 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   `/findings` and `/members` → `/officials` exist because public URLs were renamed; a silently
   broken redirect there is a broken published URL, and if no test catches it that missing guard
   matters more than the migration.
+- **08:38Z** — Two Phase 6 items verified and committed. Held push released once CI caught up:
+  `af09468` went green and live, which confirmed the batching decision was right.
+
+  **6.1 backup** (`2f41349`): verified backend **2134 / 516**, `bash -n` clean. The agent chose both
+  a critical ops event *and* a non-zero exit rather than one, with the right reasoning — a bare log
+  line was the original design and is exactly what let this sit unnoticed, so a warning alone is a
+  disproven hypothesis here, not an untested one. Spot-checked myself that no credential is echoed
+  and that the upload verifies with an independent `aws s3 ls` read-back rather than trusting `cp`.
+
+  **6.2 → v7 migration** (`ff528f9`): verified frontend **829 / 69** and, independently,
+  `npm audit --omit=dev` → **0 vulnerabilities**, tree resolving to a single `react-router@7.18.2`.
+  Sixty-seven files moved their import. Step one, the future flags on v6, broke **nothing** — which
+  is the useful result, because it means the two flags were the entire behavioural delta and the
+  version bump carried no hidden one.
+
+  The mutation that mattered was the redirect, not the upgrade: `/anomalies` → `/findings` and
+  `/members` → `/officials` exist because public URLs were renamed, so a broken one is a broken
+  *published* URL. Pointing it wrong fails exactly one named test, so that guard is real.
+
+  Dispatched **6.10** (rate limit + cache on `/api/search`) to the free backend slot. **I set the
+  numbers rather than asking**: 60/min per client and `max-age=60`. A reader searching hard does ~10
+  a minute, and the limit sits deliberately above what a scripted client needs so it nudges bulk
+  users toward `/api/data/*.csv` instead of punishing them. On a transparency site a limit set too
+  low is its own failure.
