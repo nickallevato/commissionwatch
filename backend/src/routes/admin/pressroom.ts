@@ -23,6 +23,11 @@ import {
   readQueueStats,
   readRunWork,
 } from "../../services/pressroom/queue-stats";
+import {
+  JOBS_PAGE_MAX,
+  JOB_STATUSES,
+  listJobs,
+} from "../../services/pressroom/jobs";
 import { ExtractionUnavailable } from "../../services/extraction/run";
 import { enqueueExtractionBatch, MAX_EXTRACT_BATCH, enqueueExtraction } from "../../services/extraction/stage";
 import { enqueueGovernance } from "../../services/governor/stage";
@@ -230,6 +235,70 @@ router.post("/sources/:id/sweep", (req, res) => {
 router.get("/queue", async (_req, res, next) => {
   try {
     res.json(await readQueueStats(db));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * `GET /jobs` — the queue's individual jobs, so a depth can be opened and read.
+ *
+ * A count says a queue is deep. It cannot say whether it is deep for a good
+ * reason: 972 fetches of a county archive is a healthy backlog, 972 retries of
+ * one broken URL is an outage wearing a backlog's clothes, and the two are
+ * identical from the outside.
+ *
+ * Filters are validated against the real enums rather than passed through — an
+ * unknown status would otherwise return an empty page that reads as "no such
+ * jobs" instead of "no such status".
+ */
+router.get("/jobs", async (req, res, next) => {
+  try {
+    const { status, stage, source_id: sourceId } = req.query;
+
+    if (status !== undefined) {
+      if (typeof status !== "string" || !JOB_STATUSES.includes(status as never)) {
+        res.status(400).json({
+          error: `status must be one of: ${JOB_STATUSES.join(", ")}`,
+          statusCode: 400,
+        });
+        return;
+      }
+    }
+    if (stage !== undefined && typeof stage !== "string") {
+      res.status(400).json({ error: "stage must be a string", statusCode: 400 });
+      return;
+    }
+    if (sourceId !== undefined) {
+      if (typeof sourceId !== "string" || !UUID_RE.test(sourceId)) return badId(res, "source");
+    }
+
+    const rawLimit = req.query.limit;
+    const limit = typeof rawLimit === "string" ? Number(rawLimit) : 50;
+    if (!Number.isInteger(limit) || limit <= 0 || limit > JOBS_PAGE_MAX) {
+      res.status(400).json({
+        error: `limit must be an integer from 1 to ${JOBS_PAGE_MAX}`,
+        statusCode: 400,
+      });
+      return;
+    }
+
+    const rawOffset = req.query.offset;
+    const offset = typeof rawOffset === "string" ? Number(rawOffset) : 0;
+    if (!Number.isInteger(offset) || offset < 0) {
+      res.status(400).json({ error: "offset must be a non-negative integer", statusCode: 400 });
+      return;
+    }
+
+    res.json(
+      await listJobs(db, {
+        ...(typeof status === "string" ? { status } : {}),
+        ...(typeof stage === "string" ? { stage } : {}),
+        ...(typeof sourceId === "string" ? { sourceId } : {}),
+        limit,
+        offset,
+      }),
+    );
   } catch (err) {
     next(err);
   }
