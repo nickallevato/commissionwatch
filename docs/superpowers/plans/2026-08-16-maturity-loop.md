@@ -227,3 +227,23 @@ Recorded as I make them, so the operator can overrule with the reasoning visible
   ones searching for it.
 
   Frontend verified independently at **853 / 70**.
+- **09:22Z** — Tree clean, no agents pending. Header fix committed but **not deployed** (live
+  `21391e2`, head `6db1d09`), so the production `curl` I owe on 6.4 is still owed. Recording it
+  rather than letting it quietly lapse: a config change verified only as text is not verified.
+
+  **Scoped 6.9 down, deliberately, and did not mark it done.** The roadmap asks for a browser test
+  covering the review→publish chain *and* the nginx crawler/prerender `Vary: User-Agent` split.
+  Those need different tools. The chain is drivable over HTTP against the real app and database
+  today; the prerender half genuinely needs nginx in the request path, which no test here has. So
+  the chain gets built now and the nginx half stays **open with its reason named**. Splitting a
+  roadmap item is honest; marking it done because the achievable half shipped is not.
+
+  The instruction that matters in that brief: assert the wall **before** approval, on more than one
+  public surface. A test that only checks a claim appears after approval would pass against a system
+  that publishes everything.
+
+  Second slot took 7.3 plus a **roadmap accuracy pass**, because the roadmap has drifted again
+  during today's own work — 6.10 still reads "blocked on an operator decision" when I made the
+  decision and it shipped, and its description still repeats my false unthrottled claim. Told the
+  agent to check every status against the tree and to say plainly if it finds something I marked
+  done that is not. That finding would be worth more than the retention policy.
