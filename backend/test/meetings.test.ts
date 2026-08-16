@@ -181,24 +181,49 @@ describe("GET /api/meetings/:id/documents", () => {
  *
  * The premise was invalidated, so the test is rewritten rather than deleted. It
  * now asserts the route is absent — no handler, so the request falls past the
- * router to Express's own 404 — and, importantly, that its removal did not take
- * the sibling routes on the same `:id` with it. A route that vanished by
- * accident and a route that was retired look identical from one assertion.
+ * router — and, importantly, that its removal did not take the sibling routes on
+ * the same `:id` with it. A route that vanished by accident and a route that was
+ * retired look identical from one assertion.
+ *
+ * ## Updated 2026-08-16: what "nothing answered" is asserted against
+ *
+ * This suite used to prove "nothing answered" by checking `res.body.error` was
+ * **undefined** — because an unmatched path fell through to Express's own final
+ * handler, which replies with an HTML page and therefore no JSON `error` at all.
+ *
+ * That HTML reply was itself a defect, found by probing production during the
+ * design review: a JSON API handed HTML to any client that mistyped a path, so
+ * `app.ts` now ends in a catch-all that answers `/api/*` misses in JSON.
+ *
+ * So the old assertion was resting on an implementation detail that has since
+ * been fixed, and the fix inverted it. The **intent** is unchanged and still
+ * worth testing, so the mechanism is updated rather than the test loosened: a
+ * miss must produce the *generic* "No such endpoint" body, not a body a router
+ * composed. That distinction is what still separates "this route is retired"
+ * from "this route answered 404 for its own reasons" — which is the whole point
+ * of the suite, and it is a sharper assertion than the absence of a field.
  */
 describe("GET /api/meetings/:id/rundown is retired", () => {
   it("has no handler for a real meeting", async () => {
     const res = await request(app).get(`/api/meetings/${COMPLETED_MEETING_ID}/rundown`);
 
     assert.equal(res.status, 404);
-    // Express's own not-found, not the router's JSON body: nothing answered.
-    assert.equal(res.body.error, undefined);
+    // The generic catch-all, not a body the meetings router composed: nothing
+    // in that router answered. `No such endpoint` is only ever written by the
+    // fall-through in `app.ts`.
+    assert.match(String(res.body.error), /No such endpoint/);
+    assert.match(String(res.body.error), /rundown/);
   });
 
   it("has no handler for a non-existent meeting either", async () => {
     const res = await request(app).get(`/api/meetings/${NON_EXISTENT_ID}/rundown`);
 
     assert.equal(res.status, 404);
-    assert.equal(res.body.error, undefined);
+    assert.match(String(res.body.error), /No such endpoint/);
+    // Notably NOT "Meeting not found" — the route is absent, so the id is never
+    // looked up. If this ever reads as a meeting lookup failure, something has
+    // re-added a handler here.
+    assert.doesNotMatch(String(res.body.error), /not found/i);
   });
 
   it("left the rest of the meeting routes standing", async () => {

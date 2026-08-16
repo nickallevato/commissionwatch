@@ -81,20 +81,42 @@ archive could run untouched for a decade and cost about eleven megabytes.
 
 ### Why the number is 77, and why that is the real finding
 
-Production has ingested **520 meetings**. The export contains **one**. The gap is the review gate
-doing its job: only what an operator has published appears. **The archive's growth rate is therefore
-governed by the publication rate, which is an operator's manual throughput, not by the ingestion
-rate, which is a machine's.**
+Production has ingested **212 meetings** carrying **3,160 agenda items**. The export contains
+**one** meeting and **36** agenda items. The gap is the review gate doing its job: only what an
+operator has published appears. **The archive's growth rate is therefore governed by the publication
+rate, which is an operator's manual throughput, not by the ingestion rate, which is a machine's.**
 
-That is the load-bearing fact for anyone sizing this later. A projection built from "520 meetings
-ingested" would be wrong by more than two orders of magnitude, in the direction of alarm.
+That is the load-bearing fact for anyone sizing this later. A projection built from the ingested
+corpus rather than the published one is wrong by roughly **two orders of magnitude**, in the
+direction of alarm — 3,160 agenda items exist and 36 are public.
 
 ### The upper bound worth writing down
 
-If every ingested meeting were eventually published — 520 meetings at the observed ~36 agenda items
-each, plus documents and artifacts — the corpus lands around **25,000 rows**: roughly **975 KB per
-snapshot**, **~356 MB per year**, and rising as ingestion continues. That is the point at which the
-question becomes real. It is not close, and nothing about it requires a decision today.
+**Corrected 2026-08-16, later the same day, against `/api/metrics`.** The first version of this
+section projected from **520 meetings at ~36 agenda items each**, landing at ~25,000 rows and
+~356 MB/year. Both inputs were wrong, and the mistake is worth naming because it is the easy one to
+repeat: **520 is the count of meetings *discovered* on Granicus spanning 2013–2026, not the count
+ingested.** The ~36 came from dividing the *published* export's agenda items by its one published
+meeting — a sample of one.
+
+Production's own metrics endpoint answers it directly:
+
+| Measure | Value |
+|---|---:|
+| `meetings_total` | 212 |
+| `meetings_published` | 1 |
+| `agenda_items` | 3,160 |
+| `documents_total` | 341 |
+| `documents_indexed` | 193 |
+| `claims_total` | 64 |
+
+So ~15 agenda items per meeting, not 36. If every ingested row were eventually published the corpus
+lands near **4,200 rows** — roughly **165 KB per snapshot** and **~60 MB per year**, not 356 MB. The
+conclusion is unchanged and in fact strengthened: deletion buys almost nothing, and the structural
+options below are more than sufficient if it ever matters.
+
+The lesson is the one this project already states about specs: **a figure lifted from a document is
+not a measurement.** `/api/metrics` was one request away the whole time.
 
 ## If storage ever does force the question
 

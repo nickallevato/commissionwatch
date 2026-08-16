@@ -188,6 +188,38 @@ app.use("/api/sms", express.urlencoded({ extended: false }), smsRouter);
 app.use("/api/admin/discord", discordRouter);
 app.use("/api/admin", adminRouter);
 
+/**
+ * Unmatched `/api/*` paths answer in JSON.
+ *
+ * Without this, Express's own final handler answers, and it answers with an
+ * HTML page: `Content-Type: text/html`, a `<title>Error</title>`, and
+ * `<pre>Cannot GET /api/officials</pre>`. Verified against production on
+ * 2026-08-16 for `/api/officials`, `/api/officials/` and `/api/nonexistent`.
+ *
+ * That is a broken contract rather than a cosmetic wart. This project
+ * deliberately courts machine clients — an open-data export, RSS and Atom
+ * feeds, an MCP endpoint, and a `/bot` page that tells crawlers how to consume
+ * the site. A client that asks for JSON and receives an HTML document on a
+ * mistyped path gets a parse error instead of a 404, and the parse error names
+ * the wrong problem. Routers that handle their own miss already do this
+ * correctly — `/api/data/nope.csv` returns JSON naming the valid datasets — so
+ * the inconsistency was between the API and itself.
+ *
+ * It also stops echoing the framework's default page, which names Express and
+ * reflects the requested path back into HTML.
+ *
+ * Mounted **after every router and before `errorHandler`**: a router that
+ * matched has already responded, so this only sees genuine misses. It is
+ * deliberately scoped to `/api` and leaves `/mcp`, `/.well-known` and the
+ * static site alone — those are served at the edge, not here.
+ */
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    error: `No such endpoint: ${req.method} ${req.baseUrl}${req.path}`,
+    statusCode: 404,
+  });
+});
+
 app.use(errorHandler);
 
 export default app;
