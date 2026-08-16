@@ -65,8 +65,44 @@ interface ErrorBody {
   statusCode: number;
 }
 
+/**
+ * Removes the suite's disputes **and the events they emitted**.
+ *
+ * `events.subject_id` is not a foreign key (migration 083: a deleted subject
+ * does not retroactively un-announce itself), so deleting the disputes alone
+ * left every `dispute.*` row behind for good — 25 of them per run, the largest
+ * single contributor to a log that eventually stops the batched consumers
+ * reaching any suite's own fixtures. `deliveries` keys on the same
+ * `dedupe_key`, so it goes with them. `npm test`'s `posttest` hook
+ * (`helpers/assert-events-clean.ts`) is what fails the run if this drifts.
+ */
 async function clearSuiteDisputes(): Promise<void> {
-  await db("record_disputes").where({ contact: CONTACT }).del();
+  const disputes = await db("record_disputes")
+    .where({ contact: CONTACT })
+    .select<Array<{ id: string }>>("id");
+  const disputeIds = disputes.map((row) => row.id);
+  if (disputeIds.length > 0) {
+    const events = await db("events")
+      .where({ subject_kind: "dispute" })
+      .whereIn("subject_id", disputeIds)
+      .select<Array<{ id: string; dedupe_key: string }>>("id", "dedupe_key");
+    if (events.length > 0) {
+      await db("deliveries")
+        .whereIn(
+          "dedupe_key",
+          events.map((row) => row.dedupe_key),
+        )
+        .del();
+      await db("events")
+        .whereIn(
+          "id",
+          events.map((row) => row.id),
+        )
+        .del();
+    }
+    // dispute_notifications cascades from record_disputes (migration 092).
+    await db("record_disputes").whereIn("id", disputeIds).del();
+  }
 }
 
 describe("the dispute route", () => {

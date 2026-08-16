@@ -149,10 +149,62 @@ export async function createArtifact(sha256: string, sourceUrl: string): Promise
 }
 
 /**
+ * The event rows a prefix's records announced.
+ *
+ * `events.subject_id` is deliberately not a foreign key — migration 083 gives
+ * the reason: the row records that something *was announced*, and a deleted
+ * meeting does not retroactively un-announce itself. Correct in production,
+ * and the exact mechanism by which a suite that deletes its meetings still
+ * leaves its events. Nothing cascades, so the ids have to be gathered before
+ * the rows that carry them are gone.
+ *
+ * `jurisdiction_id` catches the rest: `ops` events name no record, and any
+ * subject kind added later still carries the jurisdiction it belongs to.
+ */
+async function deleteEventsForJurisdictions(
+  jurisdictionIds: string[],
+  commissionIds: string[],
+): Promise<void> {
+  const subjectIds: string[] = [];
+
+  if (commissionIds.length > 0) {
+    const meetings = await db("meetings")
+      .whereIn("commission_id", commissionIds)
+      .select<Array<{ id: string }>>("id");
+    const meetingIds = meetings.map((row) => row.id);
+    subjectIds.push(...meetingIds);
+
+    if (meetingIds.length > 0) {
+      for (const table of ["anomaly_flags", "minute_claims", "meeting_documents"] as const) {
+        const rows = await db(table)
+          .whereIn("meeting_id", meetingIds)
+          .select<Array<{ id: string }>>("id");
+        subjectIds.push(...rows.map((row) => row.id));
+      }
+    }
+  }
+
+  await db("events")
+    .where((builder) => {
+      builder.whereIn("jurisdiction_id", jurisdictionIds);
+      if (subjectIds.length > 0) builder.orWhereIn("subject_id", subjectIds);
+    })
+    .del();
+}
+
+/**
  * Removes everything a suite created, in dependency order.
  *
  * `record_corrections` is deliberately absent — the trigger would refuse, and
  * that refusal is the feature.
+ *
+ * `events` **is** included, and it is the one table here that nothing else
+ * would ever remove. The log is append-only in production by design and no
+ * cascade touches it, so every suite that publishes through the fixtures used
+ * to leave its announcements behind for good. Past ~200 stale rows the batched
+ * consumers stop reaching any suite's own fixtures — see `helpers/events.ts`,
+ * and `helpers/assert-events-clean.ts`, which runs as `posttest` and fails the
+ * run by name if anything is left.
  */
 export async function cleanupByPrefix(prefix: string): Promise<void> {
   const jurisdictions = await db("jurisdictions")
@@ -175,6 +227,10 @@ export async function cleanupByPrefix(prefix: string): Promise<void> {
     .whereIn("jurisdiction_id", jurisdictionIds)
     .select<Array<{ id: string }>>("id");
   const commissionIds = commissions.map((row) => row.id);
+
+  // Before the meetings go: the subjects have to be readable to be found.
+  await deleteEventsForJurisdictions(jurisdictionIds, commissionIds);
+
   if (commissionIds.length > 0) {
     await db("meetings").whereIn("commission_id", commissionIds).del();
     await db("commissions").whereIn("id", commissionIds).del();

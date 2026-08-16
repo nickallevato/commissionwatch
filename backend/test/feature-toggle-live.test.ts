@@ -24,6 +24,7 @@ import {
 import { PrerenderConsumer, PrerenderStore } from "../src/services/prerender";
 import { FeatureRegistry, setFeatureRegistry } from "../src/services/features/registry";
 import { cleanupByPrefix, createMeeting, createSource } from "./helpers/pressroom";
+import { seedCursorPastExistingEvents } from "./helpers/events";
 
 /**
  * A switch an operator throws takes effect **without a restart**.
@@ -361,12 +362,8 @@ describe("the prerender consumer re-reads its flag per cycle", () => {
 
     // Start the cursor at whatever the event log already holds, so a tick sees
     // this suite's events and not every published meeting in the test database.
-    const latest = await db("events")
-      .orderBy([{ column: "updated_at", order: "desc" }, { column: "id", order: "desc" }])
-      .first<{ id: string; updated_at: Date } | undefined>("id", "updated_at");
-    if (latest !== undefined) {
-      await consumer.writeCursor({ updated_at: latest.updated_at.toISOString(), id: latest.id });
-    }
+    // Shared with `prerender.test.ts`; see `helpers/events.ts` for why.
+    await seedCursorPastExistingEvents(db, consumer);
 
     const fixture = await createSource(`${PREFIX}-pr`, { enabled: false });
     firstMeetingId = await createMeeting(fixture.commissionId, {
