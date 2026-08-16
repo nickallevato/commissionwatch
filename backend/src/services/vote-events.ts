@@ -3,6 +3,27 @@ import type { Knex } from "knex";
 /**
  * The tally, and the one check it buys.
  *
+ * **This module is unwired.** Nothing in `src/` imports it — no route, no
+ * ingestion handler, no extraction stage. `backend/test/vote-events.test.ts`
+ * exercises every function here directly, so the logic is real and tested,
+ * but nothing in the running system ever calls `recordVoteEvent`,
+ * `linkClaimsToVoteEvent`, `approveVoteEvent`, or `listPublishedVoteEvents`.
+ * The `vote_events` table it reads and writes (migration 085) is live in the
+ * sense that matters — `services/metrics.ts` counts it directly with its
+ * own `db("vote_events")` queries for `QualityMetrics.vote_events_total` /
+ * `vote_events_approved` — but that is a raw count, not a caller of this
+ * module. No extraction or ingestion stage ever calls `recordVoteEvent`, so
+ * nothing currently populates the table from a live sweep, and no route
+ * calls `approveVoteEvent` / `rejectVoteEvent`, so there is no operator
+ * review surface for a tally even if one existed. This is the only
+ * implementation of the feature described below — an unbuilt feature, not a
+ * duplicate of anything live — so it is kept, not deleted, on the same
+ * theory the review queue was kept before it was wired: the logic is the
+ * expensive part and it already has tests holding it to its own contract.
+ * Wiring it up (an extraction stage that calls `recordVoteEvent`, and a
+ * pressroom route that calls `approveVoteEvent/rejectVoteEvent`) is a
+ * separate, deliberate change.
+ *
  * `minute_claims` records what one named person did. Five of those on the same
  * motion imply "2–3", but nothing held that sentence, so the site could say
  * "Sample voted no" and could not say "the motion failed 2–3" — the sentence a
