@@ -208,6 +208,69 @@ export const SUCCESS_KEYS = ["discovered", "fetched", "parsed", "analyzed"] as c
 export const FAILURE_KEYS = ["failed", "blocked"] as const;
 
 /**
+ * What a finished run does to its source's standing.
+ *
+ * Pure and exported for the reason `classifyRun` is: this is a decision, and the
+ * decision is the thing worth testing. Reaching it through a real sweep means
+ * arranging a deadline-partial run with work done and nothing failed, which is
+ * production's every-night steady state and is fiddly to stage on demand.
+ *
+ * **The tally is cleared by a sweep that failed nothing, not by one that
+ * finished.** It used to clear only on `succeeded`, and the reasoning — "a source
+ * failing partially every night is a source with a problem" — is true of a
+ * partial run *with errors* and false of the other kind. `classifyRun` says
+ * plainly that a large archive cannot finish inside one fifteen-minute sweep, so
+ * for Bozeman `partial` is not degradation, it is the steady state: 722
+ * documents to re-check for amendments at a ten-second crawl-delay is about two
+ * hours of fetching.
+ *
+ * Left as it was, such a source could never read anything but `failing` again.
+ * On 2026-08-17 Bozeman held two failures from days earlier and a sweep that
+ * fetched 158 documents, failed nothing and ran out of clock — and the console
+ * said `failing` on the strength of the stale count while the archive grew by
+ * three thousand records overnight. A verdict that cannot improve however well
+ * the source behaves is not a verdict.
+ */
+export interface SourceHealthUpdate {
+  /** `consecutive_failures = 0`. Absent, the tally is left where it is. */
+  clearTally: boolean;
+  /** `consecutive_failures + 1`. */
+  incrementTally: boolean;
+  /** Whether this run counts as a success for the silence watch. */
+  touchLastSuccess: boolean;
+  healthStatus: "healthy" | "degraded";
+}
+
+export function sourceHealthUpdate(status: RunStatus, failures: number): SourceHealthUpdate {
+  if (status === "succeeded") {
+    return {
+      clearTally: true,
+      incrementTally: false,
+      touchLastSuccess: true,
+      healthStatus: "healthy",
+    };
+  }
+  if (status === "partial") {
+    // Work reached the database either way, so the silence watch is satisfied.
+    // What differs is whether anything went wrong.
+    return failures === 0
+      ? { clearTally: true, incrementTally: false, touchLastSuccess: true, healthStatus: "healthy" }
+      : {
+          clearTally: false,
+          incrementTally: false,
+          touchLastSuccess: true,
+          healthStatus: "degraded",
+        };
+  }
+  return {
+    clearTally: false,
+    incrementTally: true,
+    touchLastSuccess: false,
+    healthStatus: "degraded",
+  };
+}
+
+/**
  * Reads a run's tallies into a terminal status.
  *
  * Exported and pure because this is the decision the spec is most emphatic
@@ -731,7 +794,11 @@ export class SourceScheduler {
         updated_at: this.db.fn.now(),
       });
 
-    await this.updateSourceHealth(sourceId, status);
+    await this.updateSourceHealth(
+      sourceId,
+      status,
+      FAILURE_KEYS.reduce((total, key) => total + (counts[key] ?? 0), 0),
+    );
 
     this.logger.info(
       `SourceScheduler: sweep ${runId} of ${sourceId} finished ${status} — ${JSON.stringify(counts)}`,
@@ -930,34 +997,41 @@ export class SourceScheduler {
    *
    * `partial` counts as a success for `last_success_at`: work reached the
    * database, and treating it as silence would make the silence watch cry wolf.
-   * It does not reset `consecutive_failures` to zero, because a source failing
-   * partially every night is a source with a problem.
+   *
+   * **What resets `consecutive_failures` is a sweep that failed nothing, not a
+   * sweep that finished.** This used to reset only on `succeeded`, and the
+   * reasoning given — "a source failing partially every night is a source with a
+   * problem" — is true of a partial run *with errors* and false of the other
+   * kind. `classifyRun`'s own docblock says a large archive **cannot** finish
+   * inside one fifteen-minute sweep, so for Bozeman `partial` is not a
+   * degradation, it is the steady state: 722 documents to re-check for
+   * amendments at a ten-second crawl-delay is about two hours of fetching.
+   *
+   * Left as it was, that source could never read anything but `failing` again.
+   * On 2026-08-17 it held two failures from days earlier and a sweep that
+   * fetched 158 documents, failed nothing, and hit its deadline — and
+   * `assessPipeline` reported `failing` on the strength of the stale count while
+   * the archive grew by three thousand records overnight. A verdict that cannot
+   * improve however well the source behaves is not a verdict.
+   *
+   * A failure count above zero still holds the tally, so a source whose fetches
+   * are actually failing keeps climbing toward `failing` exactly as before.
    */
-  private async updateSourceHealth(sourceId: string, status: RunStatus): Promise<void> {
-    if (status === "succeeded") {
-      await this.db("ingestion_sources").where({ id: sourceId }).update({
-        last_success_at: this.db.fn.now(),
-        consecutive_failures: 0,
-        health_status: "healthy",
-        updated_at: this.db.fn.now(),
-      });
-      return;
-    }
-    if (status === "partial") {
-      await this.db("ingestion_sources")
-        .where({ id: sourceId })
-        .update({
-          last_success_at: this.db.fn.now(),
-          health_status: "degraded",
-          updated_at: this.db.fn.now(),
-        });
-      return;
-    }
+  private async updateSourceHealth(
+    sourceId: string,
+    status: RunStatus,
+    failures: number,
+  ): Promise<void> {
+    const update = sourceHealthUpdate(status, failures);
     await this.db("ingestion_sources")
       .where({ id: sourceId })
       .update({
-        consecutive_failures: this.db.raw("consecutive_failures + 1"),
-        health_status: "degraded",
+        ...(update.touchLastSuccess ? { last_success_at: this.db.fn.now() } : {}),
+        ...(update.clearTally ? { consecutive_failures: 0 } : {}),
+        ...(update.incrementTally
+          ? { consecutive_failures: this.db.raw("consecutive_failures + 1") }
+          : {}),
+        health_status: update.healthStatus,
         updated_at: this.db.fn.now(),
       });
   }

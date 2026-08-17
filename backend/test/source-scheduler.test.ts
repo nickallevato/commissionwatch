@@ -18,6 +18,7 @@ import {
   schedulerEnabled,
   RUN_RECOVERY_INTERVAL_MS,
   SourceScheduler,
+  sourceHealthUpdate,
   sourceLockKey,
   SOURCE_LOCK_NAMESPACE,
 } from "../src/services/ingestion/scheduler";
@@ -504,6 +505,65 @@ describe("a sweep does not queue a second discover beside the first", () => {
       Number(job.attempts) >= 2,
       `attempts fell to ${job.attempts}; only unblock resets an attempt budget`,
     );
+  });
+});
+
+/**
+ * What clears a source's failure tally.
+ *
+ * It used to be "a sweep that finished", which for Bozeman is never:
+ * `classifyRun` says a large archive cannot finish inside one fifteen-minute
+ * sweep, and re-checking 722 documents for amendments at a ten-second
+ * crawl-delay is about two hours. On 2026-08-17 that source held two failures
+ * from days earlier and a sweep that fetched 158 documents and failed nothing,
+ * and the console still read `failing` while the archive grew by three thousand
+ * records overnight. A verdict that cannot improve however well the source
+ * behaves is not a verdict.
+ */
+describe("sourceHealthUpdate", () => {
+  it("clears the tally when a deadline-partial sweep failed nothing", () => {
+    const update = sourceHealthUpdate("partial", 0);
+    assert.equal(update.clearTally, true);
+    assert.equal(update.healthStatus, "healthy");
+    assert.equal(update.touchLastSuccess, true);
+  });
+
+  it("keeps the tally when a partial sweep actually failed something", () => {
+    // The distinction that makes the reset safe: a source whose fetches are
+    // failing must still be able to climb toward `failing`.
+    const update = sourceHealthUpdate("partial", 2);
+    assert.equal(update.clearTally, false);
+    assert.equal(update.incrementTally, false);
+    assert.equal(update.healthStatus, "degraded");
+  });
+
+  it("still counts a failed sweep against the source", () => {
+    const update = sourceHealthUpdate("failed", 0);
+    assert.equal(update.incrementTally, true);
+    assert.equal(update.clearTally, false);
+    assert.equal(update.touchLastSuccess, false, "a failed sweep is not a success for the silence watch");
+  });
+
+  it("treats a clean sweep as it always did", () => {
+    const update = sourceHealthUpdate("succeeded", 0);
+    assert.deepEqual(update, {
+      clearTally: true,
+      incrementTally: false,
+      touchLastSuccess: true,
+      healthStatus: "healthy",
+    });
+  });
+
+  it("never both clears and increments the tally", () => {
+    for (const status of ["succeeded", "partial", "failed"] as const) {
+      for (const failures of [0, 1, 99]) {
+        const update = sourceHealthUpdate(status, failures);
+        assert.ok(
+          !(update.clearTally && update.incrementTally),
+          `${status}/${failures} both clears and increments`,
+        );
+      }
+    }
   });
 });
 
