@@ -20,15 +20,18 @@ reads as finished. The scale:
 
 ---
 
-## [0.5.0] — 2026-08-16
+## [0.5.0] — 2026-08-17
 
-The release in which the switch panel built in 0.4.0 was audited against the code behind it, and two
-of its six switches turned out to control nothing.
+The release in which the switch panel built in 0.4.0 was audited against the code behind it and two
+of its six switches turned out to control nothing — and, in the same window, the release in which all
+three ingestion sources collected records at the same time for the first time in the project's
+existence.
 
-**Deployment status: landing.** The 0.4.0 backlog that could not deploy — the extraction
-de-duplication, the taxonomy mirror guard, the From-address fix, the dated archive — reached
-production at **22:15Z on 2026-08-15**, when the operator cleared the deploy host's disk. Production
-has been tracking head through this release.
+**Deployment status: shipped.** Production tracks head at
+`d8c53ecb53ad18e7906a714e7cee67146978a096`, built 2026-08-17T03:09Z, and every claim in this release
+was verified against it rather than against the test suite. The 0.4.0 backlog that could not deploy
+— the extraction de-duplication, the taxonomy mirror guard, the From-address fix, the dated archive —
+reached production at **22:15Z on 2026-08-15**, when the operator cleared the deploy host's disk.
 
 ### Breaking
 
@@ -40,11 +43,14 @@ had toggled either was writing rows nothing consulted. See *Two switches that co
 
 ### All three ingestion sources collect records, for the first time
 
-**Completeness: Shipped.** Verified against production 2026-08-16: `bozeman-granicus` 1,639
-records, `gallatin-civicplus` 43, `mt-cers` 137. Zero failed jobs, zero blocked.
+**Completeness: Shipped.** Verified against production **2026-08-17 15:18Z**, after a full
+unattended nightly cycle: `bozeman-granicus` 4,923 records, `gallatin-civicplus` 109, `mt-cers` 220.
+All three read `pipeline: healthy` / `collection: collecting` with `consecutive_failures: 0`. Queue
+depth **0**, zero failed jobs, zero blocked. Bozeman entered this work at 1,147 records; the other
+two had **never collected a single record**.
 
-Found by reading production's own queue rather than reasoning about the code. Three unrelated
-defects, none of them the one being chased:
+Found by reading production's own queue rather than reasoning about the code. Six unrelated defects,
+none of them the one being chased, and each one only reachable once the previous was fixed:
 
 **The archive could not converge.** `fetch` drained only inside a sweep, boxed at fifteen minutes,
 at Bozeman's published `Crawl-delay: 10` — about ninety documents a night, while each night's
@@ -71,8 +77,36 @@ Refusing an entire record to avoid mis-stating four hundred milliseconds of it i
 inverted. There is a third answer: **repair the span, keep every character, and record what the file
 said** in `endMsAsPublished`. Those transcripts wrote 13,491 cues on the next pass.
 
+**One transcript insert asked Postgres for 90,270 bind parameters.** The wire protocol caps them at
+65,535 — an `int16` — and it does not refuse cleanly: the count **wraps**, and the driver reported
+`24734`, which is `90,270 − 65,536`. The bug was latent from the day the cue writer was written and
+became reachable only *because* the WebVTT repair above let long transcripts past the parser, so the
+fix for one defect exposed the next. Cues insert in chunks of 1,000, still inside the same
+transaction — a transcript writes completely or not at all, which is the property that made the
+original single statement worth having.
+
+**A single `last_error` was 1.3 MB.** A stage that fails with a page of HTML in hand put the page in
+the column, so the console's job list — which reads every pending row — was fetching megabytes to
+render a one-line error. Errors are truncated to 2,000 characters keeping the head **and** the tail,
+with the dropped count stated in the middle: the stack's top frame and its root cause are at opposite
+ends, and either half alone is the half you did not need.
+
+**Bozeman could never read anything but `failing`.** `consecutive_failures` cleared only on a
+`succeeded` run — and an archive larger than one fifteen-minute sweep window closes `partial` by
+definition, every night, forever. The tally therefore counted *sweeps that ran out of time* as
+failures and the console reported a source collecting thousands of records as broken. A sweep that
+failed nothing now clears the tally and stamps `last_success_at` whether or not it finished; a
+`partial` sweep that **did** fail something keeps the tally and reads `degraded`. The decision is a
+pure exported function, so the three cases are testable without a scheduler, a clock or a database.
+
 Supporting work, each of which was its own missing piece:
 
+- **One pending `discover` per source, not one per sweep.** Every nightly sweep enqueued another
+  `discover` behind the one the previous night had not reached, so the backlog grew by one a day and
+  the oldest job's age — the console's staleness signal — measured the duplicate rather than the
+  work. A sweep now adopts the existing pending row: re-points its `run_id`, refreshes its target and
+  makes it due immediately. Its `attempts` are deliberately **not** reset, so a job failing for a
+  real reason still walks toward `blocked` instead of being laundered nightly.
 - **`POST /jobs/unblock`.** `IngestionQueue.unblock` had existed since the queue was written with
   nothing able to call it, so a job blocked by a defect stayed blocked after the defect was fixed.
 - **Abandoned runs close on a timer.** A deploy mid-sweep stranded `ingestion_runs` rows `running`

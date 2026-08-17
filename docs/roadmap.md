@@ -271,6 +271,19 @@ docstring. Probe what is actually hanging the run before designing the third of 
 > the subject draws about itself, while a lifetime count is a fact the monitor has no second source
 > for. It is `warn` rather than `fail` because promoting it to a page is an operator's decision.
 >
+> **And the `verdict: failing` in the table above was itself wrong, found 2026-08-17.** Bozeman was
+> collecting the whole time. `consecutive_failures` cleared only on a `succeeded` run, and an archive
+> larger than one fifteen-minute sweep window closes `partial` every night by definition — so the
+> tally counted *sweeps that ran out of time* and Bozeman could never read anything but `failing` no
+> matter how many records it held. This matters for the deliverable directly: had the monitor been
+> made to fail on `verdict: failing` first, as this section asks, it would have paged the operator
+> nightly about a source working correctly. **Fix the source of the verdict before alerting on it.**
+> A sweep that failed nothing now clears the tally and stamps `last_success_at` whether or not it
+> finished; a `partial` that did fail something keeps the tally and reads `degraded`.
+>
+> Verified 2026-08-17 15:18Z: all three sources `pipeline: healthy` / `collection: collecting`,
+> `consecutive_failures: 0`, queue depth 0 — Bozeman 4,923 records, Gallatin 109, `mt-cers` 220.
+>
 > Still open here: failing on `verdict: failing`, failing on a run open past a bounded age, and
 > `expected_interval_hours` of 168 against a nightly cron.
 

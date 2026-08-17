@@ -1,11 +1,14 @@
 # CommissionWatch — Status, Gaps and Next Steps
 
-> Last updated: 2026-08-16, after the second autonomous loop — **0.5.0, in which the switch panel
-> built in 0.4.0 was audited against the code behind it and two of its six switches turned out to
-> control nothing.** Backend **2217 tests / 534 suites**, frontend **869 / 70**, both packages
-> typecheck- and build-clean — figures taken uncontended at `0cb66ac`, superseding the 2038/491 and
-> 737/64 counted earlier the same day; both packages moved further over the course of 0.5.0 than
-> this header had been updated to reflect. The deploy host's disk was cleared by the operator at ~22:15Z on
+> Last updated: 2026-08-17, at the **0.5.0 release** — the release in which **all three ingestion
+> sources collected records at the same time for the first time in the project's existence**
+> (`bozeman-granicus` 4,923, `gallatin-civicplus` 109, `mt-cers` 220, all `pipeline: healthy` /
+> `collection: collecting`, queue depth 0, measured against production at 15:18Z after a full
+> unattended nightly cycle), and in which the switch panel built in 0.4.0 was audited against the
+> code behind it and two of its six switches turned out to control nothing. Backend **2282 tests /
+> 545 suites**, frontend **874 / 70**, both packages typecheck-, test- and build-clean — figures
+> taken uncontended at `d8c53ec`, superseding the 2217/534 and 869/70 counted on 2026-08-16.
+> Tagged `v0.5.0`. The deploy host's disk was cleared by the operator at ~22:15Z on
 > 2026-08-15, so the 0.4.0 backlog is deployed and production tracks head again. **Three operator
 > decisions were created and none were taken autonomously** — see § 2026-08-16 immediately below.
 > Before that: 2026-08-15, after a long parallel build that took the product from *a corpus with
@@ -42,6 +45,71 @@
 > Previously the same day after P2 (the Pressroom console) and the deploy healthcheck fix, and
 > 2026-08-09 after P1 (ingestion scheduling), P3 (backups) and P4 (the Bozeman Granicus adapter).
 > Read this before starting work. It records what is true, not what was planned.
+
+## 2026-08-17 — 0.5.0 released: all three sources collect, and the console can be believed about it
+
+**Read this first.** For the first time in the project's existence, all three ingestion sources hold
+records at the same time. Measured against production at **15:18Z on 2026-08-17**, after a full
+unattended nightly cycle — not after a hand-triggered sweep:
+
+| Source | Records | Pipeline | Collection | Consecutive failures |
+|---|---|---|---|---|
+| `bozeman-granicus` | 4,923 | healthy | collecting | 0 |
+| `gallatin-civicplus` | 109 | healthy | collecting | 0 |
+| `mt-cers` | 220 | healthy | collecting | 0 |
+
+Queue depth **0**. Zero failed jobs, zero blocked. Bozeman began this work at 1,147 records;
+Gallatin and the state site had **never collected a single record** — Gallatin in its entire
+existence, `mt-cers` because nothing had ever run it.
+
+### What is now true
+
+- **`fetch` drains continuously**, behind `FETCH_WORKER_ENABLED` — off in code, on in this
+  deployment's compose. Bozeman's published `Crawl-delay: 10` is unchanged and unnegotiated; what
+  changed is that the crawl no longer stops at the fifteen-minute sweep deadline. Overnight the queue
+  went 1,639 → 0 at exactly 360 documents an hour, which is the crawl-delay to the second.
+- **The HTTP transport retries.** Two retries with backoff, `Retry-After` honoured on 429 and 503 up
+  to two minutes, and it **never backs off faster than it crawls**. Gallatin's whole lifetime of
+  emptiness was one unretried transient `AbortError` — which is why probing the source could never
+  reproduce it. Failures now name the URL, the elapsed time and the underlying error verbatim.
+- **The state site is crawled at one request every five seconds**, chosen before its first sweep
+  rather than after a complaint. `cers-ext.mt.gov` publishes no `robots.txt`, so the previous two
+  seconds was a rate this project had picked for a host that never agreed to it.
+- **A sweep that failed nothing is not counted as a failure.** `consecutive_failures` cleared only on
+  `succeeded`, and an archive larger than one sweep window closes `partial` every night by
+  definition — so Bozeman could never read anything but `failing` no matter how much it collected.
+- **Source health is two verdicts.** `pipeline` answers *does the machinery work*, `collection`
+  answers *is there anything in the archive*. A healthy scraper over an empty archive now reaches the
+  console's attention list and the public page's "Archive" row; previously it read simply `healthy`.
+- **Stranded runs close.** Recovery runs at boot **and** every five minutes, so a deploy mid-sweep no
+  longer leaves the console reporting "Sweeping" for a process replaced hours earlier. A recovered
+  run does not stamp `last_success_at` — closing a run is not evidence it worked.
+- **A blocked job can be unblocked** (`POST /jobs/unblock`), so a defect fixed in code can be
+  followed by the records it had been holding back.
+
+### Latent defects this work exposed rather than introduced
+
+Each was only reachable once the previous fix let work reach it — the shape worth remembering:
+
+1. A WebVTT cue ending before it starts blocked **five whole transcripts**, one of them 2,352 lines.
+   Repaired, with the original span recorded in `endMsAsPublished`; 13,491 cues written on the next pass.
+2. Letting those transcripts through produced an INSERT with **90,270 bind parameters** against the
+   wire protocol's `int16` cap of 65,535 — which **wraps** rather than erroring, so the driver
+   reported `24734`. Chunked at 1,000 cues inside the same transaction.
+3. A single `last_error` held **1.3 MB** of HTML, so rendering a one-line error in the console fetched
+   megabytes. Truncated to 2,000 characters keeping both head and tail.
+4. Nightly sweeps accumulated **one duplicate `discover` per day**, so the oldest-job age the console
+   reads as staleness was measuring the duplicate rather than the work.
+
+### Still outstanding here
+
+- `expected_interval_hours` is **168** against a nightly cron for both Bozeman and Gallatin, so the
+  silence check would tolerate a week of nothing. `mt-cers` has none at all and reads `unknown`.
+- The external monitor warns on a source that has never collected, but does not fail on
+  `pipeline: failing` or on a run left open past a bounded age.
+- `monitor.yml` still carries a "THE SCHEDULE DOES NOT FIRE" comment that is no longer true.
+
+---
 
 ## 2026-08-16 — 0.5.0: the switch panel audited against the code behind it
 

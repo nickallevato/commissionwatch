@@ -19,9 +19,11 @@ brainstorm → spec → plan → fan-out pipeline, the rules for parallel agents
 that make published output defensible.
 
 **Live:** `https://commissionwatch.bmux.sh` — deployed and healthy. **All three sources are enabled
-and collecting as of 2026-08-16**: `bozeman-granicus` (1,639 records), `gallatin-civicplus` (43, its
-first ever — the discover stage had been failing on an unretried transient abort), and `mt-cers`
-(137, first sweep, at one request every five seconds). `fetch` drains continuously via
+and collecting**, verified 2026-08-17 15:18Z after a full unattended nightly cycle:
+`bozeman-granicus` (4,923 records), `gallatin-civicplus` (109 — it had collected nothing in its
+entire existence, on one unretried transient abort), and `mt-cers` (220, at one request every five
+seconds). All three read `pipeline: healthy` / `collection: collecting`, queue depth 0, zero failed,
+zero blocked. `fetch` drains continuously via
 `FETCH_WORKER_ENABLED`; without it the queue could not converge, since a nightly fifteen-minute
 window fetches ~90 documents against hundreds discovered. See `docs/STATUS.md`.
 
