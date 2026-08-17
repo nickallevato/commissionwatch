@@ -7,6 +7,8 @@ import {
   BlockedError,
   IngestionQueue,
   InvalidJobError,
+  MAX_JOB_ERROR_CHARS,
+  truncateError,
   type ClaimedJob,
 } from "../src/services/ingestion/queue";
 import {
@@ -811,5 +813,34 @@ describe("IngestionQueue — the extract stage", () => {
     const ids = [...ownJobs(claimedA), ...ownJobs(claimedB)].map((job) => job.id);
     assert.equal(new Set(ids).size, ids.length, "SKIP LOCKED must partition the queue");
     assert.equal(ids.length, jobIds.length);
+  });
+});
+
+
+describe("an error too large to be worth keeping", () => {
+  it("keeps the tail as well as the head, because the diagnosis is often last", () => {
+    // 2026-08-17: one last_error reached 1.3 MB — a driver error quoting an
+    // entire multi-row INSERT of twelve thousand cues. The only sentence that
+    // explained anything was the final clause, `bind message has 24734
+    // parameter formats but 0 parameters`, so a head-only truncation would have
+    // thrown away the diagnosis and kept the noise.
+    const message = `${"INSERT ".repeat(50_000)}bind message has 24734 parameter formats`;
+
+    const kept = truncateError(message);
+
+    assert.ok(kept.length < MAX_JOB_ERROR_CHARS + 100);
+    assert.match(kept, /^INSERT/);
+    assert.match(kept, /bind message has 24734 parameter formats$/);
+    assert.match(kept, /characters dropped/);
+  });
+
+  it("leaves an ordinary message exactly as it is", () => {
+    assert.equal(truncateError("504 from origin after 3 attempts"), "504 from origin after 3 attempts");
+  });
+
+  it("does not truncate at the boundary itself", () => {
+    const exact = "x".repeat(MAX_JOB_ERROR_CHARS);
+    assert.equal(truncateError(exact), exact);
+    assert.notEqual(truncateError(`${exact}y`), `${exact}y`);
   });
 });

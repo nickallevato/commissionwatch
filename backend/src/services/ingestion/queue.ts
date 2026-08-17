@@ -525,6 +525,32 @@ export const DEFAULT_MAX_BACKOFF_MS = 60 * 60 * 1000;
  */
 export const DEFAULT_STALLED_AFTER_MS = 30 * 60 * 1000;
 
+/**
+ * Longest error text a job row will keep.
+ *
+ * On 2026-08-17 one `last_error` reached **1.3 MB**: a driver error that quoted
+ * the entire failing statement, which was a multi-row INSERT of twelve thousand
+ * cues. It went into the table, out through the jobs API, and into the console
+ * — a megabyte of `($90265, CURRENT_TIMESTAMP, ...)` in a field an operator
+ * reads to find out what went wrong.
+ *
+ * Two thousand characters holds any message worth reading. The tail is kept as
+ * well as the head, deliberately: for a driver error the diagnosis is often the
+ * *last* clause — this one ended `bind message has 24734 parameter formats but
+ * 0 parameters`, and a head-only truncation would have discarded the only
+ * sentence that mattered.
+ */
+export const MAX_JOB_ERROR_CHARS = 2000;
+
+/** Keeps the head and the tail of an over-long error, saying what it dropped. */
+export function truncateError(message: string): string {
+  if (message.length <= MAX_JOB_ERROR_CHARS) return message;
+  const dropped = message.length - MAX_JOB_ERROR_CHARS;
+  const head = Math.floor(MAX_JOB_ERROR_CHARS * 0.6);
+  const tail = MAX_JOB_ERROR_CHARS - head;
+  return `${message.slice(0, head)}\n… ${dropped} characters dropped …\n${message.slice(-tail)}`;
+}
+
 export interface EnqueueOptions {
   /** Delay before the job first becomes claimable. Default 0 (due now). */
   delayMs?: number;
@@ -825,7 +851,7 @@ export class IngestionQueue {
     error: unknown,
     executor?: QueryExecutor,
   ): Promise<FailResult> {
-    const message = errorMessage(error);
+    const message = truncateError(errorMessage(error));
     const run = async (trx: QueryExecutor): Promise<FailResult> => {
       const raw = await trx("ingestion_jobs")
         .where({ id: jobId })

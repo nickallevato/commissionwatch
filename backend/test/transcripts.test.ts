@@ -38,8 +38,10 @@ import { SourceScheduler, classifyRun } from "../src/services/ingestion/schedule
 import { IngestionWorker } from "../src/services/ingestion/worker";
 import { transcriptCoverage } from "../src/services/transcript-coverage";
 import {
+  CUE_INSERT_CHUNK,
   locateCueInterval,
   readTranscript,
+  recordTranscriptProjection,
   transcriptFetchSettled,
 } from "../src/services/ingestion/transcripts";
 import {
@@ -48,6 +50,7 @@ import {
   parseWebVttCues,
   projectTranscript,
   WebVttParseError,
+  type VttCue,
 } from "../src/services/ingestion/webvtt";
 
 /**
@@ -1179,5 +1182,89 @@ describe("the stub hash a reader can reproduce", () => {
     // If this ever fails, Granicus changed its empty-file bytes and every
     // absence claim on the site needs re-checking.
     assert.equal(createHash("sha256").update(Buffer.from(STUB_VTT)).digest("hex"), STUB_SHA256);
+  });
+});
+
+/**
+ * Writing the cue index, at the length a real meeting actually reaches.
+ *
+ * `recordTranscriptProjection` had no test, which is how an INSERT carrying
+ * 90,270 bind parameters reached production. PostgreSQL's wire protocol holds
+ * that count in an int16, so it wrapped: the driver reported `bind message has
+ * 24734 parameter formats but 0 parameters` — 90,270 minus 65,536 — which says
+ * nothing whatsoever about transcripts.
+ */
+describe("the cue index survives a long meeting", () => {
+  const SHA = "c".repeat(64);
+  let artifactId = "";
+
+  before(async () => {
+    await db("artifacts").where({ sha256: SHA }).del();
+    const [row] = await db("artifacts")
+      .insert({
+        sha256: SHA,
+        storage_key: `test/${SHA}.vtt`,
+        content_type: "text/vtt",
+        byte_size: 1024,
+        source_url: "https://example.invalid/captions.vtt",
+      })
+      .returning("id");
+    artifactId = row.id;
+  });
+
+  after(async () => {
+    await db("transcript_cues").where({ artifact_id: artifactId }).del();
+    await db("artifact_texts").where({ artifact_id: artifactId }).del();
+    await db("artifacts").where({ sha256: SHA }).del();
+  });
+
+  it("keeps a chunk far inside the protocol's parameter ceiling", () => {
+    // Six bound values per row. The margin is what lets someone add a column
+    // without silently walking back into the wrap.
+    assert.ok(CUE_INSERT_CHUNK * 6 < 65_535 / 5);
+  });
+
+  it("writes twelve thousand cues, which one statement cannot", () => {
+    // 12,000 rows is 72,000 parameters unchunked — past the ceiling, and past
+    // it in the direction that wraps rather than errors cleanly.
+    assert.ok(12_000 * 6 > 65_535, "this fixture must actually cross the limit");
+  });
+
+  it("indexes every cue of a long transcript, and the offsets still address the text", async () => {
+    const cues: VttCue[] = Array.from({ length: 12_000 }, (_, index) => ({
+      startMs: index * 1000,
+      endMs: index * 1000 + 900,
+      text: `cue ${index}`,
+    }));
+
+    const result = await recordTranscriptProjection(db, artifactId, cues);
+
+    assert.equal(result.cuesIndexed, 12_000);
+    const rows = await db("transcript_cues")
+      .where({ artifact_id: artifactId })
+      .count({ total: "*" })
+      .first();
+    assert.equal(Number(rows?.total), 12_000, "every cue reached the table, not just the first chunk");
+
+    // The substring invariant, across a chunk boundary rather than only at the
+    // start: an off-by-one in the chunking would leave offsets addressing text
+    // that says something else.
+    const text = await db("artifact_texts").where({ artifact_id: artifactId }).first("text");
+    const probe = await db("transcript_cues")
+      .where({ artifact_id: artifactId, cue_index: 5_500 })
+      .first();
+    assert.equal(
+      text.text.slice(Number(probe.text_offset), Number(probe.text_offset) + Number(probe.text_length)),
+      "cue 5500",
+    );
+  });
+
+  it("replaces the index on a re-read rather than accumulating a second one", async () => {
+    await recordTranscriptProjection(db, artifactId, [
+      { startMs: 0, endMs: 10, text: "only cue" },
+    ]);
+
+    const rows = await db("transcript_cues").where({ artifact_id: artifactId });
+    assert.equal(rows.length, 1);
   });
 });

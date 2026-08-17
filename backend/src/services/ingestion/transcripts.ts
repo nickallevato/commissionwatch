@@ -185,6 +185,27 @@ export async function recordTranscriptStatus(
  * artifact is content addressed, so a second reading of the same bytes is a better
  * reading of one document and not a second document.
  */
+/**
+ * Cue rows per INSERT.
+ *
+ * PostgreSQL's wire protocol carries the bind-parameter count as an **int16**,
+ * so a statement may carry at most 65,535 of them. Each cue row binds six
+ * values, and a Bozeman meeting is long: one transcript on 2026-08-17 projected
+ * to 12,895 cues, or 90,270 parameters. The overflow does not fail cleanly — the
+ * count wraps, and the driver reports `bind message has 24734 parameter formats
+ * but 0 parameters`, which is 90,270 minus 65,536 and says nothing at all about
+ * transcripts.
+ *
+ * A thousand rows is 6,000 parameters, an order of magnitude inside the limit,
+ * so the guard survives someone adding a column without noticing this comment.
+ *
+ * **This was always broken and could not be reached until 2026-08-17.** These
+ * transcripts had been refused by the parser, for a cue ending a fraction before
+ * it started; repairing that let the longest ones through to an insert that had
+ * never been tried at length.
+ */
+export const CUE_INSERT_CHUNK = 1000;
+
 export async function recordTranscriptProjection(
   db: Knex,
   artifactId: string,
@@ -194,9 +215,11 @@ export async function recordTranscriptProjection(
   return db.transaction(async (trx) => {
     const charsIndexed = await recordArtifactText(trx, artifactId, projection.text);
     await trx("transcript_cues").where({ artifact_id: artifactId }).delete();
-    if (projection.spans.length > 0) {
+    // Chunked, inside the same transaction: still both halves or neither, since
+    // a partial cue index would address a string that says something else.
+    for (let start = 0; start < projection.spans.length; start += CUE_INSERT_CHUNK) {
       await trx("transcript_cues").insert(
-        projection.spans.map((span) => ({
+        projection.spans.slice(start, start + CUE_INSERT_CHUNK).map((span) => ({
           artifact_id: artifactId,
           cue_index: span.cueIndex,
           start_ms: span.startMs,
